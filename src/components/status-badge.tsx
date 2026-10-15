@@ -18,11 +18,11 @@ import { cn } from "@/lib/utils";
 type Tone = "neutral" | "success" | "danger" | "muted" | "warn";
 
 const toneClass: Record<Tone, string> = {
-  neutral: "border-border bg-muted text-foreground",
-  success: "border-transparent bg-success/15 text-success",
-  danger: "border-transparent bg-destructive/15 text-destructive",
-  muted: "border-border bg-background text-muted-foreground",
-  warn: "border-transparent bg-amber-500/15 text-amber-800",
+  neutral: "border-border/80 bg-muted/80 text-foreground",
+  success: "border-transparent bg-success/12 text-success",
+  danger: "border-transparent bg-destructive/12 text-destructive",
+  muted: "border-border/70 bg-background text-muted-foreground",
+  warn: "border-transparent bg-[oklch(0.95_0.04_85)] text-[oklch(0.45_0.08_55)]",
 };
 
 function StatusPill({
@@ -37,7 +37,11 @@ function StatusPill({
   return (
     <Badge
       variant="outline"
-      className={cn("rounded-md font-normal", toneClass[tone], className)}
+      className={cn(
+        "rounded-full px-2 py-0.5 text-[0.7rem] font-medium",
+        toneClass[tone],
+        className
+      )}
     >
       {label}
     </Badge>

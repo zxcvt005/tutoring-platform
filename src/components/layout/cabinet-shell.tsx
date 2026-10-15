@@ -12,6 +12,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useDemoStore } from "@/lib/store/demo-store";
+import { cn } from "@/lib/utils";
 
 export function CabinetShell({
   role,
@@ -25,13 +26,18 @@ export function CabinetShell({
   const title = role === "direkciya" ? "Дирекция" : "Кафедра";
 
   return (
-    <div className="flex min-h-full flex-1 bg-background">
-      <aside className="sticky top-0 hidden h-svh w-60 shrink-0 border-r border-sidebar-border bg-sidebar md:block">
+    <div
+      className={cn(
+        "flex min-h-full flex-1",
+        role === "direkciya" ? "bg-background" : "bg-background"
+      )}
+    >
+      <aside className="sticky top-0 hidden h-svh w-[15.5rem] shrink-0 border-r border-sidebar-border bg-sidebar md:block">
         <AppSidebar role={role} />
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-border px-4 py-3 md:hidden">
+        <header className="flex items-center gap-3 border-b border-border/80 px-4 py-3 md:hidden">
           <Button
             type="button"
             size="icon-sm"
@@ -41,7 +47,9 @@ export function CabinetShell({
           >
             <Menu />
           </Button>
-          <span className="font-medium">{title}</span>
+          <span className="font-display text-base font-semibold tracking-tight">
+            {title}
+          </span>
         </header>
 
         <Sheet open={open} onOpenChange={setOpen}>
@@ -53,11 +61,11 @@ export function CabinetShell({
           </SheetContent>
         </Sheet>
 
-        <main className="flex-1 px-4 py-4 sm:px-6 sm:py-5">
+        <main className="flex-1 px-4 py-5 sm:px-7 sm:py-7">
           {!ready ? (
             <p className="text-sm text-muted-foreground">Загрузка демо-данных…</p>
           ) : (
-            children
+            <div className="mx-auto w-full max-w-6xl">{children}</div>
           )}
         </main>
       </div>

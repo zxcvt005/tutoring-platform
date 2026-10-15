@@ -1,14 +1,21 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist_Mono, Literata, Manrope } from "next/font/google";
 
 import { Toaster } from "@/components/ui/sonner";
 import { DemoStoreProvider } from "@/lib/store/demo-store";
 
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const manrope = Manrope({
+  variable: "--font-manrope",
   subsets: ["latin", "cyrillic"],
+  weight: ["400", "500", "600", "700"],
+});
+
+const literata = Literata({
+  variable: "--font-literata",
+  subsets: ["latin", "cyrillic"],
+  weight: ["500", "600", "700"],
 });
 
 const geistMono = Geist_Mono({
@@ -25,9 +32,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="ru"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${manrope.variable} ${literata.variable} ${geistMono.variable} h-full`}
     >
-      <body className="flex min-h-full flex-col bg-background text-foreground">
+      <body className="flex min-h-full flex-col bg-background font-sans text-foreground">
         <DemoStoreProvider>
           {children}
           <Toaster position="top-right" />

@@ -11,13 +11,13 @@ export function RoleSwitcher() {
   const isKafedra = pathname.startsWith("/kafedra");
 
   return (
-    <div className="inline-flex rounded-lg border border-border p-0.5 text-sm">
+    <div className="inline-flex w-full rounded-full border border-border/90 bg-background p-1 text-sm">
       <Link
         href="/direkciya"
         className={cn(
-          "rounded-md px-2.5 py-1 transition-colors",
+          "flex-1 rounded-full px-2.5 py-1.5 text-center transition-colors",
           isDirekciya
-            ? "bg-primary text-primary-foreground"
+            ? "bg-primary text-primary-foreground shadow-none"
             : "text-muted-foreground hover:text-foreground"
         )}
       >
@@ -26,9 +26,9 @@ export function RoleSwitcher() {
       <Link
         href="/kafedra"
         className={cn(
-          "rounded-md px-2.5 py-1 transition-colors",
+          "flex-1 rounded-full px-2.5 py-1.5 text-center transition-colors",
           isKafedra
-            ? "bg-primary text-primary-foreground"
+            ? "bg-primary text-primary-foreground shadow-none"
             : "text-muted-foreground hover:text-foreground"
         )}
       >
