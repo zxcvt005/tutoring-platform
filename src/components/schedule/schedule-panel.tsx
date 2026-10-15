@@ -34,7 +34,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatDateTime } from "@/lib/format";
+import { attendanceStatusLabel, formatDateTime } from "@/lib/format";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type {
   AttendanceStatus,
@@ -422,9 +422,9 @@ export function SchedulePanel({
                           </TableCell>
                           <TableCell>
                             <Select
-                              value={current?.status ?? "__none__"}
+                              value={current?.status ?? null}
                               onValueChange={(v) => {
-                                if (!v || v === "__none__") return;
+                                if (!v) return;
                                 setAttendance(
                                   attendanceLesson.id,
                                   student.id,
@@ -432,20 +432,17 @@ export function SchedulePanel({
                                 );
                               }}
                             >
-                              <SelectTrigger className="w-36" size="sm">
-                                <SelectValue placeholder="Статус" />
+                              <SelectTrigger className="w-40" size="sm">
+                                <SelectValue placeholder="Статус">
+                                  {(v: AttendanceStatus | null) =>
+                                    v ? attendanceStatusLabel[v] : "Статус"
+                                  }
+                                </SelectValue>
                               </SelectTrigger>
                               <SelectContent>
                                 {attendanceOptions.map((opt) => (
                                   <SelectItem key={opt} value={opt}>
-                                    {
-                                      {
-                                        present: "Был",
-                                        absent: "Пропуск",
-                                        late: "Опоздал",
-                                        excused: "Уваж. причина",
-                                      }[opt]
-                                    }
+                                    {attendanceStatusLabel[opt]}
                                   </SelectItem>
                                 ))}
                               </SelectContent>

@@ -180,7 +180,15 @@ export function StudentsPanel({
           }}
         >
           <SelectTrigger className="w-full sm:w-40">
-            <SelectValue />
+            <SelectValue>
+              {(v: "all" | PersonStatus | null) =>
+                v === "active"
+                  ? "Активен"
+                  : v === "paused"
+                    ? "Пауза"
+                    : "Все статусы"
+              }
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Все статусы</SelectItem>

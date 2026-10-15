@@ -157,9 +157,15 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     // Гидратация из localStorage / seed после монтирования (клиент).
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- намеренная клиентская гидратация
-    setData(loadDemoData());
-    setReady(true);
+    try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- намеренная клиентская гидратация
+      setData(loadDemoData());
+    } catch (e) {
+      console.error(e);
+      setData(createSeedData());
+    } finally {
+      setReady(true);
+    }
   }, []);
 
   const commit = useCallback((updater: (prev: DemoData) => DemoData) => {
@@ -186,6 +192,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
     clearDemoStorage();
     const seed = createSeedData();
     setData(seed);
+    setReady(true);
     saveDemoData(seed);
     toast.success("Демо-данные сброшены");
   }, []);

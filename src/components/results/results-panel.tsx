@@ -32,6 +32,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { resultStatusLabel } from "@/lib/format";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { Result, ResultStatus } from "@/lib/types";
 
@@ -124,7 +125,14 @@ export function ResultsPanel({
           }}
         >
           <SelectTrigger className="w-full sm:w-64">
-            <SelectValue placeholder="Задание" />
+            <SelectValue placeholder="Задание">
+              {(v: string | null) =>
+                !v || v === "all"
+                  ? "Все задания"
+                  : (assignmentOptions.find((a) => a.id === v)?.title ??
+                    "Задание")
+              }
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Все задания</SelectItem>
@@ -142,7 +150,11 @@ export function ResultsPanel({
           }}
         >
           <SelectTrigger className="w-full sm:w-44">
-            <SelectValue />
+            <SelectValue>
+              {(v: "all" | ResultStatus | null) =>
+                !v || v === "all" ? "Все статусы" : resultStatusLabel[v]
+              }
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Все статусы</SelectItem>

@@ -111,13 +111,17 @@ export function AppSidebar({
         <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
           <p className="text-xs text-muted-foreground">Demo-преподаватель</p>
           <Select
-            value={data.currentTeacherId}
+            value={data.currentTeacherId || null}
             onValueChange={(v) => {
               if (v) setCurrentTeacherId(v);
             }}
           >
             <SelectTrigger className="w-full">
-              <SelectValue placeholder="Выберите" />
+              <SelectValue placeholder="Выберите">
+                {(v: string | null) =>
+                  data.teachers.find((t) => t.id === v)?.fullName ?? "Выберите"
+                }
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {data.teachers.map((t) => (
