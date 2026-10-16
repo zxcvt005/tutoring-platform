@@ -19,13 +19,16 @@
 
 Next.js (App Router) · TypeScript · Tailwind · shadcn/ui · npm
 
+## GitHub
+
+- Репозиторий: https://github.com/zxcvt005/tutoring-platform  
+- Рабочая ветка: **`main`** (Дирекция + Кафедра + Аудитория + Windows-скрипты)  
+- Подробная инструкция: Project Context → [local-windows-setup](/cursor/stores/self/docs/local-windows-setup.md)
+
 ## На вашем Windows
 
-> Рабочая ветка: **`cursor/local-windows-dev-8154`** (не `main`).  
-> Пока у вас нет URL `https://github.com/…`, код **ещё не** на публичном GitHub — сейчас у агента remote часто только Cursor Origin (`agent_temp`). Как перенести на GitHub и клонировать в Cursor Desktop — в Project Context: `docs/local-windows-setup.md`.
-
 1. Node.js LTS (18+) с [nodejs.org](https://nodejs.org/).
-2. Откройте папку проекта в **Cursor Desktop** (после clone с **вашего** GitHub).
+2. Cursor Desktop → Clone → `https://github.com/zxcvt005/tutoring-platform` → Open Folder (ветка **`main`**).
 3. Двойной щелчок **`start.bat`** (или `.\start.ps1`).  
    Проверит Node и порт, при необходимости сделает `npm install`, поднимет сервер и попробует открыть браузер.
 4. Правите код → смотрите `:43127` → `tools\windows\save-my-work.bat` → `tools\windows\send-to-github.bat`.
@@ -36,7 +39,7 @@ Next.js (App Router) · TypeScript · Tailwind · shadcn/ui · npm
 
 | Скрипт | Действие |
 |--------|----------|
-| `tools\windows\use-latest-branch.bat` | checkout рабочей ветки + pull (отказ при грязном дереве) |
+| `tools\windows\use-latest-branch.bat` | checkout **`main`** + pull (отказ при грязном дереве) |
 | `tools\windows\get-updates.bat` | `git pull` без force |
 | `tools\windows\save-my-work.bat` | commit локально, **без** push |
 | `tools\windows\send-to-github.bat` | обычный `git push` без `--force` |
