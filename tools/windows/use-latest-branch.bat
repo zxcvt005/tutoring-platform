@@ -4,7 +4,7 @@ REM При незакоммиченных изменениях — ОТКАЗ (�
 setlocal EnableExtensions
 cd /d "%~dp0..\.."
 
-set "TARGET=cursor/local-windows-dev-8154"
+set "TARGET=main"
 
 echo.
 echo === Перейти на ветку %TARGET% ===
