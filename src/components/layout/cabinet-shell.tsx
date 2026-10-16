@@ -13,16 +13,24 @@ import {
 } from "@/components/ui/sheet";
 import { useDemoStore } from "@/lib/store/demo-store";
 
+export type CabinetRole = "direkciya" | "kafedra" | "auditoria";
+
+const titles: Record<CabinetRole, string> = {
+  direkciya: "Дирекция",
+  kafedra: "Кафедра",
+  auditoria: "Аудитория",
+};
+
 export function CabinetShell({
   role,
   children,
 }: {
-  role: "direkciya" | "kafedra";
+  role: CabinetRole;
   children: React.ReactNode;
 }) {
   const { ready } = useDemoStore();
   const [open, setOpen] = useState(false);
-  const title = role === "direkciya" ? "Дирекция" : "Кафедра";
+  const title = titles[role];
 
   return (
     <div className="flex min-h-full flex-1 bg-background">

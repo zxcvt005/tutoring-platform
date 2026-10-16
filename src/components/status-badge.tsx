@@ -4,6 +4,7 @@ import {
   homeworkAssignmentStatusLabel,
   lessonStatusLabel,
   personStatusLabel,
+  studentHomeworkStatusLabel,
   teacherStatusLabel,
   topicStatusLabel,
 } from "@/lib/format";
@@ -102,8 +103,11 @@ export function TopicStatusBadge({ status }: { status: TopicStatus }) {
 
 export function HomeworkAssignmentStatusBadge({
   status,
+  perspective = "staff",
 }: {
   status: HomeworkAssignmentStatus;
+  /** staff — Дирекция/Кафедра; student — Аудитория */
+  perspective?: "staff" | "student";
 }) {
   const tone: Tone =
     status === "reviewed"
@@ -113,7 +117,9 @@ export function HomeworkAssignmentStatusBadge({
         : status === "completed"
           ? "warn"
           : "neutral";
-  return (
-    <StatusPill label={homeworkAssignmentStatusLabel[status]} tone={tone} />
-  );
+  const label =
+    perspective === "student"
+      ? studentHomeworkStatusLabel[status]
+      : homeworkAssignmentStatusLabel[status];
+  return <StatusPill label={label} tone={tone} />;
 }

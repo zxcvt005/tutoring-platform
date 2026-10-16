@@ -37,6 +37,13 @@ import { formatDateTime } from "@/lib/format";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { HomeworkAssignment, HomeworkAssignmentStatus } from "@/lib/types";
 
+const reviewStatusLabel: Record<HomeworkAssignmentStatus, string> = {
+  assigned: "Назначено",
+  completed: "Выполнено",
+  reviewed: "Проверено",
+  overdue: "Просрочено",
+};
+
 export function ResultsWorkspace({
   mode,
 }: {
@@ -240,6 +247,18 @@ export function ResultsWorkspace({
             <DialogTitle>Проверка задания</DialogTitle>
           </DialogHeader>
           <div className="grid gap-3">
+            {editing?.answerText ? (
+              <div className="space-y-1.5 rounded-xl border border-border/80 bg-muted/40 px-3 py-2.5">
+                <Label>Ответ ученика</Label>
+                <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                  {editing.answerText}
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Ученик ещё не отправил текстовый ответ.
+              </p>
+            )}
             <div className="space-y-1.5">
               <Label>Статус</Label>
               <Select
@@ -249,7 +268,13 @@ export function ResultsWorkspace({
                 }
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue />
+                  <SelectValue>
+                    {(v) =>
+                      v
+                        ? reviewStatusLabel[v as HomeworkAssignmentStatus]
+                        : "Статус"
+                    }
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="completed">Выполнено</SelectItem>

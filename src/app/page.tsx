@@ -12,7 +12,7 @@ export default function Home() {
         className="pointer-events-none absolute -bottom-28 -left-20 size-80 rounded-full surface-mint opacity-70 blur-2xl"
       />
 
-      <div className="relative mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-10 px-6 py-16">
+      <div className="relative mx-auto flex w-full max-w-4xl flex-1 flex-col justify-center gap-10 px-6 py-16">
         <div className="space-y-4">
           <p className="text-xs font-semibold tracking-[0.16em] text-muted-foreground uppercase">
             Локальный прототип
@@ -21,12 +21,12 @@ export default function Home() {
             Выберите кабинет
           </h1>
           <p className="max-w-md text-[0.95rem] leading-relaxed text-muted-foreground">
-            Без входа и сервера. Данные общие для обоих кабинетов и сохраняются в
-            браузере.
+            Без входа и сервера. Данные общие для Дирекции, Кафедры и Аудитории
+            и сохраняются в браузере.
           </p>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-3">
           <Link
             href="/direkciya"
             className="group panel flex flex-col gap-3 p-5 transition-colors hover:border-foreground/20"
@@ -38,8 +38,7 @@ export default function Home() {
               Дирекция
             </span>
             <span className="text-sm leading-relaxed text-muted-foreground">
-              Ученики, преподаватели, группы, контроль заданий и проблемных
-              ситуаций.
+              Ученики, преподаватели, контроль заданий и проблемных ситуаций.
             </span>
             <span className="mt-auto pt-2 text-sm font-medium text-foreground group-hover:underline">
               Открыть →
@@ -58,6 +57,24 @@ export default function Home() {
             </span>
             <span className="text-sm leading-relaxed text-muted-foreground">
               Свои ученики, расписание, посещаемость, проверка работ.
+            </span>
+            <span className="mt-auto pt-2 text-sm font-medium text-foreground group-hover:underline">
+              Открыть →
+            </span>
+          </Link>
+
+          <Link
+            href="/auditoria"
+            className="group panel flex flex-col gap-3 p-5 transition-colors hover:border-foreground/20"
+          >
+            <span className="inline-flex w-fit rounded-full surface-mint px-2.5 py-1 text-[0.7rem] font-semibold tracking-wide text-foreground/80 uppercase">
+              Ученик
+            </span>
+            <span className="font-display text-2xl font-semibold tracking-tight">
+              Аудитория
+            </span>
+            <span className="text-sm leading-relaxed text-muted-foreground">
+              Расписание, обучение, сдача ДЗ и свои результаты.
             </span>
             <span className="mt-auto pt-2 text-sm font-medium text-foreground group-hover:underline">
               Открыть →

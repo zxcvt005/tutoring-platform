@@ -121,12 +121,14 @@ export type HomeworkAssignment = {
   score?: number;
   maxScore?: number;
   feedback?: string;
+  /** Ответ ученика при сдаче (прототип) */
+  answerText?: string;
   completedAt?: string;
   reviewedAt?: string;
 };
 
 export type DemoData = {
-  version: 3;
+  version: 4;
   teachers: Teacher[];
   students: Student[];
   lessons: Lesson[];
@@ -137,10 +139,16 @@ export type DemoData = {
   homeworkAssignments: HomeworkAssignment[];
   currentTeacherId: string;
   direkciyaTeacherId: string;
+  /** Demo-ученик для кабинета «Аудитория» */
+  currentStudentId: string;
 };
 
-export const STORAGE_KEY = "naemnye.demo.v3";
-export const LEGACY_STORAGE_KEYS = ["naemnye.demo.v1", "naemnye.demo.v2"];
+export const STORAGE_KEY = "naemnye.demo.v4";
+export const LEGACY_STORAGE_KEYS = [
+  "naemnye.demo.v1",
+  "naemnye.demo.v2",
+  "naemnye.demo.v3",
+];
 
 export const DURATION_OPTIONS = [30, 45, 60, 90, 120] as const;
 

@@ -37,6 +37,7 @@ type DemoStoreValue = {
   ready: boolean;
   setCurrentTeacherId: (id: string) => void;
   setDirekciyaTeacherId: (id: string) => void;
+  setCurrentStudentId: (id: string) => void;
   resetDemo: () => void;
   upsertTeacher: (teacher: Omit<Teacher, "id"> & { id?: string }) => void;
   deleteTeacher: (id: string) => void;
@@ -90,10 +91,15 @@ type DemoStoreValue = {
   upsertHomeworkAssignment: (
     a: Omit<HomeworkAssignment, "id"> & { id?: string }
   ) => void;
+  submitHomeworkAssignment: (
+    id: string,
+    answerText: string
+  ) => { ok: boolean; error?: string };
   deleteHomeworkAssignment: (id: string) => void;
   studentsForTeacher: (teacherId: string) => Student[];
   unassignedStudents: () => Student[];
   lessonsForTeacher: (teacherId: string) => Lesson[];
+  lessonsForStudent: (studentId: string) => Lesson[];
   sectionsForTeacher: (teacherId: string) => TopicSection[];
   topicsForTeacher: (teacherId: string) => Topic[];
   homeworksForTopic: (topicId: string) => Homework[];
@@ -105,7 +111,7 @@ type DemoStoreValue = {
 const DemoStoreContext = createContext<DemoStoreValue | null>(null);
 
 const EMPTY_DATA: DemoData = {
-  version: 3,
+  version: 4,
   teachers: [],
   students: [],
   lessons: [],
@@ -116,6 +122,7 @@ const EMPTY_DATA: DemoData = {
   homeworkAssignments: [],
   currentTeacherId: "",
   direkciyaTeacherId: "",
+  currentStudentId: "",
 };
 
 function refreshOverdue(
@@ -197,6 +204,11 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
 
   const setDirekciyaTeacherId = useCallback(
     (id: string) => patch((d) => ({ ...d, direkciyaTeacherId: id })),
+    [patch]
+  );
+
+  const setCurrentStudentId = useCallback(
+    (id: string) => patch((d) => ({ ...d, currentStudentId: id })),
     [patch]
   );
 
@@ -671,6 +683,46 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
     [patch]
   );
 
+  const submitHomeworkAssignment = useCallback(
+    (id: string, answerText: string): { ok: boolean; error?: string } => {
+      const text = answerText.trim();
+      if (!text) {
+        return { ok: false, error: "Напишите ответ перед отправкой" };
+      }
+      let found = false;
+      let blocked = false;
+      patch((d) => {
+        const current = d.homeworkAssignments.find((a) => a.id === id);
+        if (!current) return d;
+        found = true;
+        if (current.status === "reviewed") {
+          blocked = true;
+          return d;
+        }
+        return {
+          ...d,
+          homeworkAssignments: d.homeworkAssignments.map((a) =>
+            a.id === id
+              ? {
+                  ...a,
+                  answerText: text,
+                  status: "completed" as const,
+                  completedAt: new Date().toISOString(),
+                }
+              : a
+          ),
+        };
+      });
+      if (!found) return { ok: false, error: "Задание не найдено" };
+      if (blocked) {
+        return { ok: false, error: "Проверенное задание нельзя отправить снова" };
+      }
+      toast.success("Ответ отправлен на проверку");
+      return { ok: true };
+    },
+    [patch]
+  );
+
   const deleteHomeworkAssignment = useCallback(
     (id: string) => {
       patch((d) => ({
@@ -693,6 +745,12 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
 
   const lessonsForTeacher = useCallback(
     (teacherId: string) => data.lessons.filter((l) => l.teacherId === teacherId),
+    [data.lessons]
+  );
+
+  const lessonsForStudent = useCallback(
+    (studentId: string) =>
+      data.lessons.filter((l) => l.studentIds.includes(studentId)),
     [data.lessons]
   );
 
@@ -740,6 +798,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       ready,
       setCurrentTeacherId,
       setDirekciyaTeacherId,
+      setCurrentStudentId,
       resetDemo,
       upsertTeacher,
       deleteTeacher,
@@ -759,10 +818,12 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       upsertHomework,
       deleteHomework,
       upsertHomeworkAssignment,
+      submitHomeworkAssignment,
       deleteHomeworkAssignment,
       studentsForTeacher,
       unassignedStudents,
       lessonsForTeacher,
+      lessonsForStudent,
       sectionsForTeacher,
       topicsForTeacher,
       homeworksForTopic,
@@ -775,6 +836,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       ready,
       setCurrentTeacherId,
       setDirekciyaTeacherId,
+      setCurrentStudentId,
       resetDemo,
       upsertTeacher,
       deleteTeacher,
@@ -794,10 +856,12 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       upsertHomework,
       deleteHomework,
       upsertHomeworkAssignment,
+      submitHomeworkAssignment,
       deleteHomeworkAssignment,
       studentsForTeacher,
       unassignedStudents,
       lessonsForTeacher,
+      lessonsForStudent,
       sectionsForTeacher,
       topicsForTeacher,
       homeworksForTopic,

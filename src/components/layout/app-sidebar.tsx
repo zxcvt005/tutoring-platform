@@ -3,14 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  BookMarked,
+  BookOpen,
   CalendarDays,
   ClipboardList,
   GraduationCap,
   LayoutDashboard,
+  UserRound,
   Users,
+  BookMarked,
 } from "lucide-react";
 
+import type { CabinetRole } from "@/components/layout/cabinet-shell";
 import { RoleSwitcher } from "@/components/layout/role-switcher";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,14 +48,46 @@ const kafedraNav: NavItem[] = [
   { href: "/kafedra/results", label: "Результаты", icon: ClipboardList },
 ];
 
-function NavLinks({ items }: { items: NavItem[] }) {
+const auditoriaNav: NavItem[] = [
+  { href: "/auditoria", label: "Главная", icon: LayoutDashboard },
+  { href: "/auditoria/schedule", label: "Расписание", icon: CalendarDays },
+  { href: "/auditoria/learning", label: "Обучение", icon: BookOpen },
+  { href: "/auditoria/results", label: "Результаты", icon: ClipboardList },
+  { href: "/auditoria/profile", label: "Мой профиль", icon: UserRound },
+];
+
+const titles: Record<CabinetRole, string> = {
+  direkciya: "Дирекция",
+  kafedra: "Кафедра",
+  auditoria: "Аудитория",
+};
+
+const accentClass: Record<CabinetRole, string> = {
+  direkciya: "surface-sky",
+  kafedra: "surface-sand",
+  auditoria: "surface-mint",
+};
+
+function NavLinks({
+  items,
+  role,
+}: {
+  items: NavItem[];
+  role: CabinetRole;
+}) {
   const pathname = usePathname();
+  const homeHref =
+    role === "direkciya"
+      ? "/direkciya"
+      : role === "kafedra"
+        ? "/kafedra"
+        : "/auditoria";
 
   return (
     <nav className="flex flex-col gap-1">
       {items.map((item) => {
         const active =
-          item.href === "/direkciya" || item.href === "/kafedra"
+          item.href === homeHref
             ? pathname === item.href
             : pathname === item.href || pathname.startsWith(`${item.href}/`);
         const Icon = item.icon;
@@ -91,18 +126,29 @@ export function AppSidebar({
   role,
   onNavigate,
 }: {
-  role: "direkciya" | "kafedra";
+  role: CabinetRole;
   onNavigate?: () => void;
 }) {
-  const { data, setCurrentTeacherId, resetDemo } = useDemoStore();
-  const items = role === "direkciya" ? direkciyaNav : kafedraNav;
-  const title = role === "direkciya" ? "Дирекция" : "Кафедра";
-  const accentClass = role === "direkciya" ? "surface-sky" : "surface-sand";
+  const {
+    data,
+    setCurrentTeacherId,
+    setCurrentStudentId,
+    resetDemo,
+  } = useDemoStore();
+  const items =
+    role === "direkciya"
+      ? direkciyaNav
+      : role === "kafedra"
+        ? kafedraNav
+        : auditoriaNav;
+  const title = titles[role];
+
+  const demoStudents = data.students.filter((s) => s.teacherId);
 
   return (
     <div className="flex h-full flex-col gap-5 p-4" onClick={onNavigate}>
       <div className="space-y-3">
-        <div className={cn("panel-soft px-3 py-3", accentClass)}>
+        <div className={cn("panel-soft px-3 py-3", accentClass[role])}>
           <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
             Кабинет
           </p>
@@ -113,7 +159,7 @@ export function AppSidebar({
         <RoleSwitcher />
       </div>
 
-      <NavLinks items={items} />
+      <NavLinks items={items} role={role} />
 
       {role === "kafedra" ? (
         <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
@@ -147,6 +193,38 @@ export function AppSidebar({
         </div>
       ) : null}
 
+      {role === "auditoria" ? (
+        <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
+          <p className="px-0.5 text-xs font-medium text-muted-foreground">
+            Demo-ученик
+          </p>
+          <Select
+            value={data.currentStudentId || null}
+            onValueChange={(v) => {
+              if (v) setCurrentStudentId(v);
+            }}
+          >
+            <SelectTrigger className="w-full rounded-xl">
+              <SelectValue placeholder="Выберите">
+                {(v: string | null) =>
+                  demoStudents.find((s) => s.id === v)?.fullName ?? "Выберите"
+                }
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {demoStudents.map((s) => (
+                <SelectItem key={s.id} value={s.id}>
+                  {s.fullName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="px-0.5 text-[11px] leading-snug text-muted-foreground">
+            Видны только данные выбранного ученика.
+          </p>
+        </div>
+      ) : null}
+
       <div className="mt-auto space-y-2 pt-2" onClick={(e) => e.stopPropagation()}>
         <Button
           type="button"
@@ -158,7 +236,7 @@ export function AppSidebar({
           Сбросить демо
         </Button>
         <p className="px-0.5 text-[11px] leading-snug text-muted-foreground">
-          Данные в браузере (localStorage v2).
+          Данные в браузере (localStorage v4).
         </p>
       </div>
     </div>

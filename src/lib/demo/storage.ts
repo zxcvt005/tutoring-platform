@@ -1,25 +1,56 @@
 import { createSeedData } from "@/lib/demo/seed";
-import type { DemoData, Lesson, Topic, TopicSection } from "@/lib/types";
+import type {
+  DemoData,
+  HomeworkAssignment,
+  Lesson,
+  Topic,
+  TopicSection,
+} from "@/lib/types";
 import { LEGACY_STORAGE_KEYS, STORAGE_KEY } from "@/lib/types";
 
 type LegacyLesson = Lesson & { studentId?: string; studentIds?: string[] };
 type LegacyTopic = Topic & { sectionId?: string | null; sortOrder?: number };
-type LegacyV2 = Omit<DemoData, "version" | "topicSections" | "lessons" | "topics"> & {
+type LegacyAssignment = HomeworkAssignment & { answerText?: string };
+
+type LegacyV2 = {
   version: 2;
+  teachers: DemoData["teachers"];
+  students: DemoData["students"];
   lessons: LegacyLesson[];
+  attendances?: DemoData["attendances"];
   topics: LegacyTopic[];
   topicSections?: TopicSection[];
+  homeworks?: DemoData["homeworks"];
+  homeworkAssignments?: LegacyAssignment[];
+  currentTeacherId?: string;
+  direkciyaTeacherId?: string;
+  currentStudentId?: string;
+};
+
+type LegacyV3 = {
+  version: 3;
+  teachers: DemoData["teachers"];
+  students: DemoData["students"];
+  lessons: Lesson[];
+  attendances: DemoData["attendances"];
+  topicSections: TopicSection[];
+  topics: Topic[];
+  homeworks: DemoData["homeworks"];
+  homeworkAssignments: LegacyAssignment[];
+  currentTeacherId: string;
+  direkciyaTeacherId: string;
+  currentStudentId?: string;
 };
 
 function isObject(data: unknown): data is Record<string, unknown> {
   return !!data && typeof data === "object";
 }
 
-function isValidV3(data: unknown): data is DemoData {
+function isValidV4(data: unknown): data is DemoData {
   if (!isObject(data)) return false;
   const d = data as DemoData;
   return (
-    d.version === 3 &&
+    d.version === 4 &&
     Array.isArray(d.teachers) &&
     Array.isArray(d.students) &&
     Array.isArray(d.lessons) &&
@@ -29,6 +60,7 @@ function isValidV3(data: unknown): data is DemoData {
     Array.isArray(d.homeworkAssignments) &&
     typeof d.currentTeacherId === "string" &&
     typeof d.direkciyaTeacherId === "string" &&
+    typeof d.currentStudentId === "string" &&
     d.lessons.every(
       (l) => Array.isArray(l.studentIds) && typeof l.teacherId === "string"
     )
@@ -70,11 +102,83 @@ function migrateTopic(topic: LegacyTopic, index: number): Topic {
   };
 }
 
-/** Безопасная миграция v2 → v3 (studentIds, разделы тем). */
-export function migrateToV3(raw: unknown): DemoData | null {
+function pickCurrentStudentId(
+  students: DemoData["students"],
+  preferred?: string
+): string {
+  if (preferred && students.some((s) => s.id === preferred)) return preferred;
+  const withTeacher = students.find((s) => s.teacherId && s.status === "active");
+  return withTeacher?.id ?? students[0]?.id ?? "";
+}
+
+function toV4Base(input: {
+  teachers: DemoData["teachers"];
+  students: DemoData["students"];
+  lessons: Lesson[];
+  attendances: DemoData["attendances"];
+  topicSections: TopicSection[];
+  topics: Topic[];
+  homeworks: DemoData["homeworks"];
+  homeworkAssignments: HomeworkAssignment[];
+  currentTeacherId: string;
+  direkciyaTeacherId: string;
+  currentStudentId?: string;
+}): DemoData {
+  return {
+    version: 4,
+    teachers: input.teachers,
+    students: input.students,
+    lessons: input.lessons,
+    attendances: input.attendances,
+    topicSections: input.topicSections,
+    topics: input.topics,
+    homeworks: input.homeworks,
+    homeworkAssignments: input.homeworkAssignments.map((a) => ({
+      ...a,
+      answerText: a.answerText,
+    })),
+    currentTeacherId: input.currentTeacherId ?? "",
+    direkciyaTeacherId: input.direkciyaTeacherId ?? "",
+    currentStudentId: pickCurrentStudentId(
+      input.students,
+      input.currentStudentId
+    ),
+  };
+}
+
+/** Безопасная миграция v2/v3 → v4 (ответ ученика + currentStudentId). */
+export function migrateToV4(raw: unknown): DemoData | null {
   if (!isObject(raw)) return null;
   const version = (raw as { version?: number }).version;
-  if (version === 3 && isValidV3(raw)) return raw;
+  if (version === 4 && isValidV4(raw)) return raw;
+
+  if (version === 3) {
+    const v3 = raw as LegacyV3;
+    if (
+      !Array.isArray(v3.teachers) ||
+      !Array.isArray(v3.students) ||
+      !Array.isArray(v3.lessons) ||
+      !Array.isArray(v3.topics) ||
+      !Array.isArray(v3.topicSections)
+    ) {
+      return null;
+    }
+    return toV4Base({
+      teachers: v3.teachers,
+      students: v3.students,
+      lessons: v3.lessons,
+      attendances: Array.isArray(v3.attendances) ? v3.attendances : [],
+      topicSections: v3.topicSections,
+      topics: v3.topics,
+      homeworks: Array.isArray(v3.homeworks) ? v3.homeworks : [],
+      homeworkAssignments: Array.isArray(v3.homeworkAssignments)
+        ? v3.homeworkAssignments
+        : [],
+      currentTeacherId: v3.currentTeacherId ?? "",
+      direkciyaTeacherId: v3.direkciyaTeacherId ?? "",
+      currentStudentId: v3.currentStudentId,
+    });
+  }
 
   if (version !== 2) return null;
   const v2 = raw as LegacyV2;
@@ -90,8 +194,7 @@ export function migrateToV3(raw: unknown): DemoData | null {
   const topics = v2.topics.map((t, i) => migrateTopic(t, i));
   const topicSections = Array.isArray(v2.topicSections) ? v2.topicSections : [];
 
-  return {
-    version: 3,
+  return toV4Base({
     teachers: v2.teachers,
     students: v2.students,
     lessons: v2.lessons.map(migrateLesson),
@@ -104,7 +207,13 @@ export function migrateToV3(raw: unknown): DemoData | null {
       : [],
     currentTeacherId: v2.currentTeacherId ?? "",
     direkciyaTeacherId: v2.direkciyaTeacherId ?? "",
-  };
+    currentStudentId: v2.currentStudentId,
+  });
+}
+
+/** @deprecated используйте migrateToV4 */
+export function migrateToV3(raw: unknown): DemoData | null {
+  return migrateToV4(raw);
 }
 
 function clearLegacy(): void {
@@ -140,11 +249,11 @@ export function loadDemoData(): DemoData {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as unknown;
-      if (isValidV3(parsed) && parsed.teachers.length) {
+      if (isValidV4(parsed) && parsed.teachers.length) {
         clearLegacy();
         return parsed;
       }
-      const migrated = migrateToV3(parsed);
+      const migrated = migrateToV4(parsed);
       if (migrated && migrated.teachers.length) {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
         clearLegacy();
@@ -154,7 +263,7 @@ export function loadDemoData(): DemoData {
 
     const legacy = readLegacyBlob();
     if (legacy) {
-      const migrated = migrateToV3(legacy);
+      const migrated = migrateToV4(legacy);
       if (migrated && migrated.teachers.length) {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
         clearLegacy();

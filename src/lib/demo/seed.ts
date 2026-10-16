@@ -443,6 +443,8 @@ export function createSeedData(): DemoData {
       dueAt: atDay(-1, 23, 0),
       status: "completed" as const,
       maxScore: 10,
+      answerText:
+        "1) (x²)' = 2x\n2) (sin x)' = cos x\n3) (e^x)' = e^x\n… остальные примеры в тетради.",
       completedAt: atDay(-1, 20, 0),
     },
     {
@@ -466,6 +468,7 @@ export function createSeedData(): DemoData {
       score: 4,
       maxScore: 5,
       feedback: "Хорошо, следите за знаками.",
+      answerText: "Определение через предел приращения; таблица базовых производных.",
       completedAt: atDay(-3, 18, 0),
       reviewedAt: atDay(-2, 12, 0),
     },
@@ -497,12 +500,22 @@ export function createSeedData(): DemoData {
       studentId: "s7",
       dueAt: atDay(3, 23, 0),
       status: "completed" as const,
+      answerText: "Last summer I travelled to Kazan and…",
       completedAt: atDay(0, 10, 0),
+    },
+    {
+      id: "ha7",
+      homeworkId: "hw3",
+      topicId: "tp2",
+      teacherId: "t1",
+      studentId: "s1",
+      dueAt: atDay(1, 23, 0),
+      status: "assigned" as const,
     },
   ];
 
   return {
-    version: 3,
+    version: 4,
     teachers,
     students,
     lessons,
@@ -513,5 +526,6 @@ export function createSeedData(): DemoData {
     homeworkAssignments,
     currentTeacherId: "t1",
     direkciyaTeacherId: "t1",
+    currentStudentId: "s1",
   };
 }

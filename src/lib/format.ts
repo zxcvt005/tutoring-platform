@@ -83,12 +83,24 @@ export const topicStatusLabel: Record<TopicStatus, string> = {
   archived: "В архиве",
 };
 
+/** Подписи для Дирекции / Кафедры */
 export const homeworkAssignmentStatusLabel: Record<
   HomeworkAssignmentStatus,
   string
 > = {
   assigned: "Назначено",
   completed: "Выполнено",
+  reviewed: "Проверено",
+  overdue: "Просрочено",
+};
+
+/** Подписи для ученика (Аудитория) — статус выполнения отдельно от балла */
+export const studentHomeworkStatusLabel: Record<
+  HomeworkAssignmentStatus,
+  string
+> = {
+  assigned: "Нужно выполнить",
+  completed: "На проверке",
   reviewed: "Проверено",
   overdue: "Просрочено",
 };
