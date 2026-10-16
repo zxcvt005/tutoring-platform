@@ -24,16 +24,13 @@ if not defined ORIGIN_URL (
   echo.
   echo [ОШИБКА] Remote «origin» не настроен.
   echo.
-  echo Сейчас код агента часто лежит только во временном Cursor Origin
-  echo ^(origin.cursor.com / agent_temp^) — это НЕ публичный GitHub.
+  echo Remote origin не настроен.
+  echo Целевой репозиторий: https://github.com/zxcvt005/tutoring-platform
   echo.
   echo Что сделать:
-  echo   1. Создайте пустой репозиторий на https://github.com
-  echo   2. Привяжите его:  git remote add origin https://github.com/ВАШ_ЛОГИН/ВАШ_РЕПО.git
-  echo      ^(или: git remote set-url origin ... если origin уже есть^)
-  echo   3. Снова запустите этот файл.
-  echo.
-  echo Подробнее — docs/local-windows-setup.md в Project Context.
+  echo   git remote add origin https://github.com/zxcvt005/tutoring-platform.git
+  echo   ^(или: git remote set-url origin ... если remote уже есть^)
+  echo Затем снова этот файл. Рабочая ветка: main.
   echo.
   pause
   exit /b 1

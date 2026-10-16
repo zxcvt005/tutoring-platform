@@ -25,11 +25,12 @@ if not defined BRANCH (
 )
 
 echo Текущая ветка: %BRANCH%
-echo Ожидаемая рабочая ветка: cursor/local-windows-dev-8154
-if /I not "%BRANCH%"=="cursor/local-windows-dev-8154" (
+echo Ожидаемая рабочая ветка на GitHub: main
+if /I not "%BRANCH%"=="main" (
   echo.
-  echo [ВНИМАНИЕ] Вы не на cursor/local-windows-dev-8154.
-  echo Сначала запустите use-latest-branch.bat или: git checkout cursor/local-windows-dev-8154
+  echo [ВНИМАНИЕ] Вы не на main.
+  echo Для ежедневной работы: use-latest-branch.bat или git checkout main
+  echo Репозиторий: https://github.com/zxcvt005/tutoring-platform
   echo.
 )
 
