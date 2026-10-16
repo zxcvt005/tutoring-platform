@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/empty-state";
+import { FilterBar } from "@/components/layout/filter-bar";
 import { PageHeader } from "@/components/layout/page-header";
 import { ResultStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -117,14 +118,14 @@ export function ResultsPanel({
         description="Балл, статус и необязательный комментарий к работе."
       />
 
-      <div className="mb-3 flex flex-col gap-2 sm:flex-row">
+      <FilterBar>
         <Select
           value={assignmentFilter}
           onValueChange={(v) => {
             if (v) setAssignmentFilter(v);
           }}
         >
-          <SelectTrigger className="w-full sm:w-64">
+          <SelectTrigger className="w-full border-transparent bg-background sm:w-64">
             <SelectValue placeholder="Задание">
               {(v: string | null) =>
                 !v || v === "all"
@@ -149,7 +150,7 @@ export function ResultsPanel({
             if (v) setStatusFilter(v as "all" | ResultStatus);
           }}
         >
-          <SelectTrigger className="w-full sm:w-44">
+          <SelectTrigger className="w-full border-transparent bg-background sm:w-44">
             <SelectValue>
               {(v: "all" | ResultStatus | null) =>
                 !v || v === "all" ? "Все статусы" : resultStatusLabel[v]
@@ -164,7 +165,7 @@ export function ResultsPanel({
             <SelectItem value="overdue">Просрочено</SelectItem>
           </SelectContent>
         </Select>
-      </div>
+      </FilterBar>
 
       {results.length === 0 ? (
         <EmptyState title="Нет результатов" description="Смените фильтр." />

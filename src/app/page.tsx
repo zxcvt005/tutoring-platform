@@ -1,7 +1,5 @@
 import Link from "next/link";
 
-import { Button } from "@/components/ui/button";
-
 export default function Home() {
   return (
     <main className="relative flex min-h-full flex-1 flex-col overflow-hidden bg-background">
@@ -65,24 +63,6 @@ export default function Home() {
               Открыть →
             </span>
           </Link>
-        </div>
-
-        <div className="flex flex-wrap gap-2 sm:hidden">
-          <Button
-            nativeButton={false}
-            render={<Link href="/direkciya" />}
-            className="flex-1 rounded-full"
-          >
-            Дирекция
-          </Button>
-          <Button
-            variant="outline"
-            nativeButton={false}
-            render={<Link href="/kafedra" />}
-            className="flex-1 rounded-full"
-          >
-            Кафедра
-          </Button>
         </div>
       </div>
     </main>

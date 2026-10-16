@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/empty-state";
+import { FilterBar } from "@/components/layout/filter-bar";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -104,20 +105,20 @@ export function GroupsPanel() {
         title="Группы"
         description="У группы один куратор-преподаватель; ученики — многие-ко-многим."
         actions={
-          <Button type="button" onClick={openCreate}>
+          <Button type="button" className="rounded-full" onClick={openCreate}>
             Добавить группу
           </Button>
         }
       />
 
-      <div className="mb-3">
+      <FilterBar>
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Поиск группы…"
-          className="sm:max-w-xs"
+          className="border-transparent bg-background sm:max-w-xs"
         />
-      </div>
+      </FilterBar>
 
       {rows.length === 0 ? (
         <EmptyState title="Нет групп" />

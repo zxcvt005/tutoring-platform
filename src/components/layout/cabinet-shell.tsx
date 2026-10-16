@@ -12,7 +12,6 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useDemoStore } from "@/lib/store/demo-store";
-import { cn } from "@/lib/utils";
 
 export function CabinetShell({
   role,
@@ -26,13 +25,8 @@ export function CabinetShell({
   const title = role === "direkciya" ? "Дирекция" : "Кафедра";
 
   return (
-    <div
-      className={cn(
-        "flex min-h-full flex-1",
-        role === "direkciya" ? "bg-background" : "bg-background"
-      )}
-    >
-      <aside className="sticky top-0 hidden h-svh w-[15.5rem] shrink-0 border-r border-sidebar-border bg-sidebar md:block">
+    <div className="flex min-h-full flex-1 bg-background">
+      <aside className="sticky top-0 hidden h-svh w-56 shrink-0 border-r border-sidebar-border bg-sidebar lg:w-[15rem] md:block">
         <AppSidebar role={role} />
       </aside>
 
@@ -61,11 +55,11 @@ export function CabinetShell({
           </SheetContent>
         </Sheet>
 
-        <main className="flex-1 px-4 py-5 sm:px-7 sm:py-7">
+        <main className="flex-1 px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
           {!ready ? (
             <p className="text-sm text-muted-foreground">Загрузка демо-данных…</p>
           ) : (
-            <div className="mx-auto w-full max-w-6xl">{children}</div>
+            <div className="mx-auto w-full max-w-[92rem]">{children}</div>
           )}
         </main>
       </div>

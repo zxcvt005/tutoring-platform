@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/empty-state";
+import { FilterBar } from "@/components/layout/filter-bar";
 import { PageHeader } from "@/components/layout/page-header";
 import { PersonStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -159,19 +160,19 @@ export function StudentsPanel({
         }
         actions={
           editable ? (
-            <Button type="button" onClick={openCreate}>
+            <Button type="button" className="rounded-full" onClick={openCreate}>
               Добавить ученика
             </Button>
           ) : null
         }
       />
 
-      <div className="mb-3 flex flex-col gap-2 sm:flex-row">
+      <FilterBar>
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Поиск по имени или контакту…"
-          className="sm:max-w-xs"
+          className="border-transparent bg-background sm:max-w-xs"
         />
         <Select
           value={statusFilter}
@@ -179,7 +180,7 @@ export function StudentsPanel({
             if (v) setStatusFilter(v as "all" | PersonStatus);
           }}
         >
-          <SelectTrigger className="w-full sm:w-40">
+          <SelectTrigger className="w-full border-transparent bg-background sm:w-40">
             <SelectValue>
               {(v: "all" | PersonStatus | null) =>
                 v === "active"
@@ -196,7 +197,7 @@ export function StudentsPanel({
             <SelectItem value="paused">Пауза</SelectItem>
           </SelectContent>
         </Select>
-      </div>
+      </FilterBar>
 
       {rows.length === 0 ? (
         <EmptyState

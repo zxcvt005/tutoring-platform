@@ -176,7 +176,7 @@ export function AssignmentsPanel({
         title="Задания"
         description="Публикация заданий группе или выбранным ученикам."
         actions={
-          <Button type="button" onClick={openCreate}>
+          <Button type="button" className="rounded-full" onClick={openCreate}>
             Добавить задание
           </Button>
         }

@@ -164,7 +164,7 @@ export function SchedulePanel({
         description="Список занятий. Посещаемость отмечается из Кафедры (и доступна в Дирекции)."
         actions={
           canEdit ? (
-            <Button type="button" onClick={openCreate}>
+            <Button type="button" className="rounded-full" onClick={openCreate}>
               Добавить занятие
             </Button>
           ) : null

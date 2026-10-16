@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/empty-state";
+import { FilterBar } from "@/components/layout/filter-bar";
 import { PageHeader } from "@/components/layout/page-header";
 import { PersonStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -107,20 +108,20 @@ export function TeachersPanel() {
         title="Преподаватели"
         description="Справочник преподавателей и предметов."
         actions={
-          <Button type="button" onClick={openCreate}>
+          <Button type="button" className="rounded-full" onClick={openCreate}>
             Добавить преподавателя
           </Button>
         }
       />
 
-      <div className="mb-3">
+      <FilterBar>
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Поиск…"
-          className="sm:max-w-xs"
+          className="border-transparent bg-background sm:max-w-xs"
         />
-      </div>
+      </FilterBar>
 
       {rows.length === 0 ? (
         <EmptyState title="Нет преподавателей" />
