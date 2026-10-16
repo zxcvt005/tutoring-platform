@@ -6,13 +6,17 @@ import { useMemo, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
 import { CompleteLessonDialog } from "@/components/schedule/complete-lesson-dialog";
+import { LessonDialog } from "@/components/schedule/lesson-dialog";
 import { LessonStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { formatTime } from "@/lib/format";
 import {
   DAY_END_HOUR,
+  DAY_HOME_PX_PER_MINUTE,
   DAY_START_HOUR,
-  PX_PER_MINUTE,
+  durationMinutes,
+  layoutLessonColumns,
+  lessonParticipantsLabel,
   minutesSinceMidnight,
   sameDay,
 } from "@/lib/schedule";
@@ -20,8 +24,17 @@ import { useDemoStore } from "@/lib/store/demo-store";
 import type { Lesson } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+/** Короткие блоки: меньше текста и кнопок на сетке */
+const SHORT_LESSON_MIN = 40;
+
 export function KafedraDayHome() {
-  const { data, lessonsForTeacher } = useDemoStore();
+  const {
+    data,
+    lessonsForTeacher,
+    studentsForTeacher,
+    upsertLesson,
+    deleteLesson,
+  } = useDemoStore();
   const teacherId = data.currentTeacherId;
   const teacher = data.teachers.find((t) => t.id === teacherId);
   const today = useMemo(() => {
@@ -31,6 +44,7 @@ export function KafedraDayHome() {
   }, []);
 
   const [completeLesson, setCompleteLesson] = useState<Lesson | null>(null);
+  const [editLesson, setEditLesson] = useState<Lesson | null>(null);
 
   const dayLessons = useMemo(
     () =>
@@ -43,9 +57,23 @@ export function KafedraDayHome() {
     [lessonsForTeacher, teacherId, today]
   );
 
+  const laidOut = useMemo(
+    () => layoutLessonColumns(dayLessons),
+    [dayLessons]
+  );
+
+  const students = useMemo(
+    () => studentsForTeacher(teacherId).filter((s) => s.status === "active"),
+    [studentsForTeacher, teacherId]
+  );
+
   const dayStartMin = DAY_START_HOUR * 60;
   const totalMin = (DAY_END_HOUR - DAY_START_HOUR) * 60;
-  const height = totalMin * PX_PER_MINUTE;
+  const height = totalMin * DAY_HOME_PX_PER_MINUTE;
+  const px = DAY_HOME_PX_PER_MINUTE;
+
+  const nameOf = (id: string) =>
+    data.students.find((s) => s.id === id)?.fullName ?? "Ученик";
 
   const queue = data.homeworkAssignments.filter(
     (a) =>
@@ -54,7 +82,7 @@ export function KafedraDayHome() {
   ).length;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
         title="Сегодня"
         description={`${teacher?.fullName ?? "Преподаватель"} · ${today.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}`}
@@ -69,7 +97,7 @@ export function KafedraDayHome() {
       />
 
       {queue > 0 ? (
-        <div className="panel-soft surface-sand flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <div className="panel-soft surface-sand flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
           <p className="text-sm">
             К проверке или просрочено:{" "}
             <span className="font-semibold tabular-nums">{queue}</span>
@@ -90,96 +118,158 @@ export function KafedraDayHome() {
         />
       ) : (
         <>
-          {/* Desktop day timeline */}
-          <div className="panel relative hidden overflow-hidden md:block" style={{ height }}>
+          <div
+            className="panel relative hidden overflow-hidden md:block"
+            style={{ height }}
+          >
             {Array.from({ length: DAY_END_HOUR - DAY_START_HOUR }, (_, i) => {
               const h = DAY_START_HOUR + i;
               return (
                 <div
                   key={h}
-                  className="absolute inset-x-0 border-t border-border/50"
-                  style={{ top: i * 60 * PX_PER_MINUTE }}
+                  className="absolute inset-x-0 border-t border-border/45"
+                  style={{ top: i * 60 * px }}
                 >
-                  <span className="absolute top-0 left-2 -translate-y-1/2 bg-card px-1 text-[0.65rem] text-muted-foreground tabular-nums">
+                  <span className="absolute top-0 left-1.5 -translate-y-1/2 bg-card px-1 text-[0.6rem] leading-none text-muted-foreground tabular-nums">
                     {String(h).padStart(2, "0")}:00
                   </span>
                 </div>
               );
             })}
-            {dayLessons.map((l) => {
+            {laidOut.map(({ lesson: l, column, columns }) => {
               const start = minutesSinceMidnight(new Date(l.startsAt));
               const end = minutesSinceMidnight(new Date(l.endsAt));
-              const top = (start - dayStartMin) * PX_PER_MINUTE;
-              const blockH = Math.max((end - start) * PX_PER_MINUTE, 36);
-              const student = data.students.find((s) => s.id === l.studentId);
+              const top = (start - dayStartMin) * px;
+              const mins = Math.max(end - start, 15);
+              const blockH = Math.max(mins * px, 28);
+              const short = durationMinutes(l.startsAt, l.endsAt) < SHORT_LESSON_MIN;
+              const gap = 4;
+              const leftBase = 52;
+              const rightPad = 10;
+              const colW = `calc((100% - ${leftBase + rightPad}px - ${(columns - 1) * gap}px) / ${columns})`;
+              const left = `calc(${leftBase}px + ${column} * (${colW} + ${gap}px))`;
+              const label = lessonParticipantsLabel(l, nameOf);
+
               return (
                 <div
                   key={l.id}
                   className={cn(
-                    "absolute right-3 left-16 overflow-hidden rounded-xl border px-3 py-2",
+                    "absolute overflow-hidden rounded-lg border px-2 py-1",
                     l.status === "cancelled"
                       ? "border-destructive/30 bg-destructive/10"
                       : l.status === "done"
                         ? "border-success/25 surface-mint"
                         : "border-border/80 surface-sky"
                   )}
-                  style={{ top, height: blockH }}
+                  style={{ top, height: blockH, left, width: colW }}
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="font-semibold tabular-nums">
-                        {formatTime(l.startsAt)}–{formatTime(l.endsAt)}
-                      </p>
-                      <p className="font-medium">{student?.fullName}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {l.subject || "Занятие"}
-                      </p>
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <LessonStatusBadge status={l.status} />
+                  {short ? (
+                    <div className="flex h-full w-full flex-col justify-center">
+                      <button
+                        type="button"
+                        className="truncate text-left text-[0.7rem] font-semibold tabular-nums leading-tight hover:underline"
+                        onClick={() => setEditLesson(l)}
+                      >
+                        {formatTime(l.startsAt)} · {label}
+                      </button>
                       {l.status === "planned" ? (
-                        <Button
+                        <button
                           type="button"
-                          size="sm"
-                          className="rounded-full"
+                          className="mt-0.5 w-fit text-[0.65rem] font-medium underline-offset-2 hover:underline"
                           onClick={() => setCompleteLesson(l)}
                         >
                           Завершить
-                        </Button>
-                      ) : null}
+                        </button>
+                      ) : (
+                        <span className="text-[0.65rem] text-muted-foreground">
+                          {l.subject || "Занятие"}
+                        </span>
+                      )}
                     </div>
-                  </div>
+                  ) : (
+                    <div className="flex h-full flex-col justify-between gap-1">
+                      <div className="min-w-0">
+                        <p className="text-[0.75rem] font-semibold tabular-nums leading-tight">
+                          {formatTime(l.startsAt)}–{formatTime(l.endsAt)}
+                        </p>
+                        <p className="truncate text-[0.8rem] font-medium leading-snug">
+                          {label}
+                        </p>
+                        <p className="truncate text-[0.7rem] text-muted-foreground">
+                          {l.subject || "Занятие"}
+                          {l.studentIds.length > 1 ? " · совместное" : ""}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <LessonStatusBadge status={l.status} />
+                        {l.status === "planned" ? (
+                          <Button
+                            type="button"
+                            size="xs"
+                            className="h-6 rounded-full px-2 text-[0.7rem]"
+                            onClick={() => setCompleteLesson(l)}
+                          >
+                            Завершить
+                          </Button>
+                        ) : null}
+                        <Button
+                          type="button"
+                          size="xs"
+                          variant="ghost"
+                          className="h-6 rounded-full px-2 text-[0.7rem]"
+                          onClick={() => setEditLesson(l)}
+                        >
+                          Открыть
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
 
-          {/* Mobile list */}
           <ul className="panel divide-y divide-border/70 overflow-hidden md:hidden">
             {dayLessons.map((l) => {
-              const student = data.students.find((s) => s.id === l.studentId);
+              const label = lessonParticipantsLabel(l, nameOf);
+              const short =
+                durationMinutes(l.startsAt, l.endsAt) < SHORT_LESSON_MIN;
               return (
-                <li key={l.id} className="flex flex-col gap-2 px-4 py-3">
+                <li key={l.id} className="flex flex-col gap-1.5 px-3.5 py-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold tabular-nums">
+                    <span className="text-sm font-semibold tabular-nums">
                       {formatTime(l.startsAt)}–{formatTime(l.endsAt)}
                     </span>
                     <LessonStatusBadge status={l.status} />
                   </div>
-                  <p className="font-medium">{student?.fullName}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {l.subject || "Занятие"}
-                  </p>
-                  {l.status === "planned" ? (
+                  <p className="text-sm font-medium leading-snug">{label}</p>
+                  {!short ? (
+                    <p className="text-xs text-muted-foreground">
+                      {l.subject || "Занятие"}
+                      {l.studentIds.length > 1 ? " · совместное" : ""}
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {l.status === "planned" ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-7 rounded-full px-3 text-xs"
+                        onClick={() => setCompleteLesson(l)}
+                      >
+                        Завершить
+                      </Button>
+                    ) : null}
                     <Button
                       type="button"
                       size="sm"
-                      className="w-fit rounded-full"
-                      onClick={() => setCompleteLesson(l)}
+                      variant="outline"
+                      className="h-7 rounded-full px-3 text-xs"
+                      onClick={() => setEditLesson(l)}
                     >
-                      Завершить и отметить посещаемость
+                      Подробнее
                     </Button>
-                  ) : null}
+                  </div>
                 </li>
               );
             })}
@@ -202,6 +292,15 @@ export function KafedraDayHome() {
         lesson={completeLesson}
         open={!!completeLesson}
         onOpenChange={(o) => !o && setCompleteLesson(null)}
+      />
+      <LessonDialog
+        open={!!editLesson}
+        onOpenChange={(o) => !o && setEditLesson(null)}
+        teacherId={teacherId}
+        students={students}
+        initial={editLesson ?? undefined}
+        onSave={(lesson) => upsertLesson(lesson)}
+        onDelete={deleteLesson}
       />
     </div>
   );

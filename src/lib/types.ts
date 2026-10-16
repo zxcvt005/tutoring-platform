@@ -26,25 +26,23 @@ export type HomeworkAssignmentStatus =
   | "overdue";
 
 export type WorkInterval = {
-  start: string; // "09:00"
-  end: string; // "21:00"
+  start: string;
+  end: string;
 };
 
 export type Teacher = {
   id: string;
   fullName: string;
-  /** Инициалы / цвет — без реальных фото */
   avatarInitials?: string;
   subjects: string[];
   specializations?: string[];
   phone?: string;
   email?: string;
-  startedAt?: string; // ISO date
+  startedAt?: string;
   status: TeacherStatus;
   lessonPrice?: number;
   teacherPay?: number;
   defaultDurationMin?: number;
-  /** 1=пн … 7=вс */
   workDays?: number[];
   workIntervals?: WorkInterval[];
   adminNotes?: string;
@@ -55,7 +53,6 @@ export type Student = {
   fullName: string;
   contacts?: string;
   status: PersonStatus;
-  /** Пустая строка — без назначенного преподавателя */
   teacherId: string;
   notes?: string;
 };
@@ -63,8 +60,8 @@ export type Student = {
 export type Lesson = {
   id: string;
   teacherId: string;
-  /** Индивидуальное занятие */
-  studentId: string;
+  /** Участники совместного занятия (без дублей) */
+  studentIds: string[];
   subject?: string;
   startsAt: string;
   endsAt: string;
@@ -79,17 +76,29 @@ export type Attendance = {
   status: AttendanceStatus;
 };
 
+/** Раздел учебной программы преподавателя */
+export type TopicSection = {
+  id: string;
+  teacherId: string;
+  title: string;
+  /** Порядок среди разделов этого преподавателя */
+  sortOrder: number;
+};
+
 export type Topic = {
   id: string;
   teacherId: string;
+  /** null / отсутствует — «Без раздела» */
+  sectionId: string | null;
   title: string;
   subject: string;
   description?: string;
   programNote?: string;
   status: TopicStatus;
+  /** Порядок внутри раздела (или среди тем без раздела) */
+  sortOrder: number;
 };
 
-/** Шаблон ДЗ, привязанный к теме */
 export type Homework = {
   id: string;
   topicId: string;
@@ -101,7 +110,6 @@ export type Homework = {
   status: HomeworkTemplateStatus;
 };
 
-/** Назначение ДЗ конкретному ученику */
 export type HomeworkAssignment = {
   id: string;
   homeworkId: string;
@@ -118,21 +126,23 @@ export type HomeworkAssignment = {
 };
 
 export type DemoData = {
-  version: 2;
+  version: 3;
   teachers: Teacher[];
   students: Student[];
   lessons: Lesson[];
   attendances: Attendance[];
+  topicSections: TopicSection[];
   topics: Topic[];
   homeworks: Homework[];
   homeworkAssignments: HomeworkAssignment[];
-  /** Demo-преподаватель для Кафедры */
   currentTeacherId: string;
-  /** Выбранный преподаватель в Дирекции (расписание / результаты) */
   direkciyaTeacherId: string;
 };
 
-export const STORAGE_KEY = "naemnye.demo.v2";
-export const LEGACY_STORAGE_KEYS = ["naemnye.demo.v1"];
+export const STORAGE_KEY = "naemnye.demo.v3";
+export const LEGACY_STORAGE_KEYS = ["naemnye.demo.v1", "naemnye.demo.v2"];
 
 export const DURATION_OPTIONS = [30, 45, 60, 90, 120] as const;
+
+/** Служебный id «виртуального» раздела без раздела — только для UI */
+export const UNSECTIONED_ID = "__unsectioned__";

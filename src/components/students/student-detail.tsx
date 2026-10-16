@@ -39,7 +39,7 @@ export function StudentDetail({
   const lessons = useMemo(
     () =>
       data.lessons
-        .filter((l) => l.studentId === studentId)
+        .filter((l) => l.studentIds.includes(studentId))
         .sort(
           (a, b) =>
             new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime()

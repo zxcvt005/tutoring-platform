@@ -20,8 +20,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { attendanceStatusLabel } from "@/lib/format";
+import { lessonParticipantsLabel, uniqueStudentIds } from "@/lib/schedule";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { AttendanceStatus, Lesson } from "@/lib/types";
+
+const ATTENDANCE_OPTIONS: AttendanceStatus[] = [
+  "present",
+  "absent",
+  "cancelled",
+  "rescheduled",
+];
 
 export function CompleteLessonDialog({
   lesson,
@@ -57,17 +66,25 @@ function CompleteForm({
   lesson: Lesson;
   onClose: () => void;
 }) {
-  const { data, topicsForTeacher, completeLesson, upsertTopic } = useDemoStore();
+  const { data, topicsForTeacher, completeLesson, upsertTopic, sectionsForTeacher } =
+    useDemoStore();
   const topics = topicsForTeacher(lesson.teacherId).filter(
     (t) => t.status === "active"
   );
-  const [attendance, setAttendance] = useState<AttendanceStatus>("present");
+  const participantIds = uniqueStudentIds(lesson.studentIds);
+  const [attendanceByStudent, setAttendanceByStudent] = useState<
+    Record<string, AttendanceStatus>
+  >(() =>
+    Object.fromEntries(participantIds.map((id) => [id, "present" as const]))
+  );
   const [topicId, setTopicId] = useState(topics[0]?.id ?? "");
   const [creatingTopic, setCreatingTopic] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
 
-  const student = data.students.find((s) => s.id === lesson.studentId);
+  const nameOf = (id: string) =>
+    data.students.find((s) => s.id === id)?.fullName ?? "Ученик";
+  const sections = sectionsForTeacher(lesson.teacherId);
 
   function save() {
     let tid = topicId;
@@ -75,6 +92,7 @@ function CompleteForm({
       if (!newTitle.trim()) return;
       tid = upsertTopic({
         teacherId: lesson.teacherId,
+        sectionId: null,
         title: newTitle.trim(),
         subject: lesson.subject || "Предмет",
         description: newDesc.trim() || undefined,
@@ -84,8 +102,11 @@ function CompleteForm({
     if (!tid) return;
     const result = completeLesson({
       lessonId: lesson.id,
-      attendance,
       topicId: tid,
+      attendances: participantIds.map((studentId) => ({
+        studentId,
+        status: attendanceByStudent[studentId] ?? "present",
+      })),
     });
     if (result.ok) onClose();
   }
@@ -93,25 +114,47 @@ function CompleteForm({
   return (
     <>
       <p className="text-sm text-muted-foreground">
-        {student?.fullName} · нужно указать посещаемость и пройденную тему.
+        {lessonParticipantsLabel(lesson, nameOf)} · тема одна на занятие,
+        посещаемость — по каждому ученику.
       </p>
       <div className="grid gap-3">
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label>Посещаемость</Label>
-          <Select
-            value={attendance}
-            onValueChange={(v) => v && setAttendance(v as AttendanceStatus)}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="present">Присутствовал</SelectItem>
-              <SelectItem value="absent">Отсутствовал</SelectItem>
-              <SelectItem value="cancelled">Отменено</SelectItem>
-              <SelectItem value="rescheduled">Перенесено</SelectItem>
-            </SelectContent>
-          </Select>
+          <ul className="space-y-2 rounded-xl border border-border/80 p-2">
+            {participantIds.map((sid) => (
+              <li
+                key={sid}
+                className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <span className="text-sm font-medium">{nameOf(sid)}</span>
+                <Select
+                  value={attendanceByStudent[sid] ?? "present"}
+                  onValueChange={(v) =>
+                    v &&
+                    setAttendanceByStudent((prev) => ({
+                      ...prev,
+                      [sid]: v as AttendanceStatus,
+                    }))
+                  }
+                >
+                  <SelectTrigger className="w-full sm:w-44">
+                    <SelectValue>
+                      {(v) =>
+                        attendanceStatusLabel[v as AttendanceStatus] ?? "Статус"
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ATTENDANCE_OPTIONS.map((opt) => (
+                      <SelectItem key={opt} value={opt}>
+                        {attendanceStatusLabel[opt]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </li>
+            ))}
+          </ul>
         </div>
 
         {!creatingTopic ? (
@@ -127,11 +170,14 @@ function CompleteForm({
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {topics.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>
-                    {t.title}
-                  </SelectItem>
-                ))}
+                {topics.map((t) => {
+                  const sec = sections.find((s) => s.id === t.sectionId);
+                  return (
+                    <SelectItem key={t.id} value={t.id}>
+                      {sec ? `${sec.title}: ${t.title}` : t.title}
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
             <button
@@ -155,6 +201,9 @@ function CompleteForm({
               onChange={(e) => setNewDesc(e.target.value)}
               placeholder="Описание (необязательно)"
             />
+            <p className="text-xs text-muted-foreground">
+              Тема появится в блоке «Без раздела» — потом можно перенести.
+            </p>
             <button
               type="button"
               className="text-sm text-muted-foreground underline-offset-2 hover:underline"
@@ -169,7 +218,7 @@ function CompleteForm({
         <Button type="button" variant="outline" onClick={onClose}>
           Отмена
         </Button>
-        <Button type="button" onClick={save}>
+        <Button type="button" onClick={save} disabled={participantIds.length === 0}>
           Сохранить
         </Button>
       </DialogFooter>

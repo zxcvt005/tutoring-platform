@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -19,11 +20,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { lessonStatusLabel } from "@/lib/format";
 import {
   combineDateAndTime,
   durationMinutes,
   fromLocalInput,
   toLocalInputValue,
+  uniqueStudentIds,
 } from "@/lib/schedule";
 import {
   DURATION_OPTIONS,
@@ -55,7 +58,7 @@ function formKey(initial?: Initial) {
 function buildDefaults(initial: Initial | undefined, students: Student[]) {
   if (initial?.id && initial.startsAt && initial.endsAt) {
     return {
-      studentId: initial.studentId ?? "",
+      studentIds: uniqueStudentIds(initial.studentIds ?? []),
       subject: initial.subject ?? "",
       startsLocal: toLocalInputValue(initial.startsAt),
       duration: durationMinutes(initial.startsAt, initial.endsAt),
@@ -66,8 +69,9 @@ function buildDefaults(initial: Initial | undefined, students: Student[]) {
   const hour = initial?.hour ?? 10;
   const minute = initial?.minute ?? 0;
   const start = combineDateAndTime(day, hour, minute);
+  const preset = uniqueStudentIds(initial?.studentIds ?? []);
   return {
-    studentId: initial?.studentId ?? students[0]?.id ?? "",
+    studentIds: preset.length ? preset : students[0] ? [students[0].id] : [],
     subject: initial?.subject ?? "",
     startsLocal: toLocalInputValue(start.toISOString()),
     duration: 60,
@@ -124,14 +128,22 @@ function LessonForm({
   onClose: () => void;
 }) {
   const defaults = buildDefaults(initial, students);
-  const [studentId, setStudentId] = useState(defaults.studentId);
+  const [studentIds, setStudentIds] = useState<string[]>(defaults.studentIds);
   const [subject, setSubject] = useState(defaults.subject);
   const [startsLocal, setStartsLocal] = useState(defaults.startsLocal);
   const [duration, setDuration] = useState(defaults.duration);
   const [status, setStatus] = useState<LessonStatus>(defaults.status);
 
+  function toggleStudent(id: string, checked: boolean) {
+    setStudentIds((prev) => {
+      if (checked) return uniqueStudentIds([...prev, id]);
+      return prev.filter((x) => x !== id);
+    });
+  }
+
   function save() {
-    if (!studentId || !startsLocal) return;
+    const ids = uniqueStudentIds(studentIds);
+    if (!ids.length || !startsLocal) return;
     const startsAt = fromLocalInput(startsLocal);
     const endsAt = new Date(
       new Date(startsAt).getTime() + duration * 60_000
@@ -139,7 +151,7 @@ function LessonForm({
     const result = onSave({
       id: initial?.id,
       teacherId,
-      studentId,
+      studentIds: ids,
       subject: subject.trim() || undefined,
       startsAt,
       endsAt,
@@ -153,21 +165,37 @@ function LessonForm({
     <>
       <div className="grid gap-3 py-1">
         <div className="space-y-1.5">
-          <Label>Ученик</Label>
-          <Select value={studentId || null} onValueChange={(v) => v && setStudentId(v)}>
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Выберите ученика">
-                {(v) => students.find((s) => s.id === v)?.fullName ?? "Выберите"}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {students.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.fullName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Label>Ученики</Label>
+          {students.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Нет активных учеников у этого преподавателя.
+            </p>
+          ) : (
+            <ul className="max-h-40 space-y-2 overflow-y-auto rounded-xl border border-border/80 p-2">
+              {students.map((s) => {
+                const checked = studentIds.includes(s.id);
+                return (
+                  <li key={s.id} className="flex items-center gap-2 px-1 py-0.5">
+                    <Checkbox
+                      checked={checked}
+                      onCheckedChange={(v) => toggleStudent(s.id, v === true)}
+                      id={`lesson-student-${s.id}`}
+                    />
+                    <label
+                      htmlFor={`lesson-student-${s.id}`}
+                      className="cursor-pointer text-sm leading-snug"
+                    >
+                      {s.fullName}
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Несколько учеников — одно совместное занятие. Параллельные занятия
+            создаются отдельно.
+          </p>
         </div>
         <div className="space-y-1.5">
           <Label>Предмет</Label>
@@ -207,25 +235,23 @@ function LessonForm({
           >
             <SelectTrigger className="w-full">
               <SelectValue>
-                {(v) =>
-                  v === "done"
-                    ? "Проведено"
-                    : v === "cancelled"
-                      ? "Отменено"
-                      : "Запланировано"
-                }
+                {(v) => lessonStatusLabel[v as LessonStatus] ?? "Статус"}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="planned">Запланировано</SelectItem>
-              <SelectItem value="done">Проведено</SelectItem>
-              <SelectItem value="cancelled">Отменено</SelectItem>
+              <SelectItem value="planned">
+                {lessonStatusLabel.planned}
+              </SelectItem>
+              <SelectItem value="done">{lessonStatusLabel.done}</SelectItem>
+              <SelectItem value="cancelled">
+                {lessonStatusLabel.cancelled}
+              </SelectItem>
             </SelectContent>
           </Select>
           {status === "done" ? (
             <p className="text-xs text-muted-foreground">
-              Для фиксации темы и посещаемости используйте «Завершить занятие» в
-              Кафедре.
+              Для фиксации темы и посещаемости по ученикам используйте
+              «Завершить занятие» в Кафедре.
             </p>
           ) : null}
         </div>
@@ -249,7 +275,11 @@ function LessonForm({
           <Button type="button" variant="outline" onClick={onClose}>
             Отмена
           </Button>
-          <Button type="button" onClick={save}>
+          <Button
+            type="button"
+            onClick={save}
+            disabled={studentIds.length === 0}
+          >
             Сохранить
           </Button>
         </div>

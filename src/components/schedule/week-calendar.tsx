@@ -10,6 +10,8 @@ import {
   DAY_START_HOUR,
   PX_PER_MINUTE,
   addDays,
+  layoutLessonColumns,
+  lessonParticipantsLabel,
   minutesSinceMidnight,
   sameDay,
   startOfWeek,
@@ -51,7 +53,7 @@ export function WeekCalendar({
   const totalMin = dayEndMin - dayStartMin;
   const gridHeight = totalMin * PX_PER_MINUTE;
 
-  const studentName = (id: string) =>
+  const nameOf = (id: string) =>
     students.find((s) => s.id === id)?.fullName ?? "Ученик";
 
   const today = new Date();
@@ -101,7 +103,6 @@ export function WeekCalendar({
         </p>
       </div>
 
-      {/* Mobile: day list */}
       <div className="space-y-3 md:hidden">
         {days.map((day) => {
           const dayLessons = lessons
@@ -146,9 +147,12 @@ export function WeekCalendar({
                           </span>
                           <LessonStatusBadge status={l.status} />
                         </div>
-                        <span className="text-sm">{studentName(l.studentId)}</span>
+                        <span className="text-sm">
+                          {lessonParticipantsLabel(l, nameOf)}
+                        </span>
                         <span className="text-xs text-muted-foreground">
                           {l.subject || "Занятие"}
+                          {l.studentIds.length > 1 ? " · совместное" : ""}
                         </span>
                       </button>
                     </li>
@@ -160,7 +164,6 @@ export function WeekCalendar({
         })}
       </div>
 
-      {/* Desktop week grid */}
       <div className="panel hidden overflow-x-auto md:block">
         <div
           className="grid min-w-[720px]"
@@ -203,7 +206,7 @@ export function WeekCalendar({
               key={day.toISOString()}
               day={day}
               lessons={lessons.filter((l) => sameDay(new Date(l.startsAt), day))}
-              studentName={studentName}
+              nameOf={nameOf}
               gridHeight={gridHeight}
               dayStartMin={dayStartMin}
               onSlotClick={onSlotClick}
@@ -219,7 +222,7 @@ export function WeekCalendar({
 function DayColumn({
   day,
   lessons,
-  studentName,
+  nameOf,
   gridHeight,
   dayStartMin,
   onSlotClick,
@@ -227,13 +230,14 @@ function DayColumn({
 }: {
   day: Date;
   lessons: Lesson[];
-  studentName: (id: string) => string;
+  nameOf: (id: string) => string;
   gridHeight: number;
   dayStartMin: number;
   onSlotClick: (day: Date, hour: number, minute: number) => void;
   onLessonClick: (lesson: Lesson) => void;
 }) {
   const [hoverY, setHoverY] = useState<number | null>(null);
+  const laidOut = useMemo(() => layoutLessonColumns(lessons), [lessons]);
 
   return (
     <div
@@ -259,31 +263,43 @@ function DayColumn({
       {hoverY != null ? (
         <div
           className="pointer-events-none absolute inset-x-1 z-0 h-7 rounded-md bg-muted/50"
-          style={{ top: Math.floor(hoverY / (30 * PX_PER_MINUTE)) * 30 * PX_PER_MINUTE }}
+          style={{
+            top:
+              Math.floor(hoverY / (30 * PX_PER_MINUTE)) * 30 * PX_PER_MINUTE,
+          }}
         />
       ) : null}
-      {lessons.map((l) => {
+      {laidOut.map(({ lesson: l, column, columns }) => {
         const start = minutesSinceMidnight(new Date(l.startsAt));
         const end = minutesSinceMidnight(new Date(l.endsAt));
-        const top = (Math.max(start, dayStartMin) - dayStartMin) * PX_PER_MINUTE;
+        const top =
+          (Math.max(start, dayStartMin) - dayStartMin) * PX_PER_MINUTE;
         const height = Math.max(
           (Math.min(end, DAY_END_HOUR * 60) - Math.max(start, dayStartMin)) *
             PX_PER_MINUTE,
           22
         );
+        const gapPct = 1.5;
+        const widthPct = (100 - gapPct * (columns + 1)) / columns;
+        const leftPct = gapPct + column * (widthPct + gapPct);
         return (
           <button
             key={l.id}
             type="button"
             className={cn(
-              "absolute inset-x-1 z-10 overflow-hidden rounded-lg border px-1.5 py-1 text-left text-[0.7rem] leading-tight shadow-none transition-opacity hover:opacity-95",
+              "absolute z-10 overflow-hidden rounded-lg border px-1.5 py-1 text-left text-[0.7rem] leading-tight shadow-none transition-opacity hover:opacity-95",
               l.status === "cancelled"
                 ? "border-destructive/30 bg-destructive/10 text-destructive line-through"
                 : l.status === "done"
                   ? "border-success/25 surface-mint text-foreground"
                   : "border-border/80 surface-sky text-foreground"
             )}
-            style={{ top, height }}
+            style={{
+              top,
+              height,
+              left: `${leftPct}%`,
+              width: `${widthPct}%`,
+            }}
             onClick={(e) => {
               e.stopPropagation();
               onLessonClick(l);
@@ -292,7 +308,7 @@ function DayColumn({
             <div className="font-semibold tabular-nums">
               {formatTime(l.startsAt)}
             </div>
-            <div className="truncate">{studentName(l.studentId)}</div>
+            <div className="truncate">{lessonParticipantsLabel(l, nameOf)}</div>
             <div className="truncate text-muted-foreground">
               {l.subject || "Занятие"}
             </div>

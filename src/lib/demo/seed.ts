@@ -164,50 +164,93 @@ export function createSeedData(): DemoData {
     },
   ];
 
+  const topicSections = [
+    {
+      id: "sec1",
+      teacherId: "t1",
+      title: "Начала анализа",
+      sortOrder: 0,
+    },
+    {
+      id: "sec2",
+      teacherId: "t1",
+      title: "Тригонометрия",
+      sortOrder: 1,
+    },
+    {
+      id: "sec3",
+      teacherId: "t2",
+      title: "Электричество",
+      sortOrder: 0,
+    },
+  ];
+
   const topics = [
     {
       id: "tp1",
       teacherId: "t1",
+      sectionId: "sec1",
       title: "Производная: определение и таблица",
       subject: "Математика",
       description: "Базовые правила дифференцирования.",
       programNote: "ЕГЭ · блок «Начала анализа»",
       status: "active" as const,
+      sortOrder: 0,
     },
     {
       id: "tp2",
       teacherId: "t1",
+      sectionId: "sec2",
       title: "Тригонометрия: формулы приведения",
       subject: "Математика",
       status: "active" as const,
+      sortOrder: 0,
     },
     {
       id: "tp3",
       teacherId: "t1",
+      sectionId: "sec2",
       title: "Повторение ЕГЭ: тригонометрия",
       subject: "Математика",
       status: "active" as const,
+      sortOrder: 1,
+    },
+    {
+      id: "tp7",
+      teacherId: "t1",
+      sectionId: null,
+      title: "Разбор типовых ошибок",
+      subject: "Математика",
+      description: "Свободная тема вне разделов программы.",
+      status: "active" as const,
+      sortOrder: 0,
     },
     {
       id: "tp4",
       teacherId: "t2",
+      sectionId: "sec3",
       title: "Электричество: ток и напряжение",
       subject: "Физика",
       status: "active" as const,
+      sortOrder: 0,
     },
     {
       id: "tp5",
       teacherId: "t3",
+      sectionId: null,
       title: "Speaking: past experiences",
       subject: "Английский",
       status: "active" as const,
+      sortOrder: 0,
     },
     {
       id: "tp6",
       teacherId: "t4",
+      sectionId: null,
       title: "Алгоритмы: сортировки",
       subject: "Информатика",
       status: "archived" as const,
+      sortOrder: 0,
     },
   ];
 
@@ -258,9 +301,12 @@ export function createSeedData(): DemoData {
     },
   ];
 
+  // Сегодня у Анны: параллельные независимые (16:00) + совместное (18:00) + короткое (19:15)
   const l1s = atDay(-2, 18, 0);
-  const l2s = atDay(0, 18, 0);
-  const l3s = atDay(0, 16, 0);
+  const l2s = atDay(0, 18, 0); // joint s1+s2
+  const l3s = atDay(0, 16, 0); // parallel A: s2
+  const l3bs = atDay(0, 16, 0); // parallel B: s3 (same slot, different student)
+  const l3cs = atDay(0, 19, 15); // short 30min
   const l4s = atDay(1, 17, 0);
   const l5s = atDay(2, 11, 0);
   const l6s = atDay(3, 18, 0);
@@ -273,7 +319,7 @@ export function createSeedData(): DemoData {
     {
       id: "l1",
       teacherId: "t1",
-      studentId: "s1",
+      studentIds: ["s1"],
       subject: "Математика",
       startsAt: l1s,
       endsAt: endAt(l1s, 60),
@@ -283,7 +329,7 @@ export function createSeedData(): DemoData {
     {
       id: "l2",
       teacherId: "t1",
-      studentId: "s1",
+      studentIds: ["s1", "s2"],
       subject: "Математика",
       startsAt: l2s,
       endsAt: endAt(l2s, 60),
@@ -292,16 +338,34 @@ export function createSeedData(): DemoData {
     {
       id: "l3",
       teacherId: "t1",
-      studentId: "s2",
+      studentIds: ["s2"],
       subject: "Математика",
       startsAt: l3s,
       endsAt: endAt(l3s, 45),
       status: "planned" as const,
     },
     {
+      id: "l3b",
+      teacherId: "t1",
+      studentIds: ["s3"],
+      subject: "Математика",
+      startsAt: l3bs,
+      endsAt: endAt(l3bs, 60),
+      status: "planned" as const,
+    },
+    {
+      id: "l3c",
+      teacherId: "t1",
+      studentIds: ["s1"],
+      subject: "Математика",
+      startsAt: l3cs,
+      endsAt: endAt(l3cs, 30),
+      status: "planned" as const,
+    },
+    {
       id: "l4",
       teacherId: "t2",
-      studentId: "s5",
+      studentIds: ["s5"],
       subject: "Физика",
       startsAt: l4s,
       endsAt: endAt(l4s, 60),
@@ -310,7 +374,7 @@ export function createSeedData(): DemoData {
     {
       id: "l5",
       teacherId: "t3",
-      studentId: "s7",
+      studentIds: ["s7"],
       subject: "Английский",
       startsAt: l5s,
       endsAt: endAt(l5s, 45),
@@ -319,7 +383,7 @@ export function createSeedData(): DemoData {
     {
       id: "l6",
       teacherId: "t1",
-      studentId: "s3",
+      studentIds: ["s3"],
       subject: "Математика",
       startsAt: l6s,
       endsAt: endAt(l6s, 90),
@@ -328,7 +392,7 @@ export function createSeedData(): DemoData {
     {
       id: "l7",
       teacherId: "t4",
-      studentId: "s10",
+      studentIds: ["s10"],
       subject: "Информатика",
       startsAt: l7s,
       endsAt: endAt(l7s, 90),
@@ -337,7 +401,7 @@ export function createSeedData(): DemoData {
     {
       id: "l8",
       teacherId: "t2",
-      studentId: "s6",
+      studentIds: ["s6"],
       subject: "Физика",
       startsAt: l8s,
       endsAt: endAt(l8s, 60),
@@ -347,7 +411,7 @@ export function createSeedData(): DemoData {
     {
       id: "l9",
       teacherId: "t3",
-      studentId: "s8",
+      studentIds: ["s8", "s9"],
       subject: "Английский",
       startsAt: l9s,
       endsAt: endAt(l9s, 45),
@@ -356,7 +420,7 @@ export function createSeedData(): DemoData {
     {
       id: "l10",
       teacherId: "t1",
-      studentId: "s2",
+      studentIds: ["s2"],
       subject: "Математика",
       startsAt: l10s,
       endsAt: endAt(l10s, 60),
@@ -438,11 +502,12 @@ export function createSeedData(): DemoData {
   ];
 
   return {
-    version: 2,
+    version: 3,
     teachers,
     students,
     lessons,
     attendances,
+    topicSections,
     topics,
     homeworks,
     homeworkAssignments,

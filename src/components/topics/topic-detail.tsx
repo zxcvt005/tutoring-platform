@@ -307,7 +307,13 @@ export function TopicDetail({ topicId }: { topicId: string }) {
                 <TableRow key={l.id}>
                   <TableCell>{formatDateTime(l.startsAt)}</TableCell>
                   <TableCell>
-                    {data.students.find((s) => s.id === l.studentId)?.fullName}
+                    {l.studentIds
+                      .map(
+                        (sid) =>
+                          data.students.find((s) => s.id === sid)?.fullName ??
+                          "Ученик"
+                      )
+                      .join(", ")}
                   </TableCell>
                   <TableCell>
                     <LessonStatusBadge status={l.status} />
