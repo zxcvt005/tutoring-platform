@@ -1,17 +1,19 @@
 import { Badge } from "@/components/ui/badge";
 import {
-  assignmentStatusLabel,
   attendanceStatusLabel,
+  homeworkAssignmentStatusLabel,
   lessonStatusLabel,
   personStatusLabel,
-  resultStatusLabel,
+  teacherStatusLabel,
+  topicStatusLabel,
 } from "@/lib/format";
 import type {
-  AssignmentStatus,
   AttendanceStatus,
+  HomeworkAssignmentStatus,
   LessonStatus,
   PersonStatus,
-  ResultStatus,
+  TeacherStatus,
+  TopicStatus,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -57,6 +59,12 @@ export function PersonStatusBadge({ status }: { status: PersonStatus }) {
   );
 }
 
+export function TeacherStatusBadge({ status }: { status: TeacherStatus }) {
+  const tone: Tone =
+    status === "active" ? "success" : status === "inactive" ? "warn" : "muted";
+  return <StatusPill label={teacherStatusLabel[status]} tone={tone} />;
+}
+
 export function LessonStatusBadge({ status }: { status: LessonStatus }) {
   const tone: Tone =
     status === "done"
@@ -77,34 +85,35 @@ export function AttendanceStatusBadge({
       ? "success"
       : status === "absent"
         ? "danger"
-        : status === "late"
+        : status === "rescheduled"
           ? "warn"
           : "muted";
   return <StatusPill label={attendanceStatusLabel[status]} tone={tone} />;
 }
 
-export function AssignmentStatusBadge({
-  status,
-}: {
-  status: AssignmentStatus;
-}) {
-  const tone: Tone =
-    status === "published"
-      ? "success"
-      : status === "closed"
-        ? "muted"
-        : "neutral";
-  return <StatusPill label={assignmentStatusLabel[status]} tone={tone} />;
+export function TopicStatusBadge({ status }: { status: TopicStatus }) {
+  return (
+    <StatusPill
+      label={topicStatusLabel[status]}
+      tone={status === "active" ? "success" : "muted"}
+    />
+  );
 }
 
-export function ResultStatusBadge({ status }: { status: ResultStatus }) {
+export function HomeworkAssignmentStatusBadge({
+  status,
+}: {
+  status: HomeworkAssignmentStatus;
+}) {
   const tone: Tone =
-    status === "graded"
+    status === "reviewed"
       ? "success"
       : status === "overdue"
         ? "danger"
-        : status === "submitted"
+        : status === "completed"
           ? "warn"
           : "neutral";
-  return <StatusPill label={resultStatusLabel[status]} tone={tone} />;
+  return (
+    <StatusPill label={homeworkAssignmentStatusLabel[status]} tone={tone} />
+  );
 }

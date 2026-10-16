@@ -1,5 +1,5 @@
-import { SchedulePanel } from "@/components/schedule/schedule-panel";
+import { ScheduleWorkspace } from "@/components/schedule/schedule-workspace";
 
-export default function DirekciyaSchedulePage() {
-  return <SchedulePanel mode="direkciya" />;
+export default function Page() {
+  return <ScheduleWorkspace mode="direkciya" />;
 }

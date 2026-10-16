@@ -14,452 +14,458 @@ import { toast } from "sonner";
 import { clearDemoStorage, loadDemoData, saveDemoData } from "@/lib/demo/storage";
 import { createSeedData } from "@/lib/demo/seed";
 import { newId } from "@/lib/format";
+import { findLessonConflict } from "@/lib/schedule";
 import type {
-  Assignment,
   Attendance,
   AttendanceStatus,
   DemoData,
-  Group,
+  Homework,
+  HomeworkAssignment,
+  HomeworkAssignmentStatus,
   Lesson,
-  Result,
   Student,
   Teacher,
+  Topic,
 } from "@/lib/types";
 
 type DemoStoreValue = {
   data: DemoData;
   ready: boolean;
   setCurrentTeacherId: (id: string) => void;
+  setDirekciyaTeacherId: (id: string) => void;
   resetDemo: () => void;
-  // Teachers
   upsertTeacher: (teacher: Omit<Teacher, "id"> & { id?: string }) => void;
   deleteTeacher: (id: string) => void;
-  // Students
   upsertStudent: (student: Omit<Student, "id"> & { id?: string }) => void;
   deleteStudent: (id: string) => void;
-  // Groups
-  upsertGroup: (group: Omit<Group, "id"> & { id?: string }) => void;
-  deleteGroup: (id: string) => void;
-  // Lessons
-  upsertLesson: (lesson: Omit<Lesson, "id"> & { id?: string }) => void;
+  upsertLesson: (
+    lesson: Omit<Lesson, "id"> & { id?: string }
+  ) => { ok: boolean; error?: string };
   deleteLesson: (id: string) => void;
-  // Attendance
+  completeLesson: (input: {
+    lessonId: string;
+    attendance: AttendanceStatus;
+    topicId: string;
+  }) => { ok: boolean; error?: string };
   setAttendance: (
     lessonId: string,
     studentId: string,
     status: AttendanceStatus
   ) => void;
-  // Assignments + results
-  upsertAssignment: (
-    assignment: Omit<Assignment, "id"> & { id?: string }
+  upsertTopic: (topic: Omit<Topic, "id"> & { id?: string }) => string;
+  deleteTopic: (id: string) => void;
+  upsertHomework: (hw: Omit<Homework, "id"> & { id?: string }) => string;
+  deleteHomework: (id: string) => void;
+  upsertHomeworkAssignment: (
+    a: Omit<HomeworkAssignment, "id"> & { id?: string }
   ) => void;
-  deleteAssignment: (id: string) => void;
-  upsertResult: (result: Omit<Result, "id"> & { id?: string }) => void;
-  // Filters
+  deleteHomeworkAssignment: (id: string) => void;
   studentsForTeacher: (teacherId: string) => Student[];
-  groupsForTeacher: (teacherId: string) => Group[];
+  unassignedStudents: () => Student[];
   lessonsForTeacher: (teacherId: string) => Lesson[];
-  assignmentsForTeacher: (teacherId: string) => Assignment[];
-  resultsForTeacher: (teacherId: string) => Result[];
-  lessonStudents: (lesson: Lesson) => Student[];
+  topicsForTeacher: (teacherId: string) => Topic[];
+  homeworksForTopic: (topicId: string) => Homework[];
+  assignmentsForTeacher: (teacherId: string) => HomeworkAssignment[];
+  assignmentsForStudent: (studentId: string) => HomeworkAssignment[];
+  attendanceForLesson: (lessonId: string) => Attendance | undefined;
 };
 
 const DemoStoreContext = createContext<DemoStoreValue | null>(null);
 
-function syncGroupMembership(
-  students: Student[],
-  groups: Group[],
-  studentId: string,
-  groupIds: string[]
-): { students: Student[]; groups: Group[] } {
-  const nextStudents = students.map((s) =>
-    s.id === studentId ? { ...s, groupIds: [...groupIds] } : s
-  );
-  const nextGroups = groups.map((g) => {
-    const shouldInclude = groupIds.includes(g.id);
-    const has = g.studentIds.includes(studentId);
-    if (shouldInclude && !has) {
-      return { ...g, studentIds: [...g.studentIds, studentId] };
-    }
-    if (!shouldInclude && has) {
-      return {
-        ...g,
-        studentIds: g.studentIds.filter((id) => id !== studentId),
-      };
-    }
-    return g;
-  });
-  return { students: nextStudents, groups: nextGroups };
-}
-
-function syncStudentsFromGroup(
-  students: Student[],
-  groupId: string,
-  studentIds: string[]
-): Student[] {
-  return students.map((s) => {
-    const shouldInclude = studentIds.includes(s.id);
-    const has = s.groupIds.includes(groupId);
-    if (shouldInclude && !has) {
-      return { ...s, groupIds: [...s.groupIds, groupId] };
-    }
-    if (!shouldInclude && has) {
-      return { ...s, groupIds: s.groupIds.filter((id) => id !== groupId) };
-    }
-    return s;
-  });
-}
-
-function ensureResultsForAssignment(
-  results: Result[],
-  assignment: Assignment
-): Result[] {
-  const existing = new Set(
-    results
-      .filter((r) => r.assignmentId === assignment.id)
-      .map((r) => r.studentId)
-  );
-  const added: Result[] = [];
-  for (const studentId of assignment.studentIds) {
-    if (!existing.has(studentId)) {
-      added.push({
-        id: newId("r"),
-        assignmentId: assignment.id,
-        studentId,
-        maxScore: assignment.maxScore,
-        status: "pending",
-      });
-    }
-  }
-  const kept = results.filter(
-    (r) =>
-      r.assignmentId !== assignment.id ||
-      assignment.studentIds.includes(r.studentId)
-  );
-  return [...kept, ...added];
-}
-
 const EMPTY_DATA: DemoData = {
+  version: 2,
   teachers: [],
   students: [],
-  groups: [],
   lessons: [],
   attendances: [],
-  assignments: [],
-  results: [],
+  topics: [],
+  homeworks: [],
+  homeworkAssignments: [],
   currentTeacherId: "",
+  direkciyaTeacherId: "",
 };
 
+function refreshOverdue(
+  list: HomeworkAssignment[]
+): HomeworkAssignment[] {
+  const now = Date.now();
+  return list.map((a) => {
+    if (a.status === "assigned" && new Date(a.dueAt).getTime() < now) {
+      return { ...a, status: "overdue" as const };
+    }
+    return a;
+  });
+}
+
 export function DemoStoreProvider({ children }: { children: ReactNode }) {
-  // Пустой старт на SSR/prerender — seed с Date() только на клиенте.
   const [data, setData] = useState<DemoData>(EMPTY_DATA);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    // Гидратация из localStorage / seed после монтирования (клиент).
-    try {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- намеренная клиентская гидратация
-      setData(loadDemoData());
-    } catch (e) {
-      console.error(e);
-      setData(createSeedData());
-    } finally {
-      setReady(true);
-    }
+    // Клиентская гидратация из localStorage — намеренный setState после mount.
+    const loaded = loadDemoData();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage bootstrap
+    setData({
+      ...loaded,
+      homeworkAssignments: refreshOverdue(loaded.homeworkAssignments),
+    });
+    setReady(true);
   }, []);
 
-  const commit = useCallback((updater: (prev: DemoData) => DemoData) => {
-    setData((prev) => {
-      const next = updater(prev);
-      const result = saveDemoData(next);
-      if (!result.ok) {
-        toast.error("Не удалось записать в localStorage", {
-          description: result.error,
-        });
-      }
-      return next;
-    });
+  const persist = useCallback((next: DemoData) => {
+    const result = saveDemoData(next);
+    if (!result.ok) {
+      toast.error(result.error || "Ошибка сохранения");
+    }
+    setData(next);
   }, []);
+
+  const patch = useCallback(
+    (fn: (prev: DemoData) => DemoData) => {
+      setData((prev) => {
+        const next = fn(prev);
+        const result = saveDemoData(next);
+        if (!result.ok) {
+          toast.error(result.error || "Ошибка сохранения");
+        }
+        return next;
+      });
+    },
+    []
+  );
 
   const setCurrentTeacherId = useCallback(
-    (id: string) => {
-      commit((prev) => ({ ...prev, currentTeacherId: id }));
-    },
-    [commit]
+    (id: string) => patch((d) => ({ ...d, currentTeacherId: id })),
+    [patch]
+  );
+
+  const setDirekciyaTeacherId = useCallback(
+    (id: string) => patch((d) => ({ ...d, direkciyaTeacherId: id })),
+    [patch]
   );
 
   const resetDemo = useCallback(() => {
     clearDemoStorage();
     const seed = createSeedData();
-    setData(seed);
-    setReady(true);
-    saveDemoData(seed);
-    toast.success("Демо-данные сброшены");
-  }, []);
+    persist(seed);
+    toast.success("Демо-данные восстановлены");
+  }, [persist]);
 
   const upsertTeacher = useCallback(
     (teacher: Omit<Teacher, "id"> & { id?: string }) => {
-      commit((prev) => {
+      patch((d) => {
         const id = teacher.id ?? newId("t");
-        const nextTeacher: Teacher = { ...teacher, id };
-        const exists = prev.teachers.some((t) => t.id === id);
+        const next: Teacher = { ...teacher, id };
+        const exists = d.teachers.some((t) => t.id === id);
         return {
-          ...prev,
+          ...d,
           teachers: exists
-            ? prev.teachers.map((t) => (t.id === id ? nextTeacher : t))
-            : [...prev.teachers, nextTeacher],
+            ? d.teachers.map((t) => (t.id === id ? next : t))
+            : [...d.teachers, next],
         };
       });
     },
-    [commit]
+    [patch]
   );
 
   const deleteTeacher = useCallback(
     (id: string) => {
-      commit((prev) => ({
-        ...prev,
-        teachers: prev.teachers.filter((t) => t.id !== id),
+      patch((d) => ({
+        ...d,
+        teachers: d.teachers.filter((t) => t.id !== id),
+        students: d.students.map((s) =>
+          s.teacherId === id ? { ...s, teacherId: "" } : s
+        ),
         currentTeacherId:
-          prev.currentTeacherId === id
-            ? (prev.teachers.find((t) => t.id !== id)?.id ?? "")
-            : prev.currentTeacherId,
+          d.currentTeacherId === id
+            ? (d.teachers.find((t) => t.id !== id)?.id ?? "")
+            : d.currentTeacherId,
+        direkciyaTeacherId:
+          d.direkciyaTeacherId === id
+            ? (d.teachers.find((t) => t.id !== id)?.id ?? "")
+            : d.direkciyaTeacherId,
       }));
     },
-    [commit]
+    [patch]
   );
 
   const upsertStudent = useCallback(
     (student: Omit<Student, "id"> & { id?: string }) => {
-      commit((prev) => {
+      patch((d) => {
         const id = student.id ?? newId("s");
-        const nextStudent: Student = { ...student, id, groupIds: student.groupIds };
-        const exists = prev.students.some((s) => s.id === id);
-        const students = exists
-          ? prev.students.map((s) => (s.id === id ? nextStudent : s))
-          : [...prev.students, nextStudent];
-        const synced = syncGroupMembership(
-          students,
-          prev.groups,
-          id,
-          nextStudent.groupIds
-        );
-        return { ...prev, students: synced.students, groups: synced.groups };
+        const next: Student = { ...student, id };
+        const exists = d.students.some((s) => s.id === id);
+        return {
+          ...d,
+          students: exists
+            ? d.students.map((s) => (s.id === id ? next : s))
+            : [...d.students, next],
+        };
       });
     },
-    [commit]
+    [patch]
   );
 
   const deleteStudent = useCallback(
     (id: string) => {
-      commit((prev) => ({
-        ...prev,
-        students: prev.students.filter((s) => s.id !== id),
-        groups: prev.groups.map((g) => ({
-          ...g,
-          studentIds: g.studentIds.filter((sid) => sid !== id),
-        })),
-        attendances: prev.attendances.filter((a) => a.studentId !== id),
-        results: prev.results.filter((r) => r.studentId !== id),
-        assignments: prev.assignments.map((a) => ({
-          ...a,
-          studentIds: a.studentIds.filter((sid) => sid !== id),
-        })),
-      }));
-    },
-    [commit]
-  );
-
-  const upsertGroup = useCallback(
-    (group: Omit<Group, "id"> & { id?: string }) => {
-      commit((prev) => {
-        const id = group.id ?? newId("g");
-        const nextGroup: Group = { ...group, id, studentIds: group.studentIds };
-        const exists = prev.groups.some((g) => g.id === id);
-        const groups = exists
-          ? prev.groups.map((g) => (g.id === id ? nextGroup : g))
-          : [...prev.groups, nextGroup];
-        const students = syncStudentsFromGroup(
-          prev.students,
-          id,
-          nextGroup.studentIds
-        );
-        return { ...prev, groups, students };
-      });
-    },
-    [commit]
-  );
-
-  const deleteGroup = useCallback(
-    (id: string) => {
-      commit((prev) => ({
-        ...prev,
-        groups: prev.groups.filter((g) => g.id !== id),
-        students: prev.students.map((s) => ({
-          ...s,
-          groupIds: s.groupIds.filter((gid) => gid !== id),
-        })),
-        lessons: prev.lessons.map((l) =>
-          l.groupId === id ? { ...l, groupId: undefined } : l
-        ),
-        assignments: prev.assignments.map((a) =>
-          a.groupId === id ? { ...a, groupId: undefined } : a
+      patch((d) => ({
+        ...d,
+        students: d.students.filter((s) => s.id !== id),
+        homeworkAssignments: d.homeworkAssignments.filter(
+          (a) => a.studentId !== id
         ),
       }));
     },
-    [commit]
+    [patch]
   );
 
   const upsertLesson = useCallback(
     (lesson: Omit<Lesson, "id"> & { id?: string }) => {
-      commit((prev) => {
-        const id = lesson.id ?? newId("l");
-        const nextLesson: Lesson = { ...lesson, id };
-        const exists = prev.lessons.some((l) => l.id === id);
+      const id = lesson.id ?? newId("l");
+      const draft: Lesson = { ...lesson, id };
+      let error: string | undefined;
+      patch((d) => {
+        const conflict = findLessonConflict(d.lessons, draft);
+        if (conflict) {
+          error = "Пересечение с другим занятием этого преподавателя";
+          return d;
+        }
+        if (new Date(draft.endsAt) <= new Date(draft.startsAt)) {
+          error = "Конец занятия должен быть позже начала";
+          return d;
+        }
+        const exists = d.lessons.some((l) => l.id === id);
         return {
-          ...prev,
+          ...d,
           lessons: exists
-            ? prev.lessons.map((l) => (l.id === id ? nextLesson : l))
-            : [...prev.lessons, nextLesson],
+            ? d.lessons.map((l) => (l.id === id ? draft : l))
+            : [...d.lessons, draft],
         };
       });
+      if (error) {
+        toast.error(error);
+        return { ok: false, error };
+      }
+      return { ok: true };
     },
-    [commit]
+    [patch]
   );
 
   const deleteLesson = useCallback(
     (id: string) => {
-      commit((prev) => ({
-        ...prev,
-        lessons: prev.lessons.filter((l) => l.id !== id),
-        attendances: prev.attendances.filter((a) => a.lessonId !== id),
+      patch((d) => ({
+        ...d,
+        lessons: d.lessons.filter((l) => l.id !== id),
+        attendances: d.attendances.filter((a) => a.lessonId !== id),
       }));
     },
-    [commit]
+    [patch]
   );
 
   const setAttendance = useCallback(
     (lessonId: string, studentId: string, status: AttendanceStatus) => {
-      commit((prev) => {
-        const idx = prev.attendances.findIndex(
+      patch((d) => {
+        const idx = d.attendances.findIndex(
           (a) => a.lessonId === lessonId && a.studentId === studentId
         );
         const row: Attendance = { lessonId, studentId, status };
-        if (idx === -1) {
-          return { ...prev, attendances: [...prev.attendances, row] };
+        if (idx >= 0) {
+          const attendances = [...d.attendances];
+          attendances[idx] = row;
+          return { ...d, attendances };
         }
-        const attendances = [...prev.attendances];
-        attendances[idx] = row;
-        return { ...prev, attendances };
+        return { ...d, attendances: [...d.attendances, row] };
       });
     },
-    [commit]
+    [patch]
   );
 
-  const upsertAssignment = useCallback(
-    (assignment: Omit<Assignment, "id"> & { id?: string }) => {
-      commit((prev) => {
-        const id = assignment.id ?? newId("a");
-        const nextAssignment: Assignment = {
-          ...assignment,
-          id,
-          studentIds: assignment.studentIds,
+  const completeLesson = useCallback(
+    (input: {
+      lessonId: string;
+      attendance: AttendanceStatus;
+      topicId: string;
+    }) => {
+      let error: string | undefined;
+      patch((d) => {
+        const lesson = d.lessons.find((l) => l.id === input.lessonId);
+        if (!lesson) {
+          error = "Занятие не найдено";
+          return d;
+        }
+        if (!input.topicId) {
+          error = "Укажите пройденную тему";
+          return d;
+        }
+        const topic = d.topics.find((t) => t.id === input.topicId);
+        if (!topic || topic.teacherId !== lesson.teacherId) {
+          error = "Тема не принадлежит этому преподавателю";
+          return d;
+        }
+        const lessons = d.lessons.map((l) =>
+          l.id === input.lessonId
+            ? {
+                ...l,
+                status: "done" as const,
+                topicId: input.topicId,
+              }
+            : l
+        );
+        const attendances = d.attendances.filter(
+          (a) =>
+            !(a.lessonId === input.lessonId && a.studentId === lesson.studentId)
+        );
+        attendances.push({
+          lessonId: input.lessonId,
+          studentId: lesson.studentId,
+          status: input.attendance,
+        });
+        return { ...d, lessons, attendances };
+      });
+      if (error) {
+        toast.error(error);
+        return { ok: false, error };
+      }
+      toast.success("Занятие отмечено как проведённое");
+      return { ok: true };
+    },
+    [patch]
+  );
+
+  const upsertTopic = useCallback(
+    (topic: Omit<Topic, "id"> & { id?: string }) => {
+      const id = topic.id ?? newId("tp");
+      patch((d) => {
+        const next: Topic = { ...topic, id };
+        const exists = d.topics.some((t) => t.id === id);
+        return {
+          ...d,
+          topics: exists
+            ? d.topics.map((t) => (t.id === id ? next : t))
+            : [...d.topics, next],
         };
-        const exists = prev.assignments.some((a) => a.id === id);
-        const assignments = exists
-          ? prev.assignments.map((a) => (a.id === id ? nextAssignment : a))
-          : [...prev.assignments, nextAssignment];
-        const results = ensureResultsForAssignment(prev.results, nextAssignment);
-        return { ...prev, assignments, results };
       });
+      return id;
     },
-    [commit]
+    [patch]
   );
 
-  const deleteAssignment = useCallback(
+  const deleteTopic = useCallback(
     (id: string) => {
-      commit((prev) => ({
-        ...prev,
-        assignments: prev.assignments.filter((a) => a.id !== id),
-        results: prev.results.filter((r) => r.assignmentId !== id),
+      patch((d) => ({
+        ...d,
+        topics: d.topics.map((t) =>
+          t.id === id ? { ...t, status: "archived" as const } : t
+        ),
       }));
     },
-    [commit]
+    [patch]
   );
 
-  const upsertResult = useCallback(
-    (result: Omit<Result, "id"> & { id?: string }) => {
-      commit((prev) => {
-        const id = result.id ?? newId("r");
-        const next: Result = { ...result, id };
-        const exists = prev.results.some((r) => r.id === id);
+  const upsertHomework = useCallback(
+    (hw: Omit<Homework, "id"> & { id?: string }) => {
+      const id = hw.id ?? newId("hw");
+      patch((d) => {
+        const next: Homework = { ...hw, id };
+        const exists = d.homeworks.some((h) => h.id === id);
         return {
-          ...prev,
-          results: exists
-            ? prev.results.map((r) => (r.id === id ? next : r))
-            : [...prev.results, next],
+          ...d,
+          homeworks: exists
+            ? d.homeworks.map((h) => (h.id === id ? next : h))
+            : [...d.homeworks, next],
+        };
+      });
+      return id;
+    },
+    [patch]
+  );
+
+  const deleteHomework = useCallback(
+    (id: string) => {
+      patch((d) => ({
+        ...d,
+        homeworks: d.homeworks.map((h) =>
+          h.id === id ? { ...h, status: "archived" as const } : h
+        ),
+      }));
+    },
+    [patch]
+  );
+
+  const upsertHomeworkAssignment = useCallback(
+    (a: Omit<HomeworkAssignment, "id"> & { id?: string }) => {
+      patch((d) => {
+        const id = a.id ?? newId("ha");
+        let status: HomeworkAssignmentStatus = a.status;
+        if (
+          status === "assigned" &&
+          new Date(a.dueAt).getTime() < Date.now()
+        ) {
+          status = "overdue";
+        }
+        const next: HomeworkAssignment = { ...a, id, status };
+        const exists = d.homeworkAssignments.some((x) => x.id === id);
+        return {
+          ...d,
+          homeworkAssignments: exists
+            ? d.homeworkAssignments.map((x) => (x.id === id ? next : x))
+            : [...d.homeworkAssignments, next],
         };
       });
     },
-    [commit]
+    [patch]
+  );
+
+  const deleteHomeworkAssignment = useCallback(
+    (id: string) => {
+      patch((d) => ({
+        ...d,
+        homeworkAssignments: d.homeworkAssignments.filter((a) => a.id !== id),
+      }));
+    },
+    [patch]
   );
 
   const studentsForTeacher = useCallback(
-    (teacherId: string) => {
-      const groupIds = new Set(
-        data.groups.filter((g) => g.teacherId === teacherId).map((g) => g.id)
-      );
-      return data.students.filter(
-        (s) =>
-          s.teacherId === teacherId ||
-          s.groupIds.some((gid) => groupIds.has(gid))
-      );
-    },
-    [data.groups, data.students]
+    (teacherId: string) => data.students.filter((s) => s.teacherId === teacherId),
+    [data.students]
   );
 
-  const groupsForTeacher = useCallback(
-    (teacherId: string) => data.groups.filter((g) => g.teacherId === teacherId),
-    [data.groups]
+  const unassignedStudents = useCallback(
+    () => data.students.filter((s) => !s.teacherId),
+    [data.students]
   );
 
   const lessonsForTeacher = useCallback(
-    (teacherId: string) =>
-      data.lessons.filter((l) => l.teacherId === teacherId),
+    (teacherId: string) => data.lessons.filter((l) => l.teacherId === teacherId),
     [data.lessons]
+  );
+
+  const topicsForTeacher = useCallback(
+    (teacherId: string) => data.topics.filter((t) => t.teacherId === teacherId),
+    [data.topics]
+  );
+
+  const homeworksForTopic = useCallback(
+    (topicId: string) => data.homeworks.filter((h) => h.topicId === topicId),
+    [data.homeworks]
   );
 
   const assignmentsForTeacher = useCallback(
     (teacherId: string) =>
-      data.assignments.filter((a) => a.teacherId === teacherId),
-    [data.assignments]
+      data.homeworkAssignments.filter((a) => a.teacherId === teacherId),
+    [data.homeworkAssignments]
   );
 
-  const resultsForTeacher = useCallback(
-    (teacherId: string) => {
-      const assignmentIds = new Set(
-        data.assignments
-          .filter((a) => a.teacherId === teacherId)
-          .map((a) => a.id)
-      );
-      return data.results.filter((r) => assignmentIds.has(r.assignmentId));
-    },
-    [data.assignments, data.results]
+  const assignmentsForStudent = useCallback(
+    (studentId: string) =>
+      data.homeworkAssignments.filter((a) => a.studentId === studentId),
+    [data.homeworkAssignments]
   );
 
-  const lessonStudents = useCallback(
-    (lesson: Lesson) => {
-      if (lesson.groupId) {
-        const group = data.groups.find((g) => g.id === lesson.groupId);
-        if (group) {
-          return data.students.filter((s) => group.studentIds.includes(s.id));
-        }
-      }
-      if (lesson.studentIds?.length) {
-        return data.students.filter((s) => lesson.studentIds!.includes(s.id));
-      }
-      return [];
-    },
-    [data.groups, data.students]
+  const attendanceForLesson = useCallback(
+    (lessonId: string) => data.attendances.find((a) => a.lessonId === lessonId),
+    [data.attendances]
   );
 
   const value = useMemo<DemoStoreValue>(
@@ -467,49 +473,59 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       data,
       ready,
       setCurrentTeacherId,
+      setDirekciyaTeacherId,
       resetDemo,
       upsertTeacher,
       deleteTeacher,
       upsertStudent,
       deleteStudent,
-      upsertGroup,
-      deleteGroup,
       upsertLesson,
       deleteLesson,
+      completeLesson,
       setAttendance,
-      upsertAssignment,
-      deleteAssignment,
-      upsertResult,
+      upsertTopic,
+      deleteTopic,
+      upsertHomework,
+      deleteHomework,
+      upsertHomeworkAssignment,
+      deleteHomeworkAssignment,
       studentsForTeacher,
-      groupsForTeacher,
+      unassignedStudents,
       lessonsForTeacher,
+      topicsForTeacher,
+      homeworksForTopic,
       assignmentsForTeacher,
-      resultsForTeacher,
-      lessonStudents,
+      assignmentsForStudent,
+      attendanceForLesson,
     }),
     [
       data,
       ready,
       setCurrentTeacherId,
+      setDirekciyaTeacherId,
       resetDemo,
       upsertTeacher,
       deleteTeacher,
       upsertStudent,
       deleteStudent,
-      upsertGroup,
-      deleteGroup,
       upsertLesson,
       deleteLesson,
+      completeLesson,
       setAttendance,
-      upsertAssignment,
-      deleteAssignment,
-      upsertResult,
+      upsertTopic,
+      deleteTopic,
+      upsertHomework,
+      deleteHomework,
+      upsertHomeworkAssignment,
+      deleteHomeworkAssignment,
       studentsForTeacher,
-      groupsForTeacher,
+      unassignedStudents,
       lessonsForTeacher,
+      topicsForTeacher,
+      homeworksForTopic,
       assignmentsForTeacher,
-      resultsForTeacher,
-      lessonStudents,
+      assignmentsForStudent,
+      attendanceForLesson,
     ]
   );
 
@@ -521,7 +537,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
 export function useDemoStore() {
   const ctx = useContext(DemoStoreContext);
   if (!ctx) {
-    throw new Error("useDemoStore должен вызываться внутри DemoStoreProvider");
+    throw new Error("useDemoStore must be used within DemoStoreProvider");
   }
   return ctx;
 }

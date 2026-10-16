@@ -1,5 +1,5 @@
-import { SchedulePanel } from "@/components/schedule/schedule-panel";
+import { ScheduleWorkspace } from "@/components/schedule/schedule-workspace";
 
-export default function KafedraSchedulePage() {
-  return <SchedulePanel mode="kafedra" />;
+export default function Page() {
+  return <ScheduleWorkspace mode="kafedra" />;
 }

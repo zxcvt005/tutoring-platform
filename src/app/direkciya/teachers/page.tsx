@@ -1,5 +1,5 @@
-import { TeachersPanel } from "@/components/teachers/teachers-panel";
+import { TeachersWorkspace } from "@/components/teachers/teachers-workspace";
 
-export default function DirekciyaTeachersPage() {
-  return <TeachersPanel />;
+export default function Page() {
+  return <TeachersWorkspace />;
 }

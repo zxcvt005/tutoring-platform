@@ -1,5 +1,5 @@
-import { ResultsPanel } from "@/components/results/results-panel";
+import { ResultsWorkspace } from "@/components/results/results-workspace";
 
-export default function DirekciyaResultsPage() {
-  return <ResultsPanel mode="direkciya" />;
+export default function Page() {
+  return <ResultsWorkspace mode="direkciya" />;
 }

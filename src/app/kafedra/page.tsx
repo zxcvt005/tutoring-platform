@@ -1,5 +1,5 @@
-import { OverviewPanel } from "@/components/overview/overview-panel";
+import { KafedraDayHome } from "@/components/kafedra/day-home";
 
-export default function KafedraPage() {
-  return <OverviewPanel mode="kafedra" />;
+export default function Page() {
+  return <KafedraDayHome />;
 }

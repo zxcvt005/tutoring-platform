@@ -3,13 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  BookOpen,
+  BookMarked,
   CalendarDays,
   ClipboardList,
   GraduationCap,
   LayoutDashboard,
   Users,
-  UsersRound,
 } from "lucide-react";
 
 import { RoleSwitcher } from "@/components/layout/role-switcher";
@@ -34,17 +33,15 @@ const direkciyaNav: NavItem[] = [
   { href: "/direkciya", label: "Обзор", icon: LayoutDashboard },
   { href: "/direkciya/students", label: "Ученики", icon: GraduationCap },
   { href: "/direkciya/teachers", label: "Преподаватели", icon: Users },
-  { href: "/direkciya/groups", label: "Группы", icon: UsersRound },
   { href: "/direkciya/schedule", label: "Расписание", icon: CalendarDays },
-  { href: "/direkciya/assignments", label: "Задания", icon: BookOpen },
   { href: "/direkciya/results", label: "Результаты", icon: ClipboardList },
 ];
 
 const kafedraNav: NavItem[] = [
-  { href: "/kafedra", label: "Обзор", icon: LayoutDashboard },
+  { href: "/kafedra", label: "Сегодня", icon: LayoutDashboard },
   { href: "/kafedra/students", label: "Ученики", icon: GraduationCap },
   { href: "/kafedra/schedule", label: "Расписание", icon: CalendarDays },
-  { href: "/kafedra/assignments", label: "Задания", icon: BookOpen },
+  { href: "/kafedra/topics", label: "Темы", icon: BookMarked },
   { href: "/kafedra/results", label: "Результаты", icon: ClipboardList },
 ];
 
@@ -144,6 +141,9 @@ export function AppSidebar({
               ))}
             </SelectContent>
           </Select>
+          <p className="px-0.5 text-[11px] leading-snug text-muted-foreground">
+            Только для прототипа: в продукте преподаватель входит в свой кабинет.
+          </p>
         </div>
       ) : null}
 
@@ -158,7 +158,7 @@ export function AppSidebar({
           Сбросить демо
         </Button>
         <p className="px-0.5 text-[11px] leading-snug text-muted-foreground">
-          Данные только в этом браузере (localStorage).
+          Данные в браузере (localStorage v2).
         </p>
       </div>
     </div>

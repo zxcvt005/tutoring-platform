@@ -1,19 +1,53 @@
+/** Статусы людей */
 export type PersonStatus = "active" | "paused";
+
+export type TeacherStatus = "active" | "inactive" | "archived";
 
 export type LessonStatus = "planned" | "done" | "cancelled";
 
-export type AttendanceStatus = "present" | "absent" | "late" | "excused";
+/** Посещаемость по занятию */
+export type AttendanceStatus =
+  | "present"
+  | "absent"
+  | "cancelled"
+  | "rescheduled";
 
-export type AssignmentStatus = "draft" | "published" | "closed";
+export type TopicStatus = "active" | "archived";
 
-export type ResultStatus = "pending" | "submitted" | "graded" | "overdue";
+export type HomeworkTemplateStatus = "active" | "archived";
+
+export type CheckType = "score" | "pass_fail" | "comment";
+
+/** Статус назначения ДЗ ученику (не путать с баллом) */
+export type HomeworkAssignmentStatus =
+  | "assigned"
+  | "completed"
+  | "reviewed"
+  | "overdue";
+
+export type WorkInterval = {
+  start: string; // "09:00"
+  end: string; // "21:00"
+};
 
 export type Teacher = {
   id: string;
   fullName: string;
+  /** Инициалы / цвет — без реальных фото */
+  avatarInitials?: string;
   subjects: string[];
-  status: PersonStatus;
+  specializations?: string[];
+  phone?: string;
   email?: string;
+  startedAt?: string; // ISO date
+  status: TeacherStatus;
+  lessonPrice?: number;
+  teacherPay?: number;
+  defaultDurationMin?: number;
+  /** 1=пн … 7=вс */
+  workDays?: number[];
+  workIntervals?: WorkInterval[];
+  adminNotes?: string;
 };
 
 export type Student = {
@@ -21,29 +55,22 @@ export type Student = {
   fullName: string;
   contacts?: string;
   status: PersonStatus;
-  /** Один основной преподаватель */
+  /** Пустая строка — без назначенного преподавателя */
   teacherId: string;
-  groupIds: string[];
   notes?: string;
-};
-
-export type Group = {
-  id: string;
-  title: string;
-  teacherId: string;
-  studentIds: string[];
-  scheduleHint?: string;
 };
 
 export type Lesson = {
   id: string;
-  title?: string;
   teacherId: string;
-  groupId?: string;
-  studentIds?: string[];
+  /** Индивидуальное занятие */
+  studentId: string;
+  subject?: string;
   startsAt: string;
   endsAt: string;
   status: LessonStatus;
+  /** Тема, пройденная на занятии (после проведения) */
+  topicId?: string;
 };
 
 export type Attendance = {
@@ -52,39 +79,60 @@ export type Attendance = {
   status: AttendanceStatus;
 };
 
-export type Assignment = {
+export type Topic = {
   id: string;
-  title: string;
-  description?: string;
   teacherId: string;
-  groupId?: string;
-  studentIds: string[];
-  dueAt: string;
-  status: AssignmentStatus;
-  maxScore: number;
+  title: string;
+  subject: string;
+  description?: string;
+  programNote?: string;
+  status: TopicStatus;
 };
 
-export type Result = {
+/** Шаблон ДЗ, привязанный к теме */
+export type Homework = {
   id: string;
-  assignmentId: string;
+  topicId: string;
+  teacherId: string;
+  title: string;
+  description?: string;
+  checkType: CheckType;
+  maxScore?: number;
+  status: HomeworkTemplateStatus;
+};
+
+/** Назначение ДЗ конкретному ученику */
+export type HomeworkAssignment = {
+  id: string;
+  homeworkId: string;
+  topicId: string;
+  teacherId: string;
   studentId: string;
+  dueAt: string;
+  status: HomeworkAssignmentStatus;
   score?: number;
   maxScore?: number;
-  status: ResultStatus;
   feedback?: string;
-  submittedAt?: string;
+  completedAt?: string;
+  reviewedAt?: string;
 };
 
 export type DemoData = {
+  version: 2;
   teachers: Teacher[];
   students: Student[];
-  groups: Group[];
   lessons: Lesson[];
   attendances: Attendance[];
-  assignments: Assignment[];
-  results: Result[];
-  /** Выбранный demo-преподаватель для кабинета Кафедры */
+  topics: Topic[];
+  homeworks: Homework[];
+  homeworkAssignments: HomeworkAssignment[];
+  /** Demo-преподаватель для Кафедры */
   currentTeacherId: string;
+  /** Выбранный преподаватель в Дирекции (расписание / результаты) */
+  direkciyaTeacherId: string;
 };
 
-export const STORAGE_KEY = "naemnye.demo.v1";
+export const STORAGE_KEY = "naemnye.demo.v2";
+export const LEGACY_STORAGE_KEYS = ["naemnye.demo.v1"];
+
+export const DURATION_OPTIONS = [30, 45, 60, 90, 120] as const;

@@ -1,5 +1,5 @@
-import { StudentsPanel } from "@/components/students/students-panel";
+import { StudentsByTeacher } from "@/components/students/students-by-teacher";
 
-export default function DirekciyaStudentsPage() {
-  return <StudentsPanel mode="direkciya" />;
+export default function Page() {
+  return <StudentsByTeacher mode="direkciya" />;
 }

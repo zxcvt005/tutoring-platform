@@ -1,9 +1,10 @@
 import type {
-  AssignmentStatus,
   AttendanceStatus,
+  HomeworkAssignmentStatus,
   LessonStatus,
   PersonStatus,
-  ResultStatus,
+  TeacherStatus,
+  TopicStatus,
 } from "@/lib/types";
 
 export function newId(prefix: string): string {
@@ -35,9 +36,33 @@ export function formatDate(iso: string): string {
   }
 }
 
+export function formatTime(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat("ru-RU", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
+
+export function initialsFromName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return `${parts[0]![0] ?? ""}${parts[1]![0] ?? ""}`.toUpperCase();
+}
+
 export const personStatusLabel: Record<PersonStatus, string> = {
   active: "Активен",
   paused: "Пауза",
+};
+
+export const teacherStatusLabel: Record<TeacherStatus, string> = {
+  active: "Активен",
+  inactive: "Временно не работает",
+  archived: "Архивный",
 };
 
 export const lessonStatusLabel: Record<LessonStatus, string> = {
@@ -47,21 +72,25 @@ export const lessonStatusLabel: Record<LessonStatus, string> = {
 };
 
 export const attendanceStatusLabel: Record<AttendanceStatus, string> = {
-  present: "Был",
-  absent: "Пропуск",
-  late: "Опоздал",
-  excused: "Уваж. причина",
+  present: "Присутствовал",
+  absent: "Отсутствовал",
+  cancelled: "Отменено",
+  rescheduled: "Перенесено",
 };
 
-export const assignmentStatusLabel: Record<AssignmentStatus, string> = {
-  draft: "Черновик",
-  published: "Опубликовано",
-  closed: "Закрыто",
+export const topicStatusLabel: Record<TopicStatus, string> = {
+  active: "Активна",
+  archived: "В архиве",
 };
 
-export const resultStatusLabel: Record<ResultStatus, string> = {
-  pending: "Ожидает",
-  submitted: "Сдано",
-  graded: "Оценено",
+export const homeworkAssignmentStatusLabel: Record<
+  HomeworkAssignmentStatus,
+  string
+> = {
+  assigned: "Назначено",
+  completed: "Выполнено",
+  reviewed: "Проверено",
   overdue: "Просрочено",
 };
+
+export const weekdayShort = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"] as const;
