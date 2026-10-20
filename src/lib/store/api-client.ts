@@ -110,9 +110,10 @@ export async function apiBootstrapAdmin(input: {
   organizationName: string;
   organizationSlug?: string;
 }) {
+  const headers = await mutatingHeaders();
   const res = await fetch("/api/auth/bootstrap-admin", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     credentials: "include",
     body: JSON.stringify(input),
   });

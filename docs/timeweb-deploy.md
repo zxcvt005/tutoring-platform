@@ -32,10 +32,10 @@
 |------------|-------------|----------|
 | `DATABASE_URL` | да | URL Postgres (SSL по требованиям Timeweb) |
 | `NODE_ENV` | да | `production` |
-| `APP_BASE_URL` | да | `https://ваш-домен` (для CSRF Origin) |
+| `APP_BASE_URL` | да | `https://zxcvt005-tutoring-platform-302f.twc1.net` (без path; scheme+host) |
 | `BOOTSTRAP_ADMIN_TOKEN` | при первом запуске | ≥24 символа; **удалить после создания директора** |
 | `ALLOW_DEMO_LOGIN` | нет | не задавать / `0` |
-| `ALLOWED_ORIGINS` | нет | доп. Origin через запятую |
+| `ALLOWED_ORIGINS` | нет | только если нужен **доп.** Origin; для текущего домена Timeweb **не нужен** |
 | `NEXT_PUBLIC_DATA_MODE` | нет | `api` |
 
 Секреты только в панели Timeweb. Не коммитить `.env.local` / реальные токены.

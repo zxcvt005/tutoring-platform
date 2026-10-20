@@ -36,6 +36,78 @@ function parseCookie(header: string | null, name: string): string | undefined {
 }
 
 /**
+ * Нормализует строку до canonical Origin (scheme + host + port).
+ * Принимает только абсолютные URL со схемой http/https.
+ */
+export function normalizeOrigin(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+    // URL.origin — строгий scheme://host[:port] без path/query
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Список разрешённых Origin:
+ * - APP_BASE_URL (основной, обязателен по смыслу в production)
+ * - ALLOWED_ORIGINS (доп., через запятую)
+ * - localhost только вне production
+ */
+export function getAllowedOrigins(
+  env: NodeJS.ProcessEnv = process.env
+): string[] {
+  const set = new Set<string>();
+
+  const base = env.APP_BASE_URL?.trim();
+  if (base) {
+    const origin = normalizeOrigin(base);
+    if (origin) set.add(origin);
+  }
+
+  const extra = env.ALLOWED_ORIGINS?.split(",") ?? [];
+  for (const item of extra) {
+    const origin = normalizeOrigin(item);
+    if (origin) set.add(origin);
+  }
+
+  // Локальные origin только вне production (env.NODE_ENV для тестов)
+  const isProd =
+    env.NODE_ENV != null
+      ? env.NODE_ENV === "production"
+      : isProductionRuntime();
+
+  if (!isProd) {
+    for (const local of [
+      "http://127.0.0.1:43127",
+      "http://localhost:43127",
+      "http://127.0.0.1:3000",
+      "http://localhost:3000",
+    ]) {
+      set.add(local);
+    }
+  }
+
+  return [...set];
+}
+
+export function isOriginAllowed(
+  originHeader: string,
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  const origin = normalizeOrigin(originHeader);
+  if (!origin) return false;
+  const allowed = getAllowedOrigins(env);
+  return allowed.includes(origin);
+}
+
+/**
  * Double-submit CSRF: cookie tp_csrf должен совпасть с заголовком x-csrf-token.
  * Для GET не вызывается.
  */
@@ -48,16 +120,16 @@ export function assertCsrf(request: Request): void {
 }
 
 /**
- * Проверка Origin/Referer для state-changing запросов.
- * В development без APP_BASE_URL пропускаем, если Origin отсутствует (удобство тестов).
+ * Строгая проверка Origin (или Referer.origin) по scheme+host+port.
+ * CSRF отдельно не отключается.
  */
 export function assertSameOrigin(request: Request): void {
   const origin = request.headers.get("origin");
   const referer = request.headers.get("referer");
-  const allowed = allowedOrigins();
+  const allowed = getAllowedOrigins();
 
   if (origin) {
-    if (!allowed.some((a) => origin === a || origin.startsWith(a))) {
+    if (!isOriginAllowed(origin)) {
       throw forbidden("Недопустимый Origin");
     }
     return;
@@ -66,40 +138,21 @@ export function assertSameOrigin(request: Request): void {
   if (referer) {
     try {
       const refOrigin = new URL(referer).origin;
-      if (!allowed.some((a) => refOrigin === a || refOrigin.startsWith(a))) {
+      if (!allowed.includes(refOrigin)) {
         throw forbidden("Недопустимый Referer");
       }
       return;
-    } catch {
+    } catch (err) {
+      if (err instanceof Error && err.message === "Недопустимый Referer") {
+        throw err;
+      }
       throw forbidden("Недопустимый Referer");
     }
   }
 
-  // Без Origin/Referer: в production — отказ (кроме same-site навигации с cookie; API fetch всегда шлёт Origin)
   if (isProductionRuntime()) {
     throw forbidden("Отсутствует Origin");
   }
-}
-
-function allowedOrigins(): string[] {
-  const list: string[] = [];
-  const base = getAppBaseUrl();
-  if (base) {
-    try {
-      list.push(new URL(base).origin);
-    } catch {
-      /* ignore */
-    }
-  }
-  // Локальная разработка
-  list.push("http://127.0.0.1:43127", "http://localhost:43127");
-  list.push("http://127.0.0.1:3000", "http://localhost:3000");
-  const extra = process.env.ALLOWED_ORIGINS?.split(",") ?? [];
-  for (const o of extra) {
-    const t = o.trim();
-    if (t) list.push(t.replace(/\/$/, ""));
-  }
-  return list;
 }
 
 /** CSRF + Origin для мутаций из браузера. */

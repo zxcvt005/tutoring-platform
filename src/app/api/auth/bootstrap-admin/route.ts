@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { assertSameOrigin } from "@/server/auth/csrf";
+import { assertMutatingRequest } from "@/server/auth/csrf";
 import {
   SESSION_COOKIE,
   sessionCookieOptions,
@@ -40,7 +40,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    assertSameOrigin(request);
+    assertMutatingRequest(request);
     const body = parseBody(bodySchema, await readJsonBody(request));
     const db = getDb();
     const created = await bootstrapFirstAdmin(db, body);
