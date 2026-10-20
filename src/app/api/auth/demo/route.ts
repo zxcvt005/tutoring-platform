@@ -1,26 +1,28 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
 
+import { assertMutatingRequest } from "@/server/auth/csrf";
+import { isDemoLoginAllowed } from "@/server/auth/env";
 import {
   SESSION_COOKIE,
   sessionCookieOptions,
 } from "@/server/auth/session";
+import { resolveAuthContext } from "@/server/authz/context";
 import { DEMO_ORG_ID, DEMO_PASSWORD } from "@/server/db/seed";
+import { students, teachers } from "@/server/db/schema";
 import { getDb } from "@/server/db/runtime";
-import { jsonError, forbidden } from "@/server/errors";
+import { forbidden, jsonError } from "@/server/errors";
 import {
   getClientMeta,
   parseBody,
   readJsonBody,
 } from "@/server/http/request";
 import { loginWithPassword, mePayload } from "@/server/services/auth-service";
-import { resolveAuthContext } from "@/server/authz/context";
-import { eq } from "drizzle-orm";
-import { teachers, students } from "@/server/db/schema";
 
 /**
- * Демо-вход для локальной разработки / прототипа.
- * Включать только при ALLOW_DEMO_LOGIN=1 (по умолчанию в development).
+ * Демо-вход только для локальной разработки.
+ * В production всегда запрещён (даже при ALLOW_DEMO_LOGIN=1).
  */
 const bodySchema = z.object({
   role: z.enum(["director", "teacher", "student"]),
@@ -28,15 +30,12 @@ const bodySchema = z.object({
   studentId: z.string().optional(),
 });
 
-function demoAllowed() {
-  if (process.env.ALLOW_DEMO_LOGIN === "1") return true;
-  if (process.env.ALLOW_DEMO_LOGIN === "0") return false;
-  return process.env.NODE_ENV !== "production";
-}
-
 export async function POST(request: Request) {
   try {
-    if (!demoAllowed()) throw forbidden("Демо-вход отключён");
+    if (!isDemoLoginAllowed()) {
+      throw forbidden("Демо-вход отключён");
+    }
+    assertMutatingRequest(request);
 
     const body = parseBody(bodySchema, await readJsonBody(request));
     const db = getDb();

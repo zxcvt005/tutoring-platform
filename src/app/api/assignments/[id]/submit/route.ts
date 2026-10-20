@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { assertMutatingRequest } from "@/server/auth/csrf";
 import { getDb } from "@/server/db/runtime";
 import { jsonError } from "@/server/errors";
 import { withIdempotency } from "@/server/idempotency";
@@ -28,6 +29,7 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function POST(request: Request, { params }: Params) {
   try {
+    assertMutatingRequest(request);
     const { id } = await params;
     const ctx = await requireAuth(request);
     const body = parseBody(bodySchema, await readJsonBody(request));

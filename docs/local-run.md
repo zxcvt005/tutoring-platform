@@ -40,7 +40,12 @@ npm run dev:local
 | Кафедра | http://127.0.0.1:43127/kafedra |
 | Аудитория | http://127.0.0.1:43127/auditoria |
 
-Демо-вход включается автоматически при смене кабинета (`ALLOW_DEMO_LOGIN=1`). Пароль seed-пользователей: см. `DEMO_PASSWORD` в `src/server/db/seed.ts` (только для разработки).
+Демо-вход в development при `ALLOW_DEMO_LOGIN=1` (по умолчанию в dev). В **production демо-вход невозможен**.
+
+Production-вход: http://127.0.0.1:43127/login  
+Первый администратор (пустая БД): http://127.0.0.1:43127/setup + `BOOTSTRAP_ADMIN_TOKEN` в `.env.local`.
+
+Пароль seed-пользователей: `DEMO_PASSWORD` в `src/server/db/seed.ts` (только разработка).
 
 ## Свой PostgreSQL / Docker
 

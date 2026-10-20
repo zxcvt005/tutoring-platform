@@ -2,10 +2,11 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { and, eq, gt } from "drizzle-orm";
 
+import { SESSION_COOKIE } from "@/server/auth/constants";
 import { sessions, users } from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
 
-export const SESSION_COOKIE = "tp_session";
+export { SESSION_COOKIE };
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 дней
 
 /** В cookie храним сырой токен; в БД — sha256(token). */
@@ -82,5 +83,18 @@ export function sessionCookieOptions(expiresAt: Date) {
     sameSite: "lax" as const,
     path: "/",
     expires: expiresAt,
+    // Не задаём Domain — cookie только для текущего хоста
+  };
+}
+
+/** Очистка cookie с теми же флагами, что и при установке. */
+export function clearSessionCookieOptions() {
+  const secure = process.env.NODE_ENV === "production";
+  return {
+    httpOnly: true,
+    secure,
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: 0,
   };
 }

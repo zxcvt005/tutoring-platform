@@ -14,6 +14,7 @@
     "db:up": "tsx scripts/db-up.ts",
     "db:verify": "tsx scripts/db-verify-pglite.ts",
     "db:verify:pg": "tsx scripts/db-verify-postgres.ts",
+    "auth:bootstrap-admin": "tsx scripts/auth-bootstrap-admin.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

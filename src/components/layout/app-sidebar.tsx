@@ -36,6 +36,7 @@ const direkciyaNav: NavItem[] = [
   { href: "/direkciya", label: "Обзор", icon: LayoutDashboard },
   { href: "/direkciya/students", label: "Ученики", icon: GraduationCap },
   { href: "/direkciya/teachers", label: "Преподаватели", icon: Users },
+  { href: "/direkciya/users", label: "Доступ", icon: UserRound },
   { href: "/direkciya/schedule", label: "Расписание", icon: CalendarDays },
   { href: "/direkciya/results", label: "Результаты", icon: ClipboardList },
 ];
@@ -131,9 +132,12 @@ export function AppSidebar({
 }) {
   const {
     data,
+    auth,
+    demoLoginEnabled,
     setCurrentTeacherId,
     setCurrentStudentId,
     resetDemo,
+    logout,
   } = useDemoStore();
   const items =
     role === "direkciya"
@@ -155,13 +159,18 @@ export function AppSidebar({
           <p className="font-display text-xl leading-tight font-semibold tracking-tight text-sidebar-foreground">
             {title}
           </p>
+          {auth?.fullName ? (
+            <p className="mt-1 truncate text-[11px] text-muted-foreground">
+              {auth.fullName}
+            </p>
+          ) : null}
         </div>
-        <RoleSwitcher />
+        {demoLoginEnabled ? <RoleSwitcher /> : null}
       </div>
 
       <NavLinks items={items} role={role} />
 
-      {role === "kafedra" ? (
+      {demoLoginEnabled && role === "kafedra" ? (
         <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
           <p className="px-0.5 text-xs font-medium text-muted-foreground">
             Demo-преподаватель
@@ -193,7 +202,7 @@ export function AppSidebar({
         </div>
       ) : null}
 
-      {role === "auditoria" ? (
+      {demoLoginEnabled && role === "auditoria" ? (
         <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
           <p className="px-0.5 text-xs font-medium text-muted-foreground">
             Demo-ученик
@@ -231,13 +240,30 @@ export function AppSidebar({
           variant="outline"
           size="sm"
           className="w-full rounded-xl"
-          onClick={resetDemo}
+          onClick={() => void logout()}
         >
-          Сбросить демо
+          Выйти
         </Button>
-        <p className="px-0.5 text-[11px] leading-snug text-muted-foreground">
-          Данные в PostgreSQL. Сброс: npm run db:seed
-        </p>
+        {demoLoginEnabled ? (
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="w-full rounded-xl"
+              onClick={resetDemo}
+            >
+              Сбросить демо
+            </Button>
+            <p className="px-0.5 text-[11px] leading-snug text-muted-foreground">
+              Демо-режим. Данные в PostgreSQL.
+            </p>
+          </>
+        ) : (
+          <p className="px-0.5 text-[11px] leading-snug text-muted-foreground">
+            Сессия на сервере. Данные в PostgreSQL.
+          </p>
+        )}
       </div>
     </div>
   );

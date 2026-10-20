@@ -9,14 +9,18 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import {
   apiBootstrap,
   apiDemoLogin,
+  apiFeatures,
+  apiLogout,
   apiMe,
   apiPlatform,
+  cabinetHomeForRole,
+  type AuthFeatures,
   type BootstrapAuth,
 } from "@/lib/store/api-client";
 import type {
@@ -59,6 +63,9 @@ type DemoStoreValue = {
   data: DemoData;
   ready: boolean;
   auth: BootstrapAuth | null;
+  features: AuthFeatures | null;
+  demoLoginEnabled: boolean;
+  logout: () => Promise<void>;
   setCurrentTeacherId: (id: string) => void;
   setDirekciyaTeacherId: (id: string) => void;
   setCurrentStudentId: (id: string) => void;
@@ -173,10 +180,22 @@ function newClientId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function isPublicAuthPath(pathname: string | null) {
+  return (
+    pathname === "/login" ||
+    pathname === "/setup" ||
+    pathname === "/" ||
+    pathname?.startsWith("/login") ||
+    pathname?.startsWith("/setup")
+  );
+}
+
 export function DemoStoreProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [data, setData] = useState<DemoData>(EMPTY_DATA);
   const [auth, setAuth] = useState<BootstrapAuth | null>(null);
+  const [features, setFeatures] = useState<AuthFeatures | null>(null);
   const [ready, setReady] = useState(false);
   const [filterTeacherId, setFilterTeacherId] = useState("t1");
   const [filterStudentId, setFilterStudentId] = useState("s1");
@@ -188,24 +207,71 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
     return boot;
   }, []);
 
+  const logout = useCallback(async () => {
+    await apiLogout();
+    setAuth(null);
+    setData(EMPTY_DATA);
+    router.replace("/login");
+  }, [router]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const role = roleFromPath(pathname);
-        const me = await apiMe();
-        const needSwitch =
-          !me ||
-          (role === "director" && (me as { role?: string }).role !== "director") ||
-          (role === "teacher" && (me as { role?: string }).role !== "teacher") ||
-          (role === "student" && (me as { role?: string }).role !== "student");
-        if (needSwitch) {
-          await apiDemoLogin({
-            role,
-            teacherId: filterTeacherId,
-            studentId: filterStudentId,
-          });
+        const feats = await apiFeatures();
+        if (cancelled) return;
+        setFeatures(feats);
+
+        if (isPublicAuthPath(pathname)) {
+          if (!cancelled) setReady(true);
+          return;
         }
+
+        const role = roleFromPath(pathname);
+        let me = await apiMe();
+
+        if (!me) {
+          if (feats.needsBootstrap) {
+            router.replace("/setup");
+            return;
+          }
+          if (feats.demoLogin) {
+            await apiDemoLogin({
+              role,
+              teacherId: filterTeacherId,
+              studentId: filterStudentId,
+            });
+            me = await apiMe();
+          } else {
+            const next = encodeURIComponent(pathname || "/");
+            router.replace(`/login?next=${next}`);
+            return;
+          }
+        }
+
+        const meRole = (me as { role?: string } | null)?.role;
+        if (feats.demoLogin) {
+          const needSwitch =
+            !me ||
+            (role === "director" && meRole !== "director") ||
+            (role === "teacher" && meRole !== "teacher") ||
+            (role === "student" && meRole !== "student");
+          if (needSwitch) {
+            await apiDemoLogin({
+              role,
+              teacherId: filterTeacherId,
+              studentId: filterStudentId,
+            });
+          }
+        } else if (meRole && meRole !== role) {
+          router.replace(
+            cabinetHomeForRole(
+              meRole as "director" | "teacher" | "student"
+            )
+          );
+          return;
+        }
+
         if (!cancelled) await reload();
       } catch (e) {
         console.error(e);
@@ -223,7 +289,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [pathname, filterTeacherId, filterStudentId, reload]);
+  }, [pathname, filterTeacherId, filterStudentId, reload, router]);
 
   const run = useCallback(
     async (action: string, payload?: unknown, idem?: string): Promise<OkResult> => {
@@ -274,6 +340,9 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       },
       ready,
       auth,
+      features,
+      demoLoginEnabled: features?.demoLogin ?? false,
+      logout,
       setCurrentTeacherId,
       setDirekciyaTeacherId,
       setCurrentStudentId,
@@ -414,6 +483,8 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       data,
       ready,
       auth,
+      features,
+      logout,
       filterTeacherId,
       filterStudentId,
       setCurrentTeacherId,

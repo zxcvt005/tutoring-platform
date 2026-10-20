@@ -16,7 +16,8 @@ export const DEMO_ORG_ID = "org_demo";
 export const DEMO_ORG_SLUG = "demo-school";
 
 /** Только для локального/тестового seed — не для продакшн-аккаунтов. */
-export const DEMO_PASSWORD = "Demo-Pass-Change-Me!";
+/** Только для локального seed; соответствует политике пароля (≥10, буквы+цифры). */
+export const DEMO_PASSWORD = "Demo-Pass-Change-Me1!";
 
 export type SeedOptions = {
   /** Нужно на Windows/embedded PG с server_encoding=WIN1251 */

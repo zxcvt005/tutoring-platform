@@ -444,6 +444,25 @@ export const idempotencyKeys = pgTable("idempotency_keys", {
   index("idempotency_keys_created_idx").on(t.createdAt),
 ]);
 
+/** Учёт попыток входа (анти-bruteforce). */
+export const loginAttempts = pgTable(
+  "login_attempts",
+  {
+    id: text("id").primaryKey(),
+    /** email:… или ip:… */
+    key: text("key").notNull(),
+    email: text("email"),
+    ip: text("ip"),
+    success: boolean("success").notNull().default(false),
+    attemptedAt: timestamp("attempted_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("login_attempts_key_time_idx").on(t.key, t.attemptedAt),
+  ]
+);
+
 export const schema = {
   organizations,
   users,
@@ -464,4 +483,5 @@ export const schema = {
   gradeEvents,
   auditLog,
   idempotencyKeys,
+  loginAttempts,
 };

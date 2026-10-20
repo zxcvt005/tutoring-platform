@@ -22,7 +22,22 @@ export default function Home() {
           </h1>
           <p className="max-w-md text-[0.95rem] leading-relaxed text-muted-foreground">
             Дирекция, Кафедра и Аудитория работают через сервер и PostgreSQL.
-            Демо-вход подставляется автоматически при открытии кабинета.
+            Войдите по email и паролю или откройте кабинет (в dev возможен
+            демо-вход).
+          </p>
+          <p className="flex flex-wrap gap-3 text-sm">
+            <Link
+              href="/login"
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+            >
+              Войти →
+            </Link>
+            <Link
+              href="/setup"
+              className="text-muted-foreground underline-offset-4 hover:underline"
+            >
+              Первичная настройка
+            </Link>
           </p>
         </div>
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { StudentAnswer } from "@/lib/types";
+import { assertMutatingRequest } from "@/server/auth/csrf";
 import { getDb } from "@/server/db/runtime";
 import { jsonError, jsonOk, validationError } from "@/server/errors";
 import { withIdempotency } from "@/server/idempotency";
@@ -19,6 +20,7 @@ const bodySchema = z.object({
 
 export async function POST(request: Request) {
   try {
+    assertMutatingRequest(request);
     const ctx = await requireAuth(request);
     const raw = parseBody(bodySchema, await readJsonBody(request));
     const p = (raw.payload ?? {}) as Record<string, unknown>;

@@ -10,6 +10,14 @@ export type BootstrapAuth = {
   email: string;
 };
 
+export type AuthFeatures = {
+  demoLogin: boolean;
+  needsBootstrap: boolean;
+  production: boolean;
+};
+
+let csrfTokenCache: string | null = null;
+
 async function parseJson<T>(res: Response): Promise<T> {
   const data = (await res.json().catch(() => ({}))) as T & {
     error?: { message?: string };
@@ -20,17 +28,95 @@ async function parseJson<T>(res: Response): Promise<T> {
   return data;
 }
 
+export async function ensureCsrfToken(): Promise<string> {
+  if (csrfTokenCache) return csrfTokenCache;
+  const res = await fetch("/api/auth/csrf", { credentials: "include" });
+  const data = await parseJson<{ csrfToken: string }>(res);
+  csrfTokenCache = data.csrfToken;
+  return csrfTokenCache;
+}
+
+function clearCsrfCache() {
+  csrfTokenCache = null;
+}
+
+async function mutatingHeaders(
+  extra?: Record<string, string>
+): Promise<Record<string, string>> {
+  const csrf = await ensureCsrfToken();
+  return {
+    "content-type": "application/json",
+    "x-csrf-token": csrf,
+    ...extra,
+  };
+}
+
+export async function apiFeatures(): Promise<AuthFeatures> {
+  const res = await fetch("/api/auth/features", { credentials: "include" });
+  return parseJson(res);
+}
+
+export async function apiLogin(email: string, password: string) {
+  const headers = await mutatingHeaders();
+  const res = await fetch("/api/auth/login", {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: JSON.stringify({ email, password }),
+  });
+  return parseJson<{
+    user: { id: string; email: string; fullName: string };
+    organizationId: string;
+    role: "director" | "teacher" | "student";
+    teacherId: string | null;
+    studentId: string | null;
+  }>(res);
+}
+
+export async function apiLogout() {
+  try {
+    const headers = await mutatingHeaders();
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: "{}",
+    });
+  } finally {
+    clearCsrfCache();
+  }
+}
+
 export async function apiDemoLogin(input: {
   role: "director" | "teacher" | "student";
   teacherId?: string;
   studentId?: string;
 }) {
+  const headers = await mutatingHeaders();
   const res = await fetch("/api/auth/demo", {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: JSON.stringify(input),
+  });
+  return parseJson(res);
+}
+
+export async function apiBootstrapAdmin(input: {
+  token: string;
+  email: string;
+  password: string;
+  fullName: string;
+  organizationName: string;
+  organizationSlug?: string;
+}) {
+  const res = await fetch("/api/auth/bootstrap-admin", {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
     body: JSON.stringify(input),
   });
+  clearCsrfCache();
   return parseJson(res);
 }
 
@@ -47,10 +133,9 @@ export async function apiPlatform<T = unknown>(
   payload?: unknown,
   idempotencyKey?: string
 ): Promise<T> {
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-  };
-  if (idempotencyKey) headers["idempotency-key"] = idempotencyKey;
+  const headers = await mutatingHeaders(
+    idempotencyKey ? { "idempotency-key": idempotencyKey } : undefined
+  );
   const res = await fetch("/api/platform", {
     method: "POST",
     headers,
@@ -64,4 +149,57 @@ export async function apiMe() {
   const res = await fetch("/api/auth/me", { credentials: "include" });
   if (res.status === 401) return null;
   return parseJson(res);
+}
+
+export async function apiAdminUsers() {
+  const res = await fetch("/api/admin/users", { credentials: "include" });
+  return parseJson<{
+    users: {
+      id: string;
+      email: string;
+      fullName: string;
+      role: string;
+      status: string;
+    }[];
+  }>(res);
+}
+
+export async function apiAdminCreateUser(body: {
+  email: string;
+  password: string;
+  fullName: string;
+  role: "director" | "teacher" | "student";
+  teacherId?: string;
+  studentId?: string;
+}) {
+  const headers = await mutatingHeaders();
+  const res = await fetch("/api/admin/users", {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  return parseJson(res);
+}
+
+export async function apiAdminPatchUser(
+  id: string,
+  body: { status?: "active" | "paused" | "disabled"; password?: string }
+) {
+  const headers = await mutatingHeaders();
+  const res = await fetch(`/api/admin/users/${id}`, {
+    method: "PATCH",
+    headers,
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  return parseJson(res);
+}
+
+export function cabinetHomeForRole(
+  role: "director" | "teacher" | "student"
+): string {
+  if (role === "teacher") return "/kafedra";
+  if (role === "student") return "/auditoria";
+  return "/direkciya";
 }

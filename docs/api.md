@@ -3,14 +3,21 @@
 Кабинеты ходят в API через `DemoStore` → `/api/bootstrap` + `/api/platform` (+ auth).  
 Прямые маршруты assignments/tests остаются для точечных сценариев и DataProvider.
 
+Мутирующие запросы (кроме bootstrap-admin) требуют CSRF: cookie `tp_csrf` + заголовок `x-csrf-token` (см. `GET /api/auth/csrf`), и допустимый Origin.
+
 ## Auth
 
 | Метод | Путь | Описание |
 |-------|------|----------|
-| POST | `/api/auth/login` | email+password → httpOnly cookie `tp_session` |
+| GET | `/api/auth/features` | `demoLogin`, `needsBootstrap`, `production` |
+| GET | `/api/auth/csrf` | выдача CSRF-токена |
+| POST | `/api/auth/login` | email+password → httpOnly cookie `tp_session` (+ rate limit) |
 | POST | `/api/auth/logout` | отзыв сессии + очистка cookie |
 | GET | `/api/auth/me` | текущий user, role, teacherId/studentId |
-| POST | `/api/auth/demo` | демо-вход по роли (только `ALLOW_DEMO_LOGIN=1` / non-production) |
+| POST | `/api/auth/demo` | демо-вход; **в production всегда 403** |
+| GET/POST | `/api/auth/bootstrap-admin` | первый директор по `BOOTSTRAP_ADMIN_TOKEN` |
+| GET/POST | `/api/admin/users` | список / создание пользователей (director) |
+| PATCH | `/api/admin/users/:id` | статус / сброс пароля (director) |
 
 Сессия: сырой токен в cookie, в БД — sha256; TTL 14 дней.
 

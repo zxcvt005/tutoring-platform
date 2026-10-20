@@ -1,42 +1,55 @@
-# Подготовка к развёртыванию в Timeweb Cloud
+# Развёртывание в Timeweb Cloud
 
 **Не создавать платные ресурсы и не публиковать приложение без явного разрешения владельца репозитория.**
 
-## Что уже готово в коде
+## Что готово в коде
 
-- PostgreSQL-схема и миграции Drizzle (`drizzle/`)
-- Серверный API: auth, bootstrap, platform-мутации, assignments, tests
-- Cookie-сессии (`tp_session`), RBAC по ролям director/teacher/student
-- Ключи ответов и оценивание только на сервере
-- Демо-вход отключён в production (`ALLOW_DEMO_LOGIN` не `1`)
+- PostgreSQL + Drizzle (миграции в `drizzle/`, включая `login_attempts`)
+- Cookie-сессии (`tp_session`, httpOnly, Secure в production, SameSite=Lax)
+- CSRF (double-submit `tp_csrf` + `x-csrf-token`) и проверка Origin
+- Ограничение попыток входа (rate limit в БД)
+- bcrypt (12 rounds), политика пароля ≥10 + буквы и цифры
+- Демо-вход **невозможен** при `NODE_ENV=production` (даже с `ALLOW_DEMO_LOGIN=1`)
+- Страницы `/login` и `/setup` (первый администратор по `BOOTSTRAP_ADMIN_TOKEN`)
+- Дирекция → «Доступ»: создание/отключение пользователей организации
+- CLI: `npm run auth:bootstrap-admin`
 
 ## Рекомендуемая схема Timeweb
 
-1. **Managed PostgreSQL** (UTF-8) — отдельный инстанс, не shared с другими проектами без необходимости.
-2. **App Platform / Node** — Next.js (`npm run build` → `npm start`), переменные окружения из панели.
-3. Внешний HTTPS-домен → cookie `Secure` включится при `NODE_ENV=production`.
+1. **Managed PostgreSQL** (UTF-8).
+2. **App / Node** — `npm run build` → `npm start`.
+3. HTTPS-домен → укажите его в `APP_BASE_URL`.
 
-## Переменные окружения (продакшн)
+## Переменные окружения (production)
 
-| Переменная | Значение |
-|------------|----------|
-| `DATABASE_URL` | URL из Timeweb Postgres (SSL по требованиям провайдера) |
-| `NODE_ENV` | `production` |
-| `ALLOW_DEMO_LOGIN` | `0` или не задавать |
-| `NEXT_PUBLIC_DATA_MODE` | `api` (опционально; UI уже ходит в API напрямую) |
+| Переменная | Обязательно | Описание |
+|------------|-------------|----------|
+| `DATABASE_URL` | да | URL Postgres (SSL по требованиям Timeweb) |
+| `NODE_ENV` | да | `production` |
+| `APP_BASE_URL` | да | `https://ваш-домен` (для CSRF Origin) |
+| `BOOTSTRAP_ADMIN_TOKEN` | при первом запуске | ≥24 символа; **удалить после создания директора** |
+| `ALLOW_DEMO_LOGIN` | нет | не задавать / `0` |
+| `ALLOWED_ORIGINS` | нет | доп. Origin через запятую |
+| `NEXT_PUBLIC_DATA_MODE` | нет | `api` |
 
-Не коммитить секреты. Seed с `DEMO_PASSWORD` **не** запускать на проде с публичным доступом без смены паролей.
+Секреты только в панели Timeweb. Не коммитить `.env.local` / реальные токены.
 
-## Чеклист перед первым деплоем (когда будет разрешение)
+**Не** запускайте `npm run db:seed` на публичном проде (демо-пароли).
 
-1. Создать Postgres в Timeweb → сохранить `DATABASE_URL`.
-2. Создать приложение Next.js, привязать env.
-3. На одном запуске (release command / one-off): `npm run db:migrate`.
-4. Опционально: отдельный безопасный seed или ручное создание директора (не demo-пароль из репозитория).
-5. Проверить логин, кабинеты, сдачу/проверку теста, запрет доступа к чужим assignment id.
-6. Убедиться, что `ALLOW_DEMO_LOGIN` выключен.
+## Чеклист первого деплоя (когда будет разрешение)
 
-## Чего этот документ не делает
+1. Создать Postgres → сохранить `DATABASE_URL`.
+2. Создать приложение, задать env (включая длинный `BOOTSTRAP_ADMIN_TOKEN`).
+3. Release / one-off: `npm run db:migrate`.
+4. Открыть `https://…/setup` **или** CLI:
+   ```bash
+   npm run auth:bootstrap-admin -- --email you@school.example --password '…' --name 'Директор' --org 'Школа'
+   ```
+5. Удалить / сменить `BOOTSTRAP_ADMIN_TOKEN` в env и перезапустить app.
+6. Войти на `/login`, в Дирекции → «Доступ» создать преподавателей и учеников.
+7. Проверить: чужой assignment id → 403; демо `/api/auth/demo` → 403; кабинеты без cookie → редирект на login.
+
+## Чего документ не делает
 
 - Не создаёт инстансы Timeweb
 - Не публикует приложение
