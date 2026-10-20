@@ -149,10 +149,78 @@ export type WorkInterval = {
   end: string;
 };
 
+/** Известные ключи возможностей тарифа (расширяемый список). */
+export type TariffFeatureKey =
+  | "individual_lessons"
+  | "homework"
+  | "group_calls"
+  | "intensives"
+  | "extra_materials"
+  | "extra_tests";
+
+export type TariffStatus = "active" | "archived";
+
+export type TariffAssignmentStatus =
+  | "pending_payment"
+  | "active"
+  | "expired"
+  | "cancelled"
+  | "paused";
+
+export type TariffPaymentStatus = "unpaid" | "paid" | "refunded";
+
+export type PaymentRecordStatus = "pending" | "paid" | "cancelled" | "failed";
+
+export type Tariff = {
+  id: string;
+  name: string;
+  price: number;
+  currency: "RUB";
+  durationDays: number;
+  lessonsLimit?: number;
+  includesText?: string;
+  features: TariffFeatureKey[];
+  status: TariffStatus;
+  adminNotes?: string;
+  /** Сколько активных/текущих назначений (для UI дирекции) */
+  assignedCount?: number;
+};
+
+export type StudentTariffAssignment = {
+  id: string;
+  studentId: string;
+  tariffId: string;
+  startsAt: string;
+  endsAt: string;
+  priceSnapshot: number;
+  currency: "RUB";
+  status: TariffAssignmentStatus;
+  paymentStatus: TariffPaymentStatus;
+  /** Денормализация для UI */
+  tariffName?: string;
+  includesText?: string;
+};
+
+export type PaymentRecord = {
+  id: string;
+  studentId: string;
+  assignmentId: string;
+  amount: number;
+  currency: "RUB";
+  status: PaymentRecordStatus;
+  provider: string;
+  externalId?: string;
+  paidAt?: string;
+  createdAt: string;
+};
+
 export type Teacher = {
   id: string;
   fullName: string;
   avatarInitials?: string;
+  /** URL для отображения фото (из photoKey или placeholder) */
+  photoUrl?: string | null;
+  bio?: string;
   subjects: string[];
   specializations?: string[];
   phone?: string;
@@ -227,7 +295,7 @@ export type Topic = {
 };
 
 export type DemoData = {
-  version: 5;
+  version: 6;
   teachers: Teacher[];
   students: Student[];
   lessons: Lesson[];
@@ -236,6 +304,9 @@ export type DemoData = {
   topics: Topic[];
   homeworks: Homework[];
   homeworkAssignments: HomeworkAssignment[];
+  tariffs: Tariff[];
+  tariffAssignments: StudentTariffAssignment[];
+  payments: PaymentRecord[];
   currentTeacherId: string;
   direkciyaTeacherId: string;
   /** Demo-ученик для кабинета «Аудитория» */

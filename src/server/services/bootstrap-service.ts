@@ -7,7 +7,10 @@ import {
   attendances,
   lessonStudents,
   lessons,
+  payments,
+  studentTariffAssignments,
   students,
+  tariffs,
   teachers,
   testAnswerKeys,
   testAssignments,
@@ -16,6 +19,8 @@ import {
   topics,
   users,
 } from "@/server/db/schema";
+import { publicMediaUrl } from "@/server/media/storage";
+import { refreshExpiredAssignments } from "@/server/services/tariffs-service";
 import type { AppDb } from "@/server/db/types";
 import { mergeQuestionsWithKeys } from "@/server/services/question-merge";
 import type {
@@ -24,8 +29,12 @@ import type {
   Homework,
   HomeworkAssignment,
   Lesson,
+  PaymentRecord,
   Student,
   StudentAnswer,
+  StudentTariffAssignment,
+  Tariff,
+  TariffFeatureKey,
   Teacher,
   Topic,
   TopicSection,
@@ -44,6 +53,7 @@ export async function buildBootstrap(
   ctx: AuthContext
 ): Promise<DemoData> {
   const orgId = ctx.organizationId;
+  await refreshExpiredAssignments(db, orgId);
 
   const teacherRows = await db
     .select()
@@ -269,6 +279,8 @@ export async function buildBootstrap(
     id: t.id,
     fullName: t.fullName,
     avatarInitials: t.avatarInitials ?? undefined,
+    photoUrl: publicMediaUrl(t.photoKey),
+    bio: t.bio ?? undefined,
     subjects: (t.subjects as string[]) ?? [],
     specializations: (t.specializations as string[]) ?? undefined,
     phone: t.phone ?? undefined,
@@ -280,7 +292,8 @@ export async function buildBootstrap(
     defaultDurationMin: t.defaultDurationMin ?? undefined,
     workDays: (t.workDays as number[]) ?? undefined,
     workIntervals: t.workIntervals ?? undefined,
-    adminNotes: t.adminNotes ?? undefined,
+    adminNotes:
+      ctx.role === "director" ? t.adminNotes ?? undefined : undefined,
     userId: t.userId,
     accountEmail: t.userId ? accountEmailById.get(t.userId) ?? null : null,
     accountRole: t.userId ? ("teacher" as const) : null,
@@ -333,6 +346,90 @@ export async function buildBootstrap(
     sortOrder: t.sortOrder,
   }));
 
+  let tariffRows = await db
+    .select()
+    .from(tariffs)
+    .where(eq(tariffs.organizationId, orgId));
+  let assignmentRowsTariff = await db
+    .select()
+    .from(studentTariffAssignments)
+    .where(eq(studentTariffAssignments.organizationId, orgId));
+  let paymentRows = await db
+    .select()
+    .from(payments)
+    .where(eq(payments.organizationId, orgId));
+
+  if (ctx.role === "student" && ctx.studentId) {
+    assignmentRowsTariff = assignmentRowsTariff.filter(
+      (a) => a.studentId === ctx.studentId
+    );
+    paymentRows = paymentRows.filter((p) => p.studentId === ctx.studentId);
+    const tariffIds = new Set(assignmentRowsTariff.map((a) => a.tariffId));
+    tariffRows = tariffRows.filter((t) => tariffIds.has(t.id));
+  }
+
+  if (ctx.role === "teacher") {
+    // Преподавателю тарифы не нужны в полном виде
+    tariffRows = [];
+    assignmentRowsTariff = [];
+    paymentRows = [];
+  }
+
+  const assignedCount = new Map<string, number>();
+  for (const a of await db
+    .select()
+    .from(studentTariffAssignments)
+    .where(eq(studentTariffAssignments.organizationId, orgId))) {
+    assignedCount.set(a.tariffId, (assignedCount.get(a.tariffId) ?? 0) + 1);
+  }
+
+  const mappedTariffs: Tariff[] = tariffRows.map((t) => ({
+    id: t.id,
+    name: t.name,
+    price: Number(t.price),
+    currency: "RUB",
+    durationDays: t.durationDays,
+    lessonsLimit: t.lessonsLimit ?? undefined,
+    includesText: t.includesText ?? undefined,
+    features: (t.features as TariffFeatureKey[]) ?? [],
+    status: t.status as Tariff["status"],
+    adminNotes:
+      ctx.role === "director" ? t.adminNotes ?? undefined : undefined,
+    assignedCount: assignedCount.get(t.id) ?? 0,
+  }));
+
+  const tariffNameById = new Map(tariffRows.map((t) => [t.id, t]));
+  const mappedTariffAssignments: StudentTariffAssignment[] =
+    assignmentRowsTariff.map((a) => {
+      const t = tariffNameById.get(a.tariffId);
+      return {
+        id: a.id,
+        studentId: a.studentId,
+        tariffId: a.tariffId,
+        startsAt: a.startsAt.toISOString(),
+        endsAt: a.endsAt.toISOString(),
+        priceSnapshot: Number(a.priceSnapshot),
+        currency: "RUB",
+        status: a.status as StudentTariffAssignment["status"],
+        paymentStatus: a.paymentStatus as StudentTariffAssignment["paymentStatus"],
+        tariffName: t?.name,
+        includesText: t?.includesText ?? undefined,
+      };
+    });
+
+  const mappedPayments: PaymentRecord[] = paymentRows.map((p) => ({
+    id: p.id,
+    studentId: p.studentId,
+    assignmentId: p.assignmentId,
+    amount: Number(p.amount),
+    currency: "RUB",
+    status: p.status as PaymentRecord["status"],
+    provider: p.provider,
+    externalId: p.externalId ?? undefined,
+    paidAt: p.paidAt?.toISOString(),
+    createdAt: p.createdAt.toISOString(),
+  }));
+
   const currentTeacherId =
     ctx.role === "teacher"
       ? ctx.teacherId ?? mappedTeachers[0]?.id ?? ""
@@ -344,7 +441,7 @@ export async function buildBootstrap(
       : mappedStudents[0]?.id ?? "";
 
   return {
-    version: 5,
+    version: 6,
     teachers: mappedTeachers,
     students: mappedStudents,
     lessons: mappedLessons,
@@ -353,6 +450,9 @@ export async function buildBootstrap(
     topics: mappedTopics,
     homeworks,
     homeworkAssignments,
+    tariffs: mappedTariffs,
+    tariffAssignments: mappedTariffAssignments,
+    payments: mappedPayments,
     currentTeacherId,
     direkciyaTeacherId: currentTeacherId,
     currentStudentId,

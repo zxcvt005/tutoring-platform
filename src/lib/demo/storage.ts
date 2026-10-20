@@ -165,11 +165,11 @@ function pickCurrentStudentId(
   return withTeacher?.id ?? students[0]?.id ?? "";
 }
 
-function isValidV5(data: unknown): data is DemoData {
+function isValidV6(data: unknown): data is DemoData {
   if (!isObject(data)) return false;
   const d = data as DemoData;
   return (
-    d.version === 5 &&
+    d.version === 6 &&
     Array.isArray(d.teachers) &&
     Array.isArray(d.students) &&
     Array.isArray(d.lessons) &&
@@ -177,6 +177,9 @@ function isValidV5(data: unknown): data is DemoData {
     Array.isArray(d.topics) &&
     Array.isArray(d.homeworks) &&
     Array.isArray(d.homeworkAssignments) &&
+    Array.isArray(d.tariffs) &&
+    Array.isArray(d.tariffAssignments) &&
+    Array.isArray(d.payments) &&
     typeof d.currentTeacherId === "string" &&
     typeof d.direkciyaTeacherId === "string" &&
     typeof d.currentStudentId === "string" &&
@@ -189,7 +192,7 @@ function isValidV5(data: unknown): data is DemoData {
 
 export function migrateToV5(raw: unknown): DemoData | null {
   if (!isObject(raw)) return null;
-  if (isValidV5(raw)) return raw;
+  if (isValidV6(raw)) return raw;
 
   const blob = raw as LegacyBlob;
   const version = blob.version;
@@ -197,7 +200,8 @@ export function migrateToV5(raw: unknown): DemoData | null {
     version !== 2 &&
     version !== 3 &&
     version !== 4 &&
-    version !== 5
+    version !== 5 &&
+    version !== 6
   ) {
     return null;
   }
@@ -229,7 +233,7 @@ export function migrateToV5(raw: unknown): DemoData | null {
   ).map((a) => migrateAssignment(a, homeworks));
 
   return {
-    version: 5,
+    version: 6,
     teachers: blob.teachers,
     students: blob.students,
     lessons,
@@ -238,6 +242,15 @@ export function migrateToV5(raw: unknown): DemoData | null {
     topics,
     homeworks,
     homeworkAssignments,
+    tariffs: Array.isArray((blob as DemoData).tariffs)
+      ? (blob as DemoData).tariffs
+      : [],
+    tariffAssignments: Array.isArray((blob as DemoData).tariffAssignments)
+      ? (blob as DemoData).tariffAssignments
+      : [],
+    payments: Array.isArray((blob as DemoData).payments)
+      ? (blob as DemoData).payments
+      : [],
     currentTeacherId: blob.currentTeacherId ?? "",
     direkciyaTeacherId: blob.direkciyaTeacherId ?? "",
     currentStudentId: pickCurrentStudentId(
@@ -290,7 +303,7 @@ export function loadDemoData(): DemoData {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as unknown;
-      if (isValidV5(parsed) && parsed.teachers.length) {
+      if (isValidV6(parsed) && parsed.teachers.length) {
         clearLegacy();
         return parsed;
       }

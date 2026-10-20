@@ -34,7 +34,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { toast } from "sonner";
+
 import { initialsFromName } from "@/lib/format";
+import { ensureCsrfToken } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { Teacher, TeacherStatus } from "@/lib/types";
 
@@ -45,6 +48,7 @@ type FormState = {
   specializations: string;
   phone: string;
   email: string;
+  bio: string;
   startedAt: string;
   status: TeacherStatus;
   lessonPrice: string;
@@ -53,6 +57,7 @@ type FormState = {
   workDays: string;
   workInterval: string;
   adminNotes: string;
+  photoUrl?: string | null;
 };
 
 function toForm(t?: Teacher): FormState {
@@ -63,6 +68,7 @@ function toForm(t?: Teacher): FormState {
       specializations: "",
       phone: "",
       email: "",
+      bio: "",
       startedAt: "",
       status: "active",
       lessonPrice: "",
@@ -71,6 +77,7 @@ function toForm(t?: Teacher): FormState {
       workDays: "1,2,3,4,5",
       workInterval: "10:00-20:00",
       adminNotes: "",
+      photoUrl: null,
     };
   }
   return {
@@ -80,6 +87,7 @@ function toForm(t?: Teacher): FormState {
     specializations: (t.specializations ?? []).join(", "),
     phone: t.phone ?? "",
     email: t.email ?? "",
+    bio: t.bio ?? "",
     startedAt: t.startedAt ? t.startedAt.slice(0, 10) : "",
     status: t.status,
     lessonPrice: t.lessonPrice != null ? String(t.lessonPrice) : "",
@@ -90,6 +98,7 @@ function toForm(t?: Teacher): FormState {
       ? `${t.workIntervals[0].start}-${t.workIntervals[0].end}`
       : "",
     adminNotes: t.adminNotes ?? "",
+    photoUrl: t.photoUrl,
   };
 }
 
@@ -121,6 +130,7 @@ export function TeachersWorkspace() {
       id: form.id,
       fullName: form.fullName.trim(),
       avatarInitials: initialsFromName(form.fullName),
+      bio: form.bio.trim() || undefined,
       subjects: form.subjects
         .split(",")
         .map((s) => s.trim())
@@ -149,6 +159,36 @@ export function TeachersWorkspace() {
       adminNotes: form.adminNotes.trim() || undefined,
     });
     setOpen(false);
+  }
+
+  async function uploadPhoto(file: File | null) {
+    if (!file || !form.id) {
+      toast.error("Сначала сохраните карточку преподавателя");
+      return;
+    }
+    try {
+      const csrf = await ensureCsrfToken();
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch(`/api/admin/teachers/${form.id}/photo`, {
+        method: "POST",
+        headers: { "x-csrf-token": csrf },
+        credentials: "include",
+        body,
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        photoUrl?: string;
+        error?: { message?: string };
+      };
+      if (!res.ok) {
+        throw new Error(data.error?.message || `HTTP ${res.status}`);
+      }
+      setForm((f) => ({ ...f, photoUrl: data.photoUrl }));
+      toast.success("Фото загружено");
+      window.location.reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Не удалось загрузить фото");
+    }
   }
 
   return (
@@ -301,6 +341,39 @@ export function TeachersWorkspace() {
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
               />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label>Описание для учеников</Label>
+              <Textarea
+                rows={3}
+                value={form.bio}
+                onChange={(e) => setForm({ ...form, bio: e.target.value })}
+                placeholder="Коротко о подходе и опыте"
+              />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label>Фотография</Label>
+              {form.photoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={form.photoUrl}
+                  alt=""
+                  className="mb-2 size-16 rounded-xl object-cover"
+                />
+              ) : null}
+              <Input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                disabled={!form.id}
+                onChange={(e) =>
+                  void uploadPhoto(e.target.files?.[0] ?? null)
+                }
+              />
+              {!form.id ? (
+                <p className="text-xs text-muted-foreground">
+                  Сохраните преподавателя, затем загрузите фото.
+                </p>
+              ) : null}
             </div>
             <div className="space-y-1.5">
               <Label>Дата начала работы</Label>

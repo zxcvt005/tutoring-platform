@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import { AuditoriaMonthCalendar } from "@/components/auditoria/month-calendar";
+import { MyTariffBlock } from "@/components/auditoria/my-tariff-block";
+import { AuditoriaTeacherCard } from "@/components/auditoria/teacher-card";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
 import {
@@ -172,14 +175,25 @@ export function AuditoriaHomePanel() {
 
   return (
     <div>
-      <PageHeader
-        title={`Здравствуйте, ${student.fullName.split(" ")[0]}`}
-        description={
-          teacher
-            ? `Преподаватель: ${teacher.fullName}. Здесь только ваши занятия и задания.`
-            : "Преподаватель пока не назначен."
-        }
-      />
+      <PageHeader title={`Здравствуйте, ${student.fullName.split(" ")[0]}`} />
+
+      <div className="mb-8 grid gap-4 lg:grid-cols-2">
+        <AuditoriaTeacherCard teacher={teacher ?? null} />
+        <MyTariffBlock studentId={studentId} />
+      </div>
+
+      <div className="mb-8">
+        <h2 className="mb-3 font-display text-lg font-semibold tracking-tight">
+          Календарь занятий
+        </h2>
+        <AuditoriaMonthCalendar
+          lessons={lessons}
+          studentId={studentId}
+          attendances={data.attendances}
+          teachers={data.teachers}
+          topics={data.topics}
+        />
+      </div>
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <div className="space-y-8">

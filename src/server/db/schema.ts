@@ -104,6 +104,10 @@ export const teachers = pgTable("teachers", {
   }),
   fullName: text("full_name").notNull(),
   avatarInitials: text("avatar_initials"),
+  /** Путь к файлу относительно каталога uploads, напр. teachers/t1.webp */
+  photoKey: text("photo_key"),
+  /** Публичное описание для учеников */
+  bio: text("bio"),
   subjects: jsonb("subjects").$type<string[]>().notNull().default([]),
   specializations: jsonb("specializations").$type<string[]>(),
   phone: text("phone"),
@@ -468,6 +472,119 @@ export const loginAttempts = pgTable(
   ]
 );
 
+/** Продукт обучения (каталог). Не путать с назначением ученику. */
+export const tariffs = pgTable(
+  "tariffs",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    price: numeric("price", { precision: 12, scale: 2 }).notNull(),
+    currency: text("currency").notNull().default("RUB"),
+    /** Срок действия назначения в днях от даты начала */
+    durationDays: integer("duration_days").notNull(),
+    lessonsLimit: integer("lessons_limit"),
+    includesText: text("includes_text"),
+    /** Структурированные возможности, напр. ["individual_lessons","homework"] */
+    features: jsonb("features").$type<string[]>().notNull().default([]),
+    status: text("status").notNull().default("active"),
+    adminNotes: text("admin_notes"),
+    ...timestamps,
+  },
+  (t) => [
+    index("tariffs_org_idx").on(t.organizationId),
+    check(
+      "tariffs_status_check",
+      sql`${t.status} in ('active', 'archived')`
+    ),
+    check("tariffs_currency_check", sql`${t.currency} in ('RUB')`),
+  ]
+);
+
+/**
+ * Назначение тарифа ученику (подписка / период).
+ * priceSnapshot фиксирует цену на момент оформления.
+ */
+export const studentTariffAssignments = pgTable(
+  "student_tariff_assignments",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    studentId: text("student_id")
+      .notNull()
+      .references(() => students.id, { onDelete: "cascade" }),
+    tariffId: text("tariff_id")
+      .notNull()
+      .references(() => tariffs.id, { onDelete: "restrict" }),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    priceSnapshot: numeric("price_snapshot", {
+      precision: 12,
+      scale: 2,
+    }).notNull(),
+    currency: text("currency").notNull().default("RUB"),
+    status: text("status").notNull().default("pending_payment"),
+    paymentStatus: text("payment_status").notNull().default("unpaid"),
+    ...timestamps,
+  },
+  (t) => [
+    index("sta_org_student_idx").on(t.organizationId, t.studentId),
+    index("sta_tariff_idx").on(t.tariffId),
+    check(
+      "sta_status_check",
+      sql`${t.status} in ('pending_payment', 'active', 'expired', 'cancelled', 'paused')`
+    ),
+    check(
+      "sta_payment_status_check",
+      sql`${t.paymentStatus} in ('unpaid', 'paid', 'refunded')`
+    ),
+    check("sta_time_check", sql`${t.endsAt} > ${t.startsAt}`),
+  ]
+);
+
+export const payments = pgTable(
+  "payments",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    studentId: text("student_id")
+      .notNull()
+      .references(() => students.id, { onDelete: "cascade" }),
+    assignmentId: text("assignment_id")
+      .notNull()
+      .references(() => studentTariffAssignments.id, { onDelete: "restrict" }),
+    amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+    currency: text("currency").notNull().default("RUB"),
+    status: text("status").notNull().default("pending"),
+    provider: text("provider").notNull().default("stub"),
+    externalId: text("external_id"),
+    /** Защита от дублей при повторных запросах создания платежа */
+    idempotencyKey: text("idempotency_key").notNull(),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    failureReason: text("failure_reason"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    ...timestamps,
+  },
+  (t) => [
+    index("payments_org_student_idx").on(t.organizationId, t.studentId),
+    index("payments_assignment_idx").on(t.assignmentId),
+    uniqueIndex("payments_idempotency_uidx").on(
+      t.organizationId,
+      t.idempotencyKey
+    ),
+    check(
+      "payments_status_check",
+      sql`${t.status} in ('pending', 'paid', 'cancelled', 'failed')`
+    ),
+  ]
+);
+
 export const schema = {
   organizations,
   users,
@@ -489,4 +606,7 @@ export const schema = {
   auditLog,
   idempotencyKeys,
   loginAttempts,
+  tariffs,
+  studentTariffAssignments,
+  payments,
 };

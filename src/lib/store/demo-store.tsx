@@ -154,7 +154,7 @@ type DemoStoreValue = {
 const DemoStoreContext = createContext<DemoStoreValue | null>(null);
 
 const EMPTY_DATA: DemoData = {
-  version: 5,
+  version: 6,
   teachers: [],
   students: [],
   lessons: [],
@@ -163,6 +163,9 @@ const EMPTY_DATA: DemoData = {
   topics: [],
   homeworks: [],
   homeworkAssignments: [],
+  tariffs: [],
+  tariffAssignments: [],
+  payments: [],
   currentTeacherId: "",
   direkciyaTeacherId: "",
   currentStudentId: "",

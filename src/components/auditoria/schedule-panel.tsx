@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 
+import { AuditoriaMonthCalendar } from "@/components/auditoria/month-calendar";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
 import { LessonStatusBadge } from "@/components/status-badge";
@@ -22,8 +23,13 @@ export function AuditoriaSchedulePanel() {
   const student = data.students.find((s) => s.id === studentId);
   const now = useMemo(() => new Date().getTime(), []);
 
+  const allLessons = useMemo(
+    () => lessonsForStudent(studentId),
+    [lessonsForStudent, studentId]
+  );
+
   const { upcoming, past } = useMemo(() => {
-    const all = lessonsForStudent(studentId).sort(
+    const all = [...allLessons].sort(
       (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()
     );
     const upcoming = all.filter(
@@ -39,7 +45,7 @@ export function AuditoriaSchedulePanel() {
       )
       .reverse();
     return { upcoming, past };
-  }, [lessonsForStudent, studentId, now]);
+  }, [allLessons, now]);
 
   if (!student) {
     return (
@@ -103,6 +109,19 @@ export function AuditoriaSchedulePanel() {
         title="Расписание"
         description={`Занятия ${student.fullName}: только ваши слоты, без чужих учеников.`}
       />
+
+      <section className="mb-10 space-y-3">
+        <h2 className="font-display text-lg font-semibold tracking-tight">
+          Календарь месяца
+        </h2>
+        <AuditoriaMonthCalendar
+          lessons={allLessons}
+          studentId={studentId}
+          attendances={data.attendances}
+          teachers={data.teachers}
+          topics={data.topics}
+        />
+      </section>
 
       <section className="mb-10 space-y-3">
         <h2 className="font-display text-lg font-semibold tracking-tight">

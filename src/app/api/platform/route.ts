@@ -118,6 +118,16 @@ export async function POST(request: Request) {
             p.updates as never,
             p.overallFeedback as string | undefined
           );
+        case "upsertTariff":
+          return m.upsertTariffAction(db, ctx, p);
+        case "archiveTariff":
+          return m.archiveTariffAction(db, ctx, String(p.id));
+        case "assignTariff":
+          return m.assignTariffAction(db, ctx, p);
+        case "adminMarkPaymentPaid":
+          return m.adminMarkPaidAction(db, ctx, p);
+        case "studentRequestPayment":
+          return m.studentPayAction(db, ctx, String(p.assignmentId));
         default:
           throw validationError(`Неизвестное действие: ${raw.action}`);
       }
@@ -128,6 +138,8 @@ export async function POST(request: Request) {
       "reviewHomeworkAssignment",
       "assignHomework",
       "completeLesson",
+      "studentRequestPayment",
+      "assignTariff",
     ]);
 
     if (idempotent.has(raw.action)) {

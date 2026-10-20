@@ -142,6 +142,8 @@ export async function seedDemoOrganization(
       userId: uid,
       fullName: teacher.fullName,
       avatarInitials: teacher.avatarInitials,
+      bio: teacher.bio ?? null,
+      photoKey: null,
       subjects: teacher.subjects,
       specializations: teacher.specializations,
       phone: teacher.phone,
@@ -335,6 +337,54 @@ export async function seedDemoOrganization(
     }
   }
 
+  for (const tariff of demo.tariffs) {
+    await db.insert(t.tariffs).values({
+      id: tariff.id,
+      organizationId: DEMO_ORG_ID,
+      name: tariff.name,
+      price: num(tariff.price)!,
+      currency: "RUB",
+      durationDays: tariff.durationDays,
+      lessonsLimit: tariff.lessonsLimit ?? null,
+      includesText: tariff.includesText ?? null,
+      features: tariff.features,
+      status: tariff.status,
+      adminNotes: tariff.adminNotes ?? null,
+    });
+  }
+
+  for (const a of demo.tariffAssignments) {
+    await db.insert(t.studentTariffAssignments).values({
+      id: a.id,
+      organizationId: DEMO_ORG_ID,
+      studentId: a.studentId,
+      tariffId: a.tariffId,
+      startsAt: new Date(a.startsAt),
+      endsAt: new Date(a.endsAt),
+      priceSnapshot: num(a.priceSnapshot)!,
+      currency: "RUB",
+      status: a.status,
+      paymentStatus: a.paymentStatus,
+    });
+  }
+
+  for (const p of demo.payments) {
+    await db.insert(t.payments).values({
+      id: p.id,
+      organizationId: DEMO_ORG_ID,
+      studentId: p.studentId,
+      assignmentId: p.assignmentId,
+      amount: num(p.amount)!,
+      currency: "RUB",
+      status: p.status,
+      provider: p.provider,
+      externalId: p.externalId ?? null,
+      idempotencyKey: `seed:${p.id}`,
+      paidAt: p.paidAt ? new Date(p.paidAt) : null,
+      createdAt: new Date(p.createdAt),
+    });
+  }
+
   await db.insert(t.auditLog).values({
     id: "audit_seed_demo",
     organizationId: DEMO_ORG_ID,
@@ -347,6 +397,7 @@ export async function seedDemoOrganization(
       students: demo.students.length,
       tests: demo.homeworks.length,
       assignments: demo.homeworkAssignments.length,
+      tariffs: demo.tariffs.length,
     },
   });
 }

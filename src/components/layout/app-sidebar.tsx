@@ -6,8 +6,10 @@ import {
   BookOpen,
   CalendarDays,
   ClipboardList,
+  CreditCard,
   GraduationCap,
   LayoutDashboard,
+  Package,
   UserRound,
   Users,
   BookMarked,
@@ -36,6 +38,8 @@ const direkciyaNav: NavItem[] = [
   { href: "/direkciya", label: "Обзор", icon: LayoutDashboard },
   { href: "/direkciya/students", label: "Ученики", icon: GraduationCap },
   { href: "/direkciya/teachers", label: "Преподаватели", icon: Users },
+  { href: "/direkciya/tariffs", label: "Тарифы", icon: Package },
+  { href: "/direkciya/payments", label: "Платежи", icon: CreditCard },
   { href: "/direkciya/users", label: "Доступ", icon: UserRound },
   { href: "/direkciya/schedule", label: "Расписание", icon: CalendarDays },
   { href: "/direkciya/results", label: "Результаты", icon: ClipboardList },
@@ -73,9 +77,12 @@ const accentClass: Record<CabinetRole, string> = {
 function NavLinks({
   items,
   role,
+  alertHrefs,
 }: {
   items: NavItem[];
   role: CabinetRole;
+  /** Маршруты с красным индикатором (напр. ученики без преподавателя) */
+  alertHrefs?: Set<string>;
 }) {
   const pathname = usePathname();
   const homeHref =
@@ -93,6 +100,7 @@ function NavLinks({
             ? pathname === item.href
             : pathname === item.href || pathname.startsWith(`${item.href}/`);
         const Icon = item.icon;
+        const showAlert = alertHrefs?.has(item.href);
         return (
           <Link
             key={item.href}
@@ -116,7 +124,18 @@ function NavLinks({
                 active ? "opacity-90" : "opacity-55"
               )}
             />
-            {item.label}
+            <span className="flex min-w-0 flex-1 items-center gap-1.5">
+              {item.label}
+              {showAlert ? (
+                <span
+                  className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-full bg-red-500 text-[0.55rem] font-bold text-white"
+                  title="Есть ученики без преподавателя"
+                  aria-label="Есть ученики без преподавателя"
+                >
+                  !
+                </span>
+              ) : null}
+            </span>
           </Link>
         );
       })}
@@ -150,6 +169,15 @@ export function AppSidebar({
 
   const demoStudents = data.students.filter((s) => s.teacherId);
 
+  const unassignedActiveCount =
+    role === "direkciya"
+      ? data.students.filter((s) => !s.teacherId && s.status === "active").length
+      : 0;
+  const alertHrefs =
+    unassignedActiveCount > 0
+      ? new Set(["/direkciya/students"])
+      : undefined;
+
   return (
     <div className="flex h-full flex-col gap-5 p-4" onClick={onNavigate}>
       <div className="space-y-3">
@@ -169,7 +197,7 @@ export function AppSidebar({
         {demoLoginEnabled ? <RoleSwitcher /> : null}
       </div>
 
-      <NavLinks items={items} role={role} />
+      <NavLinks items={items} role={role} alertHrefs={alertHrefs} />
 
       {demoLoginEnabled && role === "kafedra" ? (
         <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>

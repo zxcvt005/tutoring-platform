@@ -11,6 +11,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:seed": "tsx scripts/db-seed.ts",
+    "db:seed:rich": "tsx scripts/db-seed-rich.ts",
     "db:up": "tsx scripts/db-up.ts",
     "db:verify": "tsx scripts/db-verify-pglite.ts",
     "db:verify:pg": "tsx scripts/db-verify-postgres.ts",

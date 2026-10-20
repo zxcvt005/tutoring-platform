@@ -37,6 +37,7 @@ export function createSeedData(): DemoData {
       workDays: [1, 2, 3, 4, 5],
       workIntervals: [{ start: "10:00", end: "20:00" }],
       adminNotes: "Сильный методист, еженедельные отчёты.",
+      bio: "Преподаю математику 12 лет. Готовлю к профильному ЕГЭ спокойно и системно: теория, практика, разбор ошибок.",
     },
     {
       id: "t2",
@@ -53,6 +54,7 @@ export function createSeedData(): DemoData {
       defaultDurationMin: 60,
       workDays: [1, 3, 5],
       workIntervals: [{ start: "15:00", end: "21:00" }],
+      bio: "Физик-практик. Объясняю сложное через опыты и понятные схемы.",
     },
     {
       id: "t3",
@@ -69,6 +71,7 @@ export function createSeedData(): DemoData {
       defaultDurationMin: 45,
       workDays: [2, 4, 6],
       workIntervals: [{ start: "11:00", end: "19:00" }],
+      bio: "Упор на разговорную практику и уверенность в речи.",
     },
     {
       id: "t4",
@@ -161,6 +164,20 @@ export function createSeedData(): DemoData {
       status: "active" as const,
       teacherId: "",
       notes: "Ждёт назначения преподавателя",
+    },
+    {
+      id: "s12",
+      fullName: "Ольга Рыбакова",
+      contacts: "+7 900 111-22-12",
+      status: "active" as const,
+      teacherId: "",
+      notes: "Новая заявка с регистрации",
+    },
+    {
+      id: "s13",
+      fullName: "Павел Чернов",
+      status: "active" as const,
+      teacherId: "",
     },
   ];
 
@@ -798,8 +815,97 @@ export function createSeedData(): DemoData {
     },
   ];
 
+  const tariffs = [
+    {
+      id: "tariff_basic",
+      name: "Базовый",
+      price: 12000,
+      currency: "RUB" as const,
+      durationDays: 30,
+      lessonsLimit: 8,
+      includesText: "8 индивидуальных занятий и проверка домашних заданий",
+      features: ["individual_lessons", "homework"] as const,
+      status: "active" as const,
+    },
+    {
+      id: "tariff_standard",
+      name: "Стандарт",
+      price: 20000,
+      currency: "RUB" as const,
+      durationDays: 30,
+      lessonsLimit: 12,
+      includesText: "12 занятий, ДЗ и разбор ошибок",
+      features: ["individual_lessons", "homework"] as const,
+      status: "active" as const,
+    },
+    {
+      id: "tariff_intensive",
+      name: "Интенсив",
+      price: 35000,
+      currency: "RUB" as const,
+      durationDays: 45,
+      lessonsLimit: 20,
+      includesText: "Плотный график подготовки к экзамену",
+      features: ["individual_lessons", "homework", "intensives"] as const,
+      status: "active" as const,
+    },
+  ];
+
+  const tariffAssignments = [
+    {
+      id: "sta_s1",
+      studentId: "s1",
+      tariffId: "tariff_standard",
+      startsAt: daysAgo(10),
+      endsAt: atDay(20, 23, 59),
+      priceSnapshot: 20000,
+      currency: "RUB" as const,
+      status: "active" as const,
+      paymentStatus: "paid" as const,
+      tariffName: "Стандарт",
+      includesText: tariffs[1]!.includesText,
+    },
+    {
+      id: "sta_s2",
+      studentId: "s2",
+      tariffId: "tariff_basic",
+      startsAt: daysAgo(2),
+      endsAt: atDay(28, 23, 59),
+      priceSnapshot: 12000,
+      currency: "RUB" as const,
+      status: "pending_payment" as const,
+      paymentStatus: "unpaid" as const,
+      tariffName: "Базовый",
+      includesText: tariffs[0]!.includesText,
+    },
+  ];
+
+  const payments = [
+    {
+      id: "pay_s1",
+      studentId: "s1",
+      assignmentId: "sta_s1",
+      amount: 20000,
+      currency: "RUB" as const,
+      status: "paid" as const,
+      provider: "manual",
+      paidAt: daysAgo(10),
+      createdAt: daysAgo(10),
+    },
+    {
+      id: "pay_s2",
+      studentId: "s2",
+      assignmentId: "sta_s2",
+      amount: 12000,
+      currency: "RUB" as const,
+      status: "pending" as const,
+      provider: "stub",
+      createdAt: daysAgo(2),
+    },
+  ];
+
   return {
-    version: 5,
+    version: 6,
     teachers,
     students,
     lessons,
@@ -808,6 +914,12 @@ export function createSeedData(): DemoData {
     topics,
     homeworks,
     homeworkAssignments,
+    tariffs: tariffs.map((t) => ({
+      ...t,
+      features: [...t.features],
+    })),
+    tariffAssignments,
+    payments,
     currentTeacherId: "t1",
     direkciyaTeacherId: "t1",
     currentStudentId: "s1",

@@ -105,6 +105,7 @@ export async function upsertTeacher(
       .set({
         fullName,
         avatarInitials: teacher.avatarInitials ?? existing.avatarInitials,
+        bio: teacher.bio !== undefined ? teacher.bio || null : existing.bio,
         subjects: teacher.subjects ?? existing.subjects,
         specializations:
           teacher.specializations !== undefined
@@ -140,6 +141,7 @@ export async function upsertTeacher(
     organizationId: ctx.organizationId,
     fullName: teacher.fullName,
     avatarInitials: teacher.avatarInitials ?? null,
+    bio: teacher.bio ?? null,
     subjects: teacher.subjects ?? [],
     specializations: teacher.specializations ?? null,
     phone: teacher.phone ?? null,
@@ -909,7 +911,11 @@ export async function saveHomeworkDraftAction(
   id: string,
   answers: StudentAnswer[]
 ) {
-  await requireStudentProfile(ctx);
+  const sid = await requireStudentProfile(ctx);
+  const { assertStudentLearningAccess } = await import(
+    "@/server/services/learning-access"
+  );
+  await assertStudentLearningAccess(db, ctx, sid, "homework");
   return saveDraft(db, ctx, id, answers);
 }
 
@@ -919,7 +925,11 @@ export async function submitHomeworkAction(
   id: string,
   answers: StudentAnswer[]
 ) {
-  await requireStudentProfile(ctx);
+  const sid = await requireStudentProfile(ctx);
+  const { assertStudentLearningAccess } = await import(
+    "@/server/services/learning-access"
+  );
+  await assertStudentLearningAccess(db, ctx, sid, "homework");
   return submitAssignment(db, ctx, id, answers);
 }
 
@@ -936,6 +946,76 @@ export async function reviewHomeworkAction(
 ) {
   await requireTeacherProfile(ctx);
   return reviewAssignment(db, ctx, id, updates, overallFeedback);
+}
+
+export async function upsertTariffAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { upsertTariff } = await import("@/server/services/tariffs-service");
+  return upsertTariff(db, ctx, {
+    id: payload.id as string | undefined,
+    name: String(payload.name ?? ""),
+    price: Number(payload.price),
+    durationDays: Number(payload.durationDays),
+    lessonsLimit:
+      payload.lessonsLimit == null ? null : Number(payload.lessonsLimit),
+    includesText: (payload.includesText as string) ?? null,
+    features: payload.features as string[] | undefined,
+    status: payload.status as "active" | "archived" | undefined,
+    adminNotes: (payload.adminNotes as string) ?? null,
+  });
+}
+
+export async function archiveTariffAction(
+  db: AppDb,
+  ctx: AuthContext,
+  id: string
+) {
+  const { archiveTariff } = await import("@/server/services/tariffs-service");
+  return archiveTariff(db, ctx, id);
+}
+
+export async function assignTariffAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { assignTariffToStudent } = await import(
+    "@/server/services/tariffs-service"
+  );
+  return assignTariffToStudent(db, ctx, {
+    studentId: String(payload.studentId),
+    tariffId: String(payload.tariffId),
+    startsAt: payload.startsAt as string | undefined,
+    endsAt: payload.endsAt as string | undefined,
+  });
+}
+
+export async function adminMarkPaidAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { adminMarkPaymentPaid } = await import(
+    "@/server/services/tariffs-service"
+  );
+  return adminMarkPaymentPaid(db, ctx, {
+    paymentId: String(payload.paymentId),
+    reason: String(payload.reason ?? ""),
+  });
+}
+
+export async function studentPayAction(
+  db: AppDb,
+  ctx: AuthContext,
+  assignmentId: string
+) {
+  const { studentRequestPayment } = await import(
+    "@/server/services/tariffs-service"
+  );
+  return studentRequestPayment(db, ctx, assignmentId);
 }
 
 /** Dispatch table for /api/platform */
@@ -963,6 +1043,11 @@ export const platformActions = {
   saveHomeworkDraft: saveHomeworkDraftAction,
   submitHomeworkAssignment: submitHomeworkAction,
   reviewHomeworkAssignment: reviewHomeworkAction,
+  upsertTariff: upsertTariffAction,
+  archiveTariff: archiveTariffAction,
+  assignTariff: assignTariffAction,
+  adminMarkPaymentPaid: adminMarkPaidAction,
+  studentRequestPayment: studentPayAction,
 } as const;
 
 export type PlatformAction = keyof typeof platformActions;

@@ -11,6 +11,12 @@ loadEnv({ path: ".env.local" });
 loadEnv();
 
 async function main() {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "Отказ: npm run db:seed нельзя запускать при NODE_ENV=production (демо-пароли)."
+    );
+  }
+
   const url = requireDatabaseUrl();
   const { db, sql } = createDb(url);
 

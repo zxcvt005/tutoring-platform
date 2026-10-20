@@ -34,6 +34,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { toast } from "sonner";
+
+import { apiPlatform } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { PersonStatus, Student } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -45,6 +48,7 @@ type FormState = {
   status: PersonStatus;
   teacherId: string;
   notes: string;
+  tariffId: string;
 };
 
 const emptyForm = (teacherId: string): FormState => ({
@@ -53,6 +57,7 @@ const emptyForm = (teacherId: string): FormState => ({
   status: "active",
   teacherId,
   notes: "",
+  tariffId: "",
 });
 
 export function StudentsByTeacher({
@@ -64,12 +69,13 @@ export function StudentsByTeacher({
     useDemoStore();
 
   const [teacherFilter, setTeacherFilter] = useState<string>(
-    mode === "kafedra" ? data.currentTeacherId : data.direkciyaTeacherId || "all"
+    mode === "kafedra" ? data.currentTeacherId : "unassigned"
   );
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | PersonStatus>("all");
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm(data.teachers[0]?.id ?? ""));
+  const [initialTariffId, setInitialTariffId] = useState("");
 
   const basePath = mode === "direkciya" ? "/direkciya" : "/kafedra";
 
@@ -108,6 +114,7 @@ export function StudentsByTeacher({
   const editable = mode === "direkciya" || mode === "kafedra";
 
   function openCreate() {
+    setInitialTariffId("");
     setForm(
       emptyForm(
         mode === "kafedra"
@@ -121,6 +128,14 @@ export function StudentsByTeacher({
   }
 
   function openEdit(student: Student) {
+    const currentTariff = data.tariffAssignments
+      .filter((a) => a.studentId === student.id)
+      .sort(
+        (a, b) =>
+          new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime()
+      )[0];
+    const tariffId = currentTariff?.tariffId ?? "";
+    setInitialTariffId(tariffId);
     setForm({
       id: student.id,
       fullName: student.fullName,
@@ -128,20 +143,38 @@ export function StudentsByTeacher({
       status: student.status,
       teacherId: student.teacherId,
       notes: student.notes ?? "",
+      tariffId,
     });
     setOpen(true);
   }
 
-  function save() {
+  async function save() {
     if (!form.fullName.trim()) return;
+    const id =
+      form.id ?? `s_${Math.random().toString(36).slice(2, 9)}`;
     upsertStudent({
-      id: form.id,
+      id,
       fullName: form.fullName.trim(),
       contacts: form.contacts.trim() || undefined,
       status: form.status,
       teacherId: form.teacherId,
       notes: form.notes.trim() || undefined,
     });
+    if (
+      mode === "direkciya" &&
+      form.tariffId &&
+      form.tariffId !== initialTariffId
+    ) {
+      try {
+        await apiPlatform("assignTariff", {
+          studentId: id,
+          tariffId: form.tariffId,
+        });
+        toast.success("Тариф назначен");
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Не удалось назначить тариф");
+      }
+    }
     setOpen(false);
   }
 
@@ -251,7 +284,18 @@ export function StudentsByTeacher({
       ) : null}
 
       {rows.length === 0 ? (
-        <EmptyState title="Нет учеников" description="Измените фильтр или добавьте запись." />
+        <EmptyState
+          title={
+            mode === "direkciya" && teacherFilter === "unassigned"
+              ? "Все ученики назначены"
+              : "Нет учеников"
+          }
+          description={
+            mode === "direkciya" && teacherFilter === "unassigned"
+              ? "Сейчас нет учеников без преподавателя. Можно показать всех или выбрать преподавателя."
+              : "Измените фильтр или добавьте запись."
+          }
+        />
       ) : (
         <Table>
           <TableHeader>
@@ -398,6 +442,44 @@ export function StudentsByTeacher({
                 </SelectContent>
               </Select>
             </div>
+            {mode === "direkciya" ? (
+              <div className="space-y-1.5">
+                <Label>Тариф</Label>
+                <Select
+                  value={form.tariffId || "__none__"}
+                  onValueChange={(v) =>
+                    v &&
+                    setForm({
+                      ...form,
+                      tariffId: v === "__none__" ? "" : v,
+                    })
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue>
+                      {(v) =>
+                        !v || v === "__none__"
+                          ? "Не назначен"
+                          : (data.tariffs.find((t) => t.id === v)?.name ?? "—")
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Не назначен</SelectItem>
+                    {data.tariffs
+                      .filter((t) => t.status === "active")
+                      .map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.name} · {t.price.toLocaleString("ru-RU")} ₽
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  При сохранении создаётся новое назначение (история сохраняется).
+                </p>
+              </div>
+            ) : null}
             <div className="space-y-1.5">
               <Label>Заметки</Label>
               <Textarea
@@ -425,7 +507,7 @@ export function StudentsByTeacher({
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>
                 Отмена
               </Button>
-              <Button type="button" onClick={save}>
+              <Button type="button" onClick={() => void save()}>
                 Сохранить
               </Button>
             </div>
