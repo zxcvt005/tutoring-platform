@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import { EnterCabinetButton } from "@/components/admin/enter-cabinet-button";
 import { EmptyState } from "@/components/empty-state";
 import { FilterBar } from "@/components/layout/filter-bar";
 import { PageHeader } from "@/components/layout/page-header";
@@ -258,7 +259,8 @@ export function StudentsByTeacher({
               <TableHead>ФИО</TableHead>
               {mode === "direkciya" ? <TableHead>Преподаватель</TableHead> : null}
               <TableHead>Статус</TableHead>
-              <TableHead className="w-36" />
+              {mode === "direkciya" ? <TableHead>Аккаунт</TableHead> : null}
+              <TableHead className="w-48" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -285,8 +287,26 @@ export function StudentsByTeacher({
                 <TableCell>
                   <PersonStatusBadge status={s.status} />
                 </TableCell>
+                {mode === "direkciya" ? (
+                  <TableCell className="text-xs text-muted-foreground">
+                    {s.accountEmail ? (
+                      <>
+                        <div>{s.accountEmail}</div>
+                        <div>роль: student</div>
+                      </>
+                    ) : (
+                      "нет входа"
+                    )}
+                  </TableCell>
+                ) : null}
                 <TableCell>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {mode === "direkciya" ? (
+                      <EnterCabinetButton
+                        userId={s.userId}
+                        studentId={s.id}
+                      />
+                    ) : null}
                     <Link
                       href={`${basePath}/students/${s.id}`}
                       className="text-sm font-medium underline-offset-2 hover:underline"

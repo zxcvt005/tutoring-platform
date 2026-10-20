@@ -165,6 +165,10 @@ export type Teacher = {
   workDays?: number[];
   workIntervals?: WorkInterval[];
   adminNotes?: string;
+  /** Связанная учётная запись (для входа / impersonation) */
+  userId?: string | null;
+  accountEmail?: string | null;
+  accountRole?: "teacher" | null;
 };
 
 export type Student = {
@@ -174,6 +178,10 @@ export type Student = {
   status: PersonStatus;
   teacherId: string;
   notes?: string;
+  /** Связанная учётная запись (для входа / impersonation) */
+  userId?: string | null;
+  accountEmail?: string | null;
+  accountRole?: "student" | null;
 };
 
 export type Lesson = {

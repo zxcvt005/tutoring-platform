@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Menu } from "lucide-react";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
+import { ImpersonationBanner } from "@/components/layout/impersonation-banner";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -33,7 +34,9 @@ export function CabinetShell({
   const title = titles[role];
 
   return (
-    <div className="flex min-h-full flex-1 bg-background">
+    <div className="flex min-h-full flex-1 flex-col bg-background">
+      <ImpersonationBanner />
+      <div className="flex min-h-0 flex-1">
       <aside className="sticky top-0 hidden h-svh w-56 shrink-0 border-r border-sidebar-border bg-sidebar lg:w-[15rem] md:block">
         <AppSidebar role={role} />
       </aside>
@@ -70,6 +73,7 @@ export function CabinetShell({
             <div className="mx-auto w-full max-w-[92rem]">{children}</div>
           )}
         </main>
+      </div>
       </div>
     </div>
   );

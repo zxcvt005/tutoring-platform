@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import { EnterCabinetButton } from "@/components/admin/enter-cabinet-button";
 import { EmptyState } from "@/components/empty-state";
 import { FilterBar } from "@/components/layout/filter-bar";
 import { PageHeader } from "@/components/layout/page-header";
@@ -188,7 +189,8 @@ export function TeachersWorkspace() {
               <TableHead>Предметы</TableHead>
               <TableHead>Учеников</TableHead>
               <TableHead>Статус</TableHead>
-              <TableHead className="w-28" />
+              <TableHead>Аккаунт</TableHead>
+              <TableHead className="w-48" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -219,18 +221,34 @@ export function TeachersWorkspace() {
                 <TableCell>
                   <TeacherStatusBadge status={t.status} />
                 </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {t.accountEmail ? (
+                    <>
+                      <div>{t.accountEmail}</div>
+                      <div>роль: teacher</div>
+                    </>
+                  ) : (
+                    "нет входа"
+                  )}
+                </TableCell>
                 <TableCell>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      setForm(toForm(t));
-                      setOpen(true);
-                    }}
-                  >
-                    Изменить
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <EnterCabinetButton
+                      userId={t.userId}
+                      teacherId={t.id}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setForm(toForm(t));
+                        setOpen(true);
+                      }}
+                    >
+                      Изменить
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}

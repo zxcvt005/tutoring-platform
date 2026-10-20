@@ -78,6 +78,10 @@ export const sessions = pgTable("sessions", {
   userId: text("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
+  /** Если задан — сеанс открыт администратором «от имени» userId */
+  impersonatorUserId: text("impersonator_user_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   userAgent: text("user_agent"),
   ip: text("ip"),
@@ -87,6 +91,7 @@ export const sessions = pgTable("sessions", {
 }, (t) => [
   index("sessions_user_idx").on(t.userId),
   index("sessions_expires_idx").on(t.expiresAt),
+  index("sessions_impersonator_idx").on(t.impersonatorUserId),
 ]);
 
 export const teachers = pgTable("teachers", {

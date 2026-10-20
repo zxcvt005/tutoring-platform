@@ -33,6 +33,18 @@ export default function Home() {
               Войти →
             </Link>
             <Link
+              href="/register/teacher"
+              className="text-muted-foreground underline-offset-4 hover:underline"
+            >
+              Регистрация преподавателя
+            </Link>
+            <Link
+              href="/register/student"
+              className="text-muted-foreground underline-offset-4 hover:underline"
+            >
+              Регистрация ученика
+            </Link>
+            <Link
               href="/setup"
               className="text-muted-foreground underline-offset-4 hover:underline"
             >

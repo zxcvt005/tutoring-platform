@@ -17,6 +17,7 @@ export async function GET(request: Request) {
         studentId: ctx.studentId,
         fullName: ctx.fullName,
         email: ctx.email,
+        impersonation: ctx.impersonation,
       },
     });
   } catch (err) {

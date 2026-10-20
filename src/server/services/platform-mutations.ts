@@ -37,6 +37,7 @@ import {
   tests,
   topicSections,
   topics,
+  users,
 } from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
 import { badRequest, conflict, forbidden, notFound } from "@/server/errors";
@@ -85,6 +86,52 @@ export async function upsertTeacher(
   ctx: AuthContext,
   teacher: Omit<Teacher, "id"> & { id?: string }
 ) {
+  // Преподаватель может править только свой профиль (без ставок и adminNotes)
+  if (ctx.role === "teacher") {
+    const tid = await requireTeacherProfile(ctx);
+    if (teacher.id && teacher.id !== tid) throw forbidden();
+    const [existing] = await db
+      .select()
+      .from(teachers)
+      .where(eq(teachers.id, tid))
+      .limit(1);
+    if (!existing || existing.organizationId !== ctx.organizationId) {
+      throw notFound();
+    }
+    const fullName = teacher.fullName.trim();
+    if (!fullName) throw badRequest("Укажите ФИО");
+    await db
+      .update(teachers)
+      .set({
+        fullName,
+        avatarInitials: teacher.avatarInitials ?? existing.avatarInitials,
+        subjects: teacher.subjects ?? existing.subjects,
+        specializations:
+          teacher.specializations !== undefined
+            ? teacher.specializations
+            : existing.specializations,
+        phone: teacher.phone ?? null,
+        email: teacher.email ?? existing.email,
+        defaultDurationMin:
+          teacher.defaultDurationMin ?? existing.defaultDurationMin,
+        workDays: teacher.workDays ?? existing.workDays,
+        workIntervals: teacher.workIntervals ?? existing.workIntervals,
+        updatedAt: new Date(),
+      })
+      .where(eq(teachers.id, tid));
+    if (existing.userId) {
+      await db
+        .update(users)
+        .set({
+          fullName,
+          phone: teacher.phone ?? null,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, existing.userId));
+    }
+    return { id: tid };
+  }
+
   requireRoles(ctx, ["director"]);
   const id = teacher.id ?? newId("t");
   const existing = await db.select().from(teachers).where(eq(teachers.id, id)).limit(1);
@@ -110,6 +157,16 @@ export async function upsertTeacher(
   if (existing[0]) {
     if (existing[0].organizationId !== ctx.organizationId) throw forbidden();
     await db.update(teachers).set(values).where(eq(teachers.id, id));
+    if (existing[0].userId) {
+      await db
+        .update(users)
+        .set({
+          fullName: teacher.fullName,
+          phone: teacher.phone ?? null,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, existing[0].userId));
+    }
   } else {
     await db.insert(teachers).values({ ...values, createdAt: new Date() });
   }
@@ -138,6 +195,29 @@ export async function upsertStudent(
   ctx: AuthContext,
   student: Omit<Student, "id"> & { id?: string }
 ) {
+  // Ученик — только свои контакты и заметки; имя/преподавателя не меняет
+  if (ctx.role === "student") {
+    const sid = await requireStudentProfile(ctx);
+    if (student.id && student.id !== sid) throw forbidden();
+    const [existing] = await db
+      .select()
+      .from(students)
+      .where(eq(students.id, sid))
+      .limit(1);
+    if (!existing || existing.organizationId !== ctx.organizationId) {
+      throw notFound();
+    }
+    await db
+      .update(students)
+      .set({
+        contacts: student.contacts ?? null,
+        notes: student.notes ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(students.id, sid));
+    return { id: sid };
+  }
+
   requireRoles(ctx, ["director", "teacher"]);
   const id = student.id ?? newId("s");
   if (ctx.role === "teacher") {
@@ -165,6 +245,12 @@ export async function upsertStudent(
       throw forbidden();
     }
     await db.update(students).set(values).where(eq(students.id, id));
+    if (existing[0].userId && ctx.role === "director") {
+      await db
+        .update(users)
+        .set({ fullName: student.fullName, updatedAt: new Date() })
+        .where(eq(users.id, existing[0].userId));
+    }
   } else {
     await db.insert(students).values({ ...values, createdAt: new Date() });
   }

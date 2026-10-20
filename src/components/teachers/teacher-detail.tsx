@@ -4,6 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { useMemo } from "react";
 
+import { EnterCabinetButton } from "@/components/admin/enter-cabinet-button";
 import { PageHeader } from "@/components/layout/page-header";
 import {
   HomeworkAssignmentStatusBadge,
@@ -68,12 +69,18 @@ export function TeacherDetail({ teacherId }: { teacherId: string }) {
         title={teacher.fullName}
         description={teacher.subjects.join(" · ") || "Преподаватель"}
         actions={
-          <Link
-            href="/direkciya/teachers"
-            className="text-sm font-medium underline-offset-2 hover:underline"
-          >
-            ← К списку
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <EnterCabinetButton
+              userId={teacher.userId}
+              teacherId={teacher.id}
+            />
+            <Link
+              href="/direkciya/teachers"
+              className="text-sm font-medium underline-offset-2 hover:underline"
+            >
+              ← К списку
+            </Link>
+          </div>
         }
       />
 
@@ -92,7 +99,15 @@ export function TeacherDetail({ teacherId }: { teacherId: string }) {
           </div>
           <dl className="grid gap-2 text-sm">
             <Row label="Телефон" value={teacher.phone || "—"} />
-            <Row label="Email" value={teacher.email || "—"} />
+            <Row label="Email профиля" value={teacher.email || "—"} />
+            <Row
+              label="Email входа"
+              value={teacher.accountEmail || "нет учётной записи"}
+            />
+            <Row
+              label="Роль"
+              value={teacher.userId ? "teacher" : "—"}
+            />
             <Row
               label="Начало работы"
               value={teacher.startedAt ? formatDate(teacher.startedAt) : "—"}

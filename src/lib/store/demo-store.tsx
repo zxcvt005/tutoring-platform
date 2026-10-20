@@ -186,7 +186,8 @@ function isPublicAuthPath(pathname: string | null) {
     pathname === "/setup" ||
     pathname === "/" ||
     pathname?.startsWith("/login") ||
-    pathname?.startsWith("/setup")
+    pathname?.startsWith("/setup") ||
+    pathname?.startsWith("/register")
   );
 }
 

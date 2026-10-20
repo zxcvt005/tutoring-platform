@@ -14,6 +14,7 @@ import {
   tests,
   topicSections,
   topics,
+  users,
 } from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
 import { mergeQuestionsWithKeys } from "@/server/services/question-merge";
@@ -251,6 +252,19 @@ export async function buildBootstrap(
     };
   });
 
+  const accountUserIds = [
+    ...teacherRows.map((t) => t.userId).filter((id): id is string => !!id),
+    ...studentRows.map((s) => s.userId).filter((id): id is string => !!id),
+  ];
+  const accountRows =
+    accountUserIds.length > 0
+      ? await db
+          .select({ id: users.id, email: users.email })
+          .from(users)
+          .where(inArray(users.id, accountUserIds))
+      : [];
+  const accountEmailById = new Map(accountRows.map((u) => [u.id, u.email]));
+
   const mappedTeachers: Teacher[] = teacherRows.map((t) => ({
     id: t.id,
     fullName: t.fullName,
@@ -267,6 +281,9 @@ export async function buildBootstrap(
     workDays: (t.workDays as number[]) ?? undefined,
     workIntervals: t.workIntervals ?? undefined,
     adminNotes: t.adminNotes ?? undefined,
+    userId: t.userId,
+    accountEmail: t.userId ? accountEmailById.get(t.userId) ?? null : null,
+    accountRole: t.userId ? ("teacher" as const) : null,
   }));
 
   const mappedStudents: Student[] = studentRows.map((s) => ({
@@ -276,8 +293,10 @@ export async function buildBootstrap(
     status: s.status as Student["status"],
     teacherId: s.primaryTeacherId ?? "",
     notes: s.notes ?? undefined,
+    userId: s.userId,
+    accountEmail: s.userId ? accountEmailById.get(s.userId) ?? null : null,
+    accountRole: s.userId ? ("student" as const) : null,
   }));
-
   const mappedLessons: Lesson[] = lessonRows.map((l) => ({
     id: l.id,
     teacherId: l.teacherId,

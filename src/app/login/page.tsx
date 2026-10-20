@@ -90,7 +90,7 @@ function LoginForm() {
             Вход
           </h1>
           <p className="text-sm text-muted-foreground">
-            Войдите по email и паролю, выданным администратором школы.
+            Войдите по email и паролю. Если аккаунта ещё нет — зарегистрируйтесь.
           </p>
         </div>
 
@@ -136,6 +136,20 @@ function LoginForm() {
         <p className="text-sm text-muted-foreground">
           <Link href="/" className="underline-offset-4 hover:underline">
             На главную
+          </Link>
+          {" · "}
+          <Link
+            href="/register/teacher"
+            className="underline-offset-4 hover:underline"
+          >
+            Преподаватель
+          </Link>
+          {" · "}
+          <Link
+            href="/register/student"
+            className="underline-offset-4 hover:underline"
+          >
+            Ученик
           </Link>
           {needsBootstrap ? (
             <>

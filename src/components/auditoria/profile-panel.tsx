@@ -14,7 +14,7 @@ import { useDemoStore } from "@/lib/store/demo-store";
 import type { Student } from "@/lib/types";
 
 function ProfileSettingsForm({ student }: { student: Student }) {
-  const { upsertStudent, data } = useDemoStore();
+  const { upsertStudent, data, auth } = useDemoStore();
   const teacher = data.teachers.find((t) => t.id === student.teacherId);
   const [contacts, setContacts] = useState(student.contacts ?? "");
   const [notes, setNotes] = useState(student.notes ?? "");
@@ -32,7 +32,7 @@ function ProfileSettingsForm({ student }: { student: Student }) {
     <div>
       <PageHeader
         title="Мой профиль"
-        description="Ваши данные в прототипе. Родительского кабинета нет."
+        description="Доступные вам поля профиля. Имя и преподавателя меняет Дирекция."
       />
 
       <div className="grid max-w-xl gap-8">
@@ -51,6 +51,12 @@ function ProfileSettingsForm({ student }: { student: Student }) {
               <dt className="text-muted-foreground">Статус</dt>
               <dd>
                 <PersonStatusBadge status={student.status} />
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Email входа</dt>
+              <dd className="font-medium">
+                {auth?.email || student.accountEmail || "—"}
               </dd>
             </div>
           </dl>

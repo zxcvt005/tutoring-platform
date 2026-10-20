@@ -47,6 +47,7 @@ const kafedraNav: NavItem[] = [
   { href: "/kafedra/schedule", label: "Расписание", icon: CalendarDays },
   { href: "/kafedra/topics", label: "Темы", icon: BookMarked },
   { href: "/kafedra/results", label: "Результаты", icon: ClipboardList },
+  { href: "/kafedra/profile", label: "Мой профиль", icon: UserRound },
 ];
 
 const auditoriaNav: NavItem[] = [

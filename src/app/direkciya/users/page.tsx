@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { EnterCabinetButton } from "@/components/admin/enter-cabinet-button";
 import {
   apiAdminCreateUser,
   apiAdminPatchUser,
@@ -102,7 +103,7 @@ export default function DirekciyaUsersPage() {
     <div className="space-y-8">
       <PageHeader
         title="Пользователи"
-        description="Создание аккаунтов и управление доступом в вашей организации. Публичной регистрации нет."
+        description="Создание аккаунтов и управление доступом. Публичная регистрация преподавателей и учеников тоже доступна."
       />
 
       <form
@@ -181,16 +182,21 @@ export default function DirekciyaUsersPage() {
                 <td className="py-2 pr-3">{u.role}</td>
                 <td className="py-2 pr-3">{u.status}</td>
                 <td className="py-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="rounded-lg"
-                    onClick={() => void toggleStatus(u)}
-                    disabled={u.id === auth?.userId}
-                  >
-                    {u.status === "active" ? "Отключить" : "Включить"}
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {u.role === "teacher" || u.role === "student" ? (
+                      <EnterCabinetButton userId={u.id} />
+                    ) : null}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="rounded-lg"
+                      onClick={() => void toggleStatus(u)}
+                      disabled={u.id === auth?.userId}
+                    >
+                      {u.status === "active" ? "Отключить" : "Включить"}
+                    </Button>
+                  </div>
                 </td>
               </tr>
             ))}

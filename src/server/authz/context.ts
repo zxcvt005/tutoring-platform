@@ -6,10 +6,18 @@ import {
   memberships,
   students,
   teachers,
+  users,
 } from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
 
 export type MembershipRole = "director" | "teacher" | "student";
+
+export type ImpersonationInfo = {
+  active: true;
+  actorUserId: string;
+  actorEmail: string;
+  actorFullName: string;
+};
 
 export type AuthContext = {
   userId: string;
@@ -22,12 +30,17 @@ export type AuthContext = {
   /** Профиль ученика в текущей org, если role=student */
   studentId: string | null;
   sessionId: string;
+  /** Заполнено, если сеанс — административный просмотр чужого кабинета */
+  impersonation: ImpersonationInfo | null;
 };
 
 /**
  * Строит контекст из cookie-токена.
  * organizationId берётся из membership (не из клиента).
  * При нескольких membership — используем первую активную; позже можно выбрать org явно.
+ *
+ * Эффективная роль всегда роль session.userId (целевого пользователя при impersonation).
+ * Права директора в этом сеансе недоступны — исходная admin-сессия хранится отдельно.
  */
 export async function resolveAuthContext(
   db: AppDb,
@@ -89,6 +102,47 @@ export async function resolveAuthContext(
     studentId = s?.id ?? null;
   }
 
+  let impersonation: ImpersonationInfo | null = null;
+  if (sessionUser.impersonatorUserId) {
+    const [actor] = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        fullName: users.fullName,
+        status: users.status,
+      })
+      .from(users)
+      .where(eq(users.id, sessionUser.impersonatorUserId))
+      .limit(1);
+
+    if (!actor || actor.status !== "active") {
+      throw unauthorized("Сеанс просмотра недействителен");
+    }
+
+    // Имперсонатор должен оставаться директором той же организации
+    const [actorMem] = await db
+      .select()
+      .from(memberships)
+      .where(
+        and(
+          eq(memberships.userId, actor.id),
+          eq(memberships.organizationId, membership.organizationId),
+          eq(memberships.role, "director")
+        )
+      )
+      .limit(1);
+    if (!actorMem) {
+      throw unauthorized("Сеанс просмотра недействителен");
+    }
+
+    impersonation = {
+      active: true,
+      actorUserId: actor.id,
+      actorEmail: actor.email,
+      actorFullName: actor.fullName,
+    };
+  }
+
   return {
     userId: sessionUser.userId,
     email: sessionUser.email,
@@ -98,5 +152,6 @@ export async function resolveAuthContext(
     teacherId,
     studentId,
     sessionId: sessionUser.sessionId,
+    impersonation,
   };
 }

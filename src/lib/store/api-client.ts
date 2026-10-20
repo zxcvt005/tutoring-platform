@@ -1,4 +1,12 @@
+import { cabinetHomeForRole } from "@/lib/auth/cabinets";
 import type { DemoData } from "@/lib/types";
+
+export type ImpersonationAuth = {
+  active: true;
+  actorUserId: string;
+  actorEmail: string;
+  actorFullName: string;
+};
 
 export type BootstrapAuth = {
   userId: string;
@@ -8,7 +16,10 @@ export type BootstrapAuth = {
   studentId: string | null;
   fullName: string;
   email: string;
+  impersonation?: ImpersonationAuth | null;
 };
+
+export { cabinetHomeForRole };
 
 export type AuthFeatures = {
   demoLogin: boolean;
@@ -197,10 +208,83 @@ export async function apiAdminPatchUser(
   return parseJson(res);
 }
 
-export function cabinetHomeForRole(
-  role: "director" | "teacher" | "student"
-): string {
-  if (role === "teacher") return "/kafedra";
-  if (role === "student") return "/auditoria";
-  return "/direkciya";
+export async function apiRegisterTeacher(body: {
+  fullName: string;
+  email: string;
+  password: string;
+  passwordConfirm: string;
+  phone?: string;
+  subjects?: string[];
+  specializations?: string[];
+}) {
+  const headers = await mutatingHeaders();
+  const res = await fetch("/api/auth/register/teacher", {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  clearCsrfCache();
+  return parseJson<{
+    user: { id: string; email: string; fullName: string };
+    role: "teacher";
+    teacherId: string | null;
+  }>(res);
+}
+
+export async function apiRegisterStudent(body: {
+  fullName: string;
+  email: string;
+  password: string;
+  passwordConfirm: string;
+  contacts?: string;
+}) {
+  const headers = await mutatingHeaders();
+  const res = await fetch("/api/auth/register/student", {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  clearCsrfCache();
+  return parseJson<{
+    user: { id: string; email: string; fullName: string };
+    role: "student";
+    studentId: string | null;
+  }>(res);
+}
+
+export async function apiStartImpersonation(body: {
+  userId?: string;
+  teacherId?: string;
+  studentId?: string;
+}) {
+  const headers = await mutatingHeaders();
+  const res = await fetch("/api/admin/impersonate", {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  clearCsrfCache();
+  return parseJson<{
+    role: "director" | "teacher" | "student";
+    redirectTo: string;
+    impersonation: ImpersonationAuth | null;
+  }>(res);
+}
+
+export async function apiStopImpersonation() {
+  const headers = await mutatingHeaders();
+  const res = await fetch("/api/admin/impersonate/stop", {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: "{}",
+  });
+  clearCsrfCache();
+  return parseJson<{
+    role: "director" | "teacher" | "student";
+    redirectTo: string;
+  }>(res);
 }

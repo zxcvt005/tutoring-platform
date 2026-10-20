@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { notFound } from "next/navigation";
 
+import { EnterCabinetButton } from "@/components/admin/enter-cabinet-button";
 import { PageHeader } from "@/components/layout/page-header";
 import {
   HomeworkAssignmentStatusBadge,
@@ -80,12 +81,20 @@ export function StudentDetail({
             : "Преподаватель не назначен"
         }
         actions={
-          <Link
-            href={`${base}/students`}
-            className="text-sm font-medium underline-offset-2 hover:underline"
-          >
-            ← К списку
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            {mode === "direkciya" ? (
+              <EnterCabinetButton
+                userId={student.userId}
+                studentId={student.id}
+              />
+            ) : null}
+            <Link
+              href={`${base}/students`}
+              className="text-sm font-medium underline-offset-4 hover:underline"
+            >
+              ← К списку
+            </Link>
+          </div>
         }
       />
 
@@ -103,6 +112,18 @@ export function StudentDetail({
               <span className="text-muted-foreground">Контакты</span>
               <span>{student.contacts || "—"}</span>
             </div>
+            {mode === "direkciya" ? (
+              <>
+                <div className="flex justify-between gap-2">
+                  <span className="text-muted-foreground">Email входа</span>
+                  <span>{student.accountEmail || "нет учётной записи"}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-muted-foreground">Роль</span>
+                  <span>{student.userId ? "student" : "—"}</span>
+                </div>
+              </>
+            ) : null}
             {student.notes ? (
               <p className="rounded-xl bg-muted/40 px-3 py-2 text-muted-foreground">
                 {student.notes}

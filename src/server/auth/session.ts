@@ -2,11 +2,14 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { and, eq, gt } from "drizzle-orm";
 
-import { SESSION_COOKIE } from "@/server/auth/constants";
+import {
+  IMPERSONATOR_COOKIE,
+  SESSION_COOKIE,
+} from "@/server/auth/constants";
 import { sessions, users } from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
 
-export { SESSION_COOKIE };
+export { SESSION_COOKIE, IMPERSONATOR_COOKIE };
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 дней
 
 /** В cookie храним сырой токен; в БД — sha256(token). */
@@ -24,6 +27,7 @@ export async function createSession(
     userId: string;
     userAgent?: string | null;
     ip?: string | null;
+    impersonatorUserId?: string | null;
   }
 ): Promise<{ rawToken: string; expiresAt: Date }> {
   const rawToken = createSessionToken();
@@ -32,6 +36,7 @@ export async function createSession(
   await db.insert(sessions).values({
     id,
     userId: input.userId,
+    impersonatorUserId: input.impersonatorUserId ?? null,
     expiresAt,
     userAgent: input.userAgent ?? null,
     ip: input.ip ?? null,
@@ -66,6 +71,7 @@ export async function findValidSessionUser(db: AppDb, rawToken: string) {
       email: users.email,
       fullName: users.fullName,
       status: users.status,
+      impersonatorUserId: sessions.impersonatorUserId,
     })
     .from(sessions)
     .innerJoin(users, eq(sessions.userId, users.id))

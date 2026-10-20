@@ -75,6 +75,7 @@ export function mePayload(ctx: AuthContext) {
     role: ctx.role,
     teacherId: ctx.teacherId,
     studentId: ctx.studentId,
+    impersonation: ctx.impersonation,
   };
 }
 
