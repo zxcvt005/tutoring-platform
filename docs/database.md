@@ -27,7 +27,7 @@ docker run --name tutoring-pg ^
 | Команда | Назначение |
 |---------|------------|
 | `npm run db:generate` | Сгенерировать SQL-миграцию из `src/server/db/schema.ts` |
-| `npm run db:migrate` | Применить миграции к БД из `DATABASE_URL` |
+| `npm run db:migrate` | Применить миграции (`node scripts/db-migrate.mjs`, без tsx) |
 | `npm run db:seed` | Залить демо-организацию `org_demo` (другие org не трогает) |
 | `npm run db:verify` | Проверка migrate→migrate→seed на **PGlite** (без внешнего PG) |
 

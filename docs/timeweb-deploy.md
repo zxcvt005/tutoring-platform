@@ -22,6 +22,8 @@
 
 **Важно:** `@tailwindcss/postcss`, `tailwindcss` и `typescript` находятся в `dependencies`, чтобы сборка работала при `npm ci --omit=dev` / `NODE_ENV=production` во время install. Не удаляйте их из dependencies.
 
+**Миграции:** `npm run db:migrate` вызывает `node scripts/db-migrate.mjs` и зависит только от `drizzle-orm` + `postgres` (уже в `dependencies`). Пакет `tsx` в production-контейнере отсутствует — это ожидаемо.
+
 ## Переменные окружения (production)
 
 | Переменная | Обязательно | Описание |
@@ -42,7 +44,12 @@
 
 1. Создать Postgres → сохранить `DATABASE_URL`.
 2. Создать приложение, задать env (включая длинный `BOOTSTRAP_ADMIN_TOKEN`).
-3. Release / one-off: `npm run db:migrate`.
+3. One-off / SSH / release command в каталоге `/app`:
+   ```bash
+   npm run db:migrate
+   ```
+   Скрипт — `node scripts/db-migrate.mjs` (без `tsx`; `tsx` в production не ставится).
+   Seed **не** запускать. Повторный `db:migrate` безопасен (журнал Drizzle).
 4. Открыть `https://…/setup` **или** CLI:
    ```bash
    npm run auth:bootstrap-admin -- --email you@school.example --password '…' --name 'Директор' --org 'Школа'
