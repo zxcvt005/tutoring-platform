@@ -15,14 +15,14 @@ export default function Home() {
       <div className="relative mx-auto flex w-full max-w-4xl flex-1 flex-col justify-center gap-10 px-6 py-16">
         <div className="space-y-4">
           <p className="text-xs font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-            Локальный прототип
+            Tutoring platform
           </p>
           <h1 className="font-display max-w-xl text-4xl leading-[1.1] font-semibold tracking-[-0.03em] text-foreground sm:text-5xl">
             Выберите кабинет
           </h1>
           <p className="max-w-md text-[0.95rem] leading-relaxed text-muted-foreground">
-            Без входа и сервера. Данные общие для Дирекции, Кафедры и Аудитории
-            и сохраняются в браузере.
+            Дирекция, Кафедра и Аудитория работают через сервер и PostgreSQL.
+            Демо-вход подставляется автоматически при открытии кабинета.
           </p>
         </div>
 

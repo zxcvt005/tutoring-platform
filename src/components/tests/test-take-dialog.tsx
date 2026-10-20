@@ -95,17 +95,21 @@ function TestTakeForm({
   }
 
   function handleSaveDraft() {
-    const result = saveHomeworkDraft(assignment.id, answers);
-    if (!result.ok) toast.error(result.error || "Не удалось сохранить");
+    void (async () => {
+      const result = await saveHomeworkDraft(assignment.id, answers);
+      if (!result.ok) toast.error(result.error || "Не удалось сохранить");
+    })();
   }
 
   function handleSubmit() {
-    const result = submitHomeworkAssignment(assignment.id, answers);
-    if (!result.ok) {
-      toast.error(result.error || "Не удалось отправить");
-      return;
-    }
-    onClose();
+    void (async () => {
+      const result = await submitHomeworkAssignment(assignment.id, answers);
+      if (!result.ok) {
+        toast.error(result.error || "Не удалось отправить");
+        return;
+      }
+      onClose();
+    })();
   }
 
   const pendingManual =

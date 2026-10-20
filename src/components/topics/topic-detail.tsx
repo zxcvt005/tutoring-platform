@@ -107,22 +107,22 @@ export function TopicDetail({ topicId }: { topicId: string }) {
       toast.error("Выберите тест и ученика");
       return;
     }
-    const result = assignHomework({
-      homeworkId: assignForm.homeworkId,
-      topicId,
-      teacherId: topic!.teacherId,
-      studentIds: [assignForm.studentId],
-      dueAt: assignForm.dueAt
-        ? new Date(assignForm.dueAt).toISOString()
-        : undefined,
-    });
-    if (!result.ok) return;
-    if (result.created === 0) {
-      toast.message("Такое назначение уже есть");
-    } else {
-      toast.success("Тест назначен");
-    }
-    setAssignOpen(false);
+    void (async () => {
+      const result = await assignHomework({
+        homeworkId: assignForm.homeworkId,
+        topicId,
+        teacherId: topic!.teacherId,
+        studentIds: [assignForm.studentId],
+        dueAt: assignForm.dueAt
+          ? new Date(assignForm.dueAt).toISOString()
+          : undefined,
+      });
+      if (!result.ok) return;
+      if (result.created === 0) {
+        toast.message("Такое назначение уже есть");
+      }
+      setAssignOpen(false);
+    })();
   }
 
   return (

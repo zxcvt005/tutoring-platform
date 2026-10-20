@@ -160,16 +160,18 @@ function CompleteForm({
       };
     }
 
-    const result = completeLesson({
-      lessonId: lesson.id,
-      topicId: tid,
-      attendances: participantIds.map((studentId) => ({
-        studentId,
-        status: attendanceByStudent[studentId] ?? "present",
-      })),
-      homeworkAssign,
-    });
-    if (result.ok) onClose();
+    void (async () => {
+      const result = await completeLesson({
+        lessonId: lesson.id,
+        topicId: tid,
+        attendances: participantIds.map((studentId) => ({
+          studentId,
+          status: attendanceByStudent[studentId] ?? "present",
+        })),
+        homeworkAssign,
+      });
+      if (result.ok) onClose();
+    })();
   }
 
   const canSave =

@@ -43,7 +43,9 @@ type LessonDialogProps = {
   teacherId: string;
   students: Student[];
   initial?: Initial;
-  onSave: (lesson: Omit<Lesson, "id"> & { id?: string }) => { ok: boolean };
+  onSave: (
+    lesson: Omit<Lesson, "id"> & { id?: string }
+  ) => { ok: boolean } | Promise<{ ok: boolean }>;
   onDelete?: (id: string) => void;
 };
 
@@ -123,7 +125,9 @@ function LessonForm({
   teacherId: string;
   students: Student[];
   initial?: Initial;
-  onSave: (lesson: Omit<Lesson, "id"> & { id?: string }) => { ok: boolean };
+  onSave: (
+    lesson: Omit<Lesson, "id"> & { id?: string }
+  ) => { ok: boolean } | Promise<{ ok: boolean }>;
   onDelete?: (id: string) => void;
   onClose: () => void;
 }) {
@@ -148,17 +152,19 @@ function LessonForm({
     const endsAt = new Date(
       new Date(startsAt).getTime() + duration * 60_000
     ).toISOString();
-    const result = onSave({
-      id: initial?.id,
-      teacherId,
-      studentIds: ids,
-      subject: subject.trim() || undefined,
-      startsAt,
-      endsAt,
-      status,
-      topicId: status === "done" ? initial?.topicId : undefined,
-    });
-    if (result.ok) onClose();
+    void (async () => {
+      const result = await onSave({
+        id: initial?.id,
+        teacherId,
+        studentIds: ids,
+        subject: subject.trim() || undefined,
+        startsAt,
+        endsAt,
+        status,
+        topicId: status === "done" ? initial?.topicId : undefined,
+      });
+      if (result.ok) onClose();
+    })();
   }
 
   return (

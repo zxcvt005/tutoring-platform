@@ -24,8 +24,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Дирекция / Кафедра — прототип",
-  description: "Локальный прототип управления репетиторским бизнесом",
+  title: "Дирекция / Кафедра / Аудитория",
+  description: "Платформа управления репетиторским бизнесом",
 };
 
 export default function RootLayout({

@@ -202,11 +202,13 @@ export function TopicsWorkspace() {
   function confirmDeleteSection() {
     if (!deletingSectionId) return;
     const target = moveTo === UNSECTIONED_ID ? null : moveTo;
-    const result = deleteTopicSection(deletingSectionId, target);
-    if (result.ok) {
-      setDeleteSectionOpen(false);
-      setDeletingSectionId(null);
-    }
+    void (async () => {
+      const result = await deleteTopicSection(deletingSectionId, target);
+      if (result.ok) {
+        setDeleteSectionOpen(false);
+        setDeletingSectionId(null);
+      }
+    })();
   }
 
   function moveTopicInList(

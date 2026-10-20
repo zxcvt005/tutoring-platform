@@ -130,16 +130,18 @@ function ReviewForm({
       return;
     }
 
-    const result = reviewHomeworkAssignment(
-      assignment.id,
-      updates,
-      feedback.trim() || undefined
-    );
-    if (!result.ok) {
-      toast.error(result.error || "Не удалось сохранить");
-      return;
-    }
-    onClose();
+    void (async () => {
+      const result = await reviewHomeworkAssignment(
+        assignment.id,
+        updates,
+        feedback.trim() || undefined
+      );
+      if (!result.ok) {
+        toast.error(result.error || "Не удалось сохранить");
+        return;
+      }
+      onClose();
+    })();
   }
 
   const pct =

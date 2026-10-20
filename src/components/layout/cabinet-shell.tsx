@@ -65,7 +65,7 @@ export function CabinetShell({
 
         <main className="flex-1 px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
           {!ready ? (
-            <p className="text-sm text-muted-foreground">Загрузка демо-данных…</p>
+            <p className="text-sm text-muted-foreground">Загрузка данных с сервера…</p>
           ) : (
             <div className="mx-auto w-full max-w-[92rem]">{children}</div>
           )}

@@ -236,7 +236,7 @@ export function AppSidebar({
           Сбросить демо
         </Button>
         <p className="px-0.5 text-[11px] leading-snug text-muted-foreground">
-          Данные в браузере (localStorage v5).
+          Данные в PostgreSQL. Сброс: npm run db:seed
         </p>
       </div>
     </div>

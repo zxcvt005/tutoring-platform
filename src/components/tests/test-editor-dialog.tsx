@@ -181,11 +181,14 @@ function TestEditorForm({
       maxScore,
     });
     if (andPublish) {
-      const result = publishHomework(form.id ?? id);
-      if (!result.ok) return;
-    } else {
-      toast.success("Тест сохранён");
+      void (async () => {
+        const result = await publishHomework(form.id ?? id);
+        if (!result.ok) return;
+        onClose();
+      })();
+      return;
     }
+    toast.success("Тест сохранён");
     onClose();
   }
 
