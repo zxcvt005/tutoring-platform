@@ -24,6 +24,8 @@
 
 **Миграции:** `npm run db:migrate` вызывает `node scripts/db-migrate.mjs` и зависит только от `drizzle-orm` + `postgres` (уже в `dependencies`). Пакет `tsx` в production-контейнере отсутствует — это ожидаемо.
 
+**DATABASE_URL:** логин и пароль в URL должны быть **percent-encoded** (`encodeURIComponent`). Символы `@ # / : ? %` и пробел в пароле без кодирования ломают разбор (Invalid URL). Пример пароля `p@ss#1` → `p%40ss%231` в строке URL. Скрипт миграции передаёт в postgres.js объект опций, не склеивая URL заново; секреты в логах не печатаются.
+
 ## Переменные окружения (production)
 
 | Переменная | Обязательно | Описание |

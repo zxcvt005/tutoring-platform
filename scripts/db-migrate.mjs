@@ -11,6 +11,12 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 
+import {
+  parseDatabaseUrl,
+  sanitizeDbError,
+  toPostgresOptions,
+} from "./lib/database-url.mjs";
+
 function loadEnvFile(filename) {
   const path = resolve(process.cwd(), filename);
   if (!existsSync(path)) return;
@@ -37,24 +43,37 @@ loadEnvFile(".env.local");
 loadEnvFile(".env");
 
 async function main() {
-  const url = process.env.DATABASE_URL;
-  if (!url) {
+  const rawUrl = process.env.DATABASE_URL;
+  if (!rawUrl) {
     console.error(
       "DATABASE_URL не задан. В Timeweb задайте переменную окружения приложения."
     );
     process.exit(1);
   }
 
-  const sql = postgres(url, { max: 1 });
+  let options;
+  try {
+    options = toPostgresOptions(parseDatabaseUrl(rawUrl), { max: 1 });
+  } catch (err) {
+    console.error(sanitizeDbError(err).message);
+    process.exit(1);
+  }
+
+  const sql = postgres(options);
   const db = drizzle(sql);
 
   console.log("Applying migrations from ./drizzle …");
-  await migrate(db, { migrationsFolder: resolve(process.cwd(), "drizzle") });
-  console.log("Migrations OK");
-  await sql.end({ timeout: 5 });
+  try {
+    await migrate(db, { migrationsFolder: resolve(process.cwd(), "drizzle") });
+    console.log("Migrations OK");
+  } catch (err) {
+    throw sanitizeDbError(err);
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error(sanitizeDbError(err).message);
   process.exit(1);
 });
