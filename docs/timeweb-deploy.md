@@ -17,8 +17,10 @@
 ## Рекомендуемая схема Timeweb
 
 1. **Managed PostgreSQL** (UTF-8).
-2. **App / Node** — `npm run build` → `npm start`.
+2. **App / Node** — `npm ci` (или `npm install`) → `npm run build` → `npm start`.
 3. HTTPS-домен → укажите его в `APP_BASE_URL`.
+
+**Важно:** `@tailwindcss/postcss`, `tailwindcss` и `typescript` находятся в `dependencies`, чтобы сборка работала при `npm ci --omit=dev` / `NODE_ENV=production` во время install. Не удаляйте их из dependencies.
 
 ## Переменные окружения (production)
 

@@ -84,7 +84,7 @@ function LoginForm() {
       <div className="relative mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-8 px-6 py-16">
         <div className="space-y-2">
           <p className="text-xs font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-            Tutoring platform
+            Umba
           </p>
           <h1 className="font-display text-3xl font-semibold tracking-tight">
             Вход

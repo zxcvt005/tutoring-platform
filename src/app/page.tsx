@@ -15,7 +15,7 @@ export default function Home() {
       <div className="relative mx-auto flex w-full max-w-4xl flex-1 flex-col justify-center gap-10 px-6 py-16">
         <div className="space-y-4">
           <p className="text-xs font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-            Tutoring platform
+            Umba
           </p>
           <h1 className="font-display max-w-xl text-4xl leading-[1.1] font-semibold tracking-[-0.03em] text-foreground sm:text-5xl">
             Выберите кабинет

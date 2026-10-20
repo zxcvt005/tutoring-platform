@@ -24,8 +24,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Дирекция / Кафедра / Аудитория",
-  description: "Платформа управления репетиторским бизнесом",
+  title: "Umba — Дирекция / Кафедра / Аудитория",
+  description: "Umba — платформа управления репетиторским бизнесом",
 };
 
 export default function RootLayout({
