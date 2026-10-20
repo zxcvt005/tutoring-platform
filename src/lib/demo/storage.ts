@@ -1,7 +1,14 @@
 import { createSeedData } from "@/lib/demo/seed";
+import {
+  computeMaxScore,
+  legacyHomeworkToQuestions,
+  snapshotFromHomework,
+} from "@/lib/tests/helpers";
 import type {
   DemoData,
+  Homework,
   HomeworkAssignment,
+  HomeworkTemplateStatus,
   Lesson,
   Topic,
   TopicSection,
@@ -10,61 +17,44 @@ import { LEGACY_STORAGE_KEYS, STORAGE_KEY } from "@/lib/types";
 
 type LegacyLesson = Lesson & { studentId?: string; studentIds?: string[] };
 type LegacyTopic = Topic & { sectionId?: string | null; sortOrder?: number };
-type LegacyAssignment = HomeworkAssignment & { answerText?: string };
+type LegacyHomework = Partial<Homework> & {
+  id: string;
+  topicId: string;
+  teacherId: string;
+  title: string;
+  status?: string;
+  checkType?: Homework["checkType"];
+  maxScore?: number;
+  description?: string;
+  questions?: Homework["questions"];
+};
+type LegacyAssignment = Partial<HomeworkAssignment> & {
+  id: string;
+  homeworkId: string;
+  topicId: string;
+  teacherId: string;
+  studentId: string;
+  status: HomeworkAssignment["status"];
+  dueAt?: string;
+};
 
-type LegacyV2 = {
-  version: 2;
+type LegacyBlob = {
+  version?: number;
   teachers: DemoData["teachers"];
   students: DemoData["students"];
   lessons: LegacyLesson[];
   attendances?: DemoData["attendances"];
   topics: LegacyTopic[];
   topicSections?: TopicSection[];
-  homeworks?: DemoData["homeworks"];
+  homeworks?: LegacyHomework[];
   homeworkAssignments?: LegacyAssignment[];
   currentTeacherId?: string;
   direkciyaTeacherId?: string;
   currentStudentId?: string;
 };
 
-type LegacyV3 = {
-  version: 3;
-  teachers: DemoData["teachers"];
-  students: DemoData["students"];
-  lessons: Lesson[];
-  attendances: DemoData["attendances"];
-  topicSections: TopicSection[];
-  topics: Topic[];
-  homeworks: DemoData["homeworks"];
-  homeworkAssignments: LegacyAssignment[];
-  currentTeacherId: string;
-  direkciyaTeacherId: string;
-  currentStudentId?: string;
-};
-
 function isObject(data: unknown): data is Record<string, unknown> {
   return !!data && typeof data === "object";
-}
-
-function isValidV4(data: unknown): data is DemoData {
-  if (!isObject(data)) return false;
-  const d = data as DemoData;
-  return (
-    d.version === 4 &&
-    Array.isArray(d.teachers) &&
-    Array.isArray(d.students) &&
-    Array.isArray(d.lessons) &&
-    Array.isArray(d.topicSections) &&
-    Array.isArray(d.topics) &&
-    Array.isArray(d.homeworks) &&
-    Array.isArray(d.homeworkAssignments) &&
-    typeof d.currentTeacherId === "string" &&
-    typeof d.direkciyaTeacherId === "string" &&
-    typeof d.currentStudentId === "string" &&
-    d.lessons.every(
-      (l) => Array.isArray(l.studentIds) && typeof l.teacherId === "string"
-    )
-  );
 }
 
 function migrateLesson(lesson: LegacyLesson): Lesson {
@@ -102,6 +92,70 @@ function migrateTopic(topic: LegacyTopic, index: number): Topic {
   };
 }
 
+function migrateHomeworkStatus(status?: string): HomeworkTemplateStatus {
+  if (status === "draft" || status === "published" || status === "archived") {
+    return status;
+  }
+  if (status === "active") return "published";
+  return "published";
+}
+
+function migrateHomework(hw: LegacyHomework): Homework {
+  const questions =
+    Array.isArray(hw.questions) && hw.questions.length > 0
+      ? hw.questions
+      : legacyHomeworkToQuestions(hw);
+  return {
+    id: hw.id,
+    topicId: hw.topicId,
+    teacherId: hw.teacherId,
+    title: hw.title,
+    description: hw.description,
+    status: migrateHomeworkStatus(hw.status),
+    questions,
+    maxScore: computeMaxScore(questions) || hw.maxScore,
+    checkType: hw.checkType,
+  };
+}
+
+function migrateAssignment(
+  a: LegacyAssignment,
+  homeworks: Homework[]
+): HomeworkAssignment {
+  const hw = homeworks.find((h) => h.id === a.homeworkId);
+  const snapshot =
+    a.testSnapshot ??
+    (hw
+      ? snapshotFromHomework(hw)
+      : {
+          title: "Задание",
+          questions: [],
+          maxScore: a.maxScore ?? 0,
+        });
+
+  let status = a.status;
+  if (status === ("active" as string)) status = "assigned";
+
+  return {
+    id: a.id,
+    homeworkId: a.homeworkId,
+    topicId: a.topicId,
+    teacherId: a.teacherId,
+    studentId: a.studentId,
+    lessonId: a.lessonId,
+    dueAt: a.dueAt,
+    status,
+    score: a.score,
+    maxScore: a.maxScore ?? snapshot.maxScore,
+    feedback: a.feedback,
+    answerText: a.answerText,
+    completedAt: a.completedAt,
+    reviewedAt: a.reviewedAt,
+    testSnapshot: snapshot,
+    answers: a.answers ?? [],
+  };
+}
+
 function pickCurrentStudentId(
   students: DemoData["students"],
   preferred?: string
@@ -111,109 +165,96 @@ function pickCurrentStudentId(
   return withTeacher?.id ?? students[0]?.id ?? "";
 }
 
-function toV4Base(input: {
-  teachers: DemoData["teachers"];
-  students: DemoData["students"];
-  lessons: Lesson[];
-  attendances: DemoData["attendances"];
-  topicSections: TopicSection[];
-  topics: Topic[];
-  homeworks: DemoData["homeworks"];
-  homeworkAssignments: HomeworkAssignment[];
-  currentTeacherId: string;
-  direkciyaTeacherId: string;
-  currentStudentId?: string;
-}): DemoData {
-  return {
-    version: 4,
-    teachers: input.teachers,
-    students: input.students,
-    lessons: input.lessons,
-    attendances: input.attendances,
-    topicSections: input.topicSections,
-    topics: input.topics,
-    homeworks: input.homeworks,
-    homeworkAssignments: input.homeworkAssignments.map((a) => ({
-      ...a,
-      answerText: a.answerText,
-    })),
-    currentTeacherId: input.currentTeacherId ?? "",
-    direkciyaTeacherId: input.direkciyaTeacherId ?? "",
-    currentStudentId: pickCurrentStudentId(
-      input.students,
-      input.currentStudentId
-    ),
-  };
+function isValidV5(data: unknown): data is DemoData {
+  if (!isObject(data)) return false;
+  const d = data as DemoData;
+  return (
+    d.version === 5 &&
+    Array.isArray(d.teachers) &&
+    Array.isArray(d.students) &&
+    Array.isArray(d.lessons) &&
+    Array.isArray(d.topicSections) &&
+    Array.isArray(d.topics) &&
+    Array.isArray(d.homeworks) &&
+    Array.isArray(d.homeworkAssignments) &&
+    typeof d.currentTeacherId === "string" &&
+    typeof d.direkciyaTeacherId === "string" &&
+    typeof d.currentStudentId === "string" &&
+    d.lessons.every(
+      (l) => Array.isArray(l.studentIds) && typeof l.teacherId === "string"
+    ) &&
+    d.homeworks.every((h) => Array.isArray(h.questions))
+  );
 }
 
-/** Безопасная миграция v2/v3 → v4 (ответ ученика + currentStudentId). */
-export function migrateToV4(raw: unknown): DemoData | null {
+export function migrateToV5(raw: unknown): DemoData | null {
   if (!isObject(raw)) return null;
-  const version = (raw as { version?: number }).version;
-  if (version === 4 && isValidV4(raw)) return raw;
+  if (isValidV5(raw)) return raw;
 
-  if (version === 3) {
-    const v3 = raw as LegacyV3;
-    if (
-      !Array.isArray(v3.teachers) ||
-      !Array.isArray(v3.students) ||
-      !Array.isArray(v3.lessons) ||
-      !Array.isArray(v3.topics) ||
-      !Array.isArray(v3.topicSections)
-    ) {
-      return null;
-    }
-    return toV4Base({
-      teachers: v3.teachers,
-      students: v3.students,
-      lessons: v3.lessons,
-      attendances: Array.isArray(v3.attendances) ? v3.attendances : [],
-      topicSections: v3.topicSections,
-      topics: v3.topics,
-      homeworks: Array.isArray(v3.homeworks) ? v3.homeworks : [],
-      homeworkAssignments: Array.isArray(v3.homeworkAssignments)
-        ? v3.homeworkAssignments
-        : [],
-      currentTeacherId: v3.currentTeacherId ?? "",
-      direkciyaTeacherId: v3.direkciyaTeacherId ?? "",
-      currentStudentId: v3.currentStudentId,
-    });
-  }
-
-  if (version !== 2) return null;
-  const v2 = raw as LegacyV2;
+  const blob = raw as LegacyBlob;
+  const version = blob.version;
   if (
-    !Array.isArray(v2.teachers) ||
-    !Array.isArray(v2.students) ||
-    !Array.isArray(v2.lessons) ||
-    !Array.isArray(v2.topics)
+    version !== 2 &&
+    version !== 3 &&
+    version !== 4 &&
+    version !== 5
+  ) {
+    return null;
+  }
+  if (
+    !Array.isArray(blob.teachers) ||
+    !Array.isArray(blob.students) ||
+    !Array.isArray(blob.lessons) ||
+    !Array.isArray(blob.topics)
   ) {
     return null;
   }
 
-  const topics = v2.topics.map((t, i) => migrateTopic(t, i));
-  const topicSections = Array.isArray(v2.topicSections) ? v2.topicSections : [];
+  const lessons =
+    version === 2
+      ? blob.lessons.map(migrateLesson)
+      : (blob.lessons as Lesson[]);
+  const topics =
+    version === 2
+      ? blob.topics.map((t, i) => migrateTopic(t, i))
+      : (blob.topics as Topic[]);
+  const topicSections = Array.isArray(blob.topicSections)
+    ? blob.topicSections
+    : [];
+  const homeworks = (Array.isArray(blob.homeworks) ? blob.homeworks : []).map(
+    migrateHomework
+  );
+  const homeworkAssignments = (
+    Array.isArray(blob.homeworkAssignments) ? blob.homeworkAssignments : []
+  ).map((a) => migrateAssignment(a, homeworks));
 
-  return toV4Base({
-    teachers: v2.teachers,
-    students: v2.students,
-    lessons: v2.lessons.map(migrateLesson),
-    attendances: Array.isArray(v2.attendances) ? v2.attendances : [],
+  return {
+    version: 5,
+    teachers: blob.teachers,
+    students: blob.students,
+    lessons,
+    attendances: Array.isArray(blob.attendances) ? blob.attendances : [],
     topicSections,
     topics,
-    homeworks: Array.isArray(v2.homeworks) ? v2.homeworks : [],
-    homeworkAssignments: Array.isArray(v2.homeworkAssignments)
-      ? v2.homeworkAssignments
-      : [],
-    currentTeacherId: v2.currentTeacherId ?? "",
-    direkciyaTeacherId: v2.direkciyaTeacherId ?? "",
-    currentStudentId: v2.currentStudentId,
-  });
+    homeworks,
+    homeworkAssignments,
+    currentTeacherId: blob.currentTeacherId ?? "",
+    direkciyaTeacherId: blob.direkciyaTeacherId ?? "",
+    currentStudentId: pickCurrentStudentId(
+      blob.students,
+      blob.currentStudentId
+    ),
+  };
 }
 
-/** @deprecated используйте migrateToV4 */
+/** @deprecated */
+export function migrateToV4(raw: unknown): DemoData | null {
+  return migrateToV5(raw);
+}
+
+/** @deprecated */
 export function migrateToV3(raw: unknown): DemoData | null {
-  return migrateToV4(raw);
+  return migrateToV5(raw);
 }
 
 function clearLegacy(): void {
@@ -249,11 +290,11 @@ export function loadDemoData(): DemoData {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as unknown;
-      if (isValidV4(parsed) && parsed.teachers.length) {
+      if (isValidV5(parsed) && parsed.teachers.length) {
         clearLegacy();
         return parsed;
       }
-      const migrated = migrateToV4(parsed);
+      const migrated = migrateToV5(parsed);
       if (migrated && migrated.teachers.length) {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
         clearLegacy();
@@ -263,7 +304,7 @@ export function loadDemoData(): DemoData {
 
     const legacy = readLegacyBlob();
     if (legacy) {
-      const migrated = migrateToV4(legacy);
+      const migrated = migrateToV5(legacy);
       if (migrated && migrated.teachers.length) {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
         clearLegacy();

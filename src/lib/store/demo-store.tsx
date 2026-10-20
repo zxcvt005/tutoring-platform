@@ -15,6 +15,14 @@ import { clearDemoStorage, loadDemoData, saveDemoData } from "@/lib/demo/storage
 import { createSeedData } from "@/lib/demo/seed";
 import { newId } from "@/lib/format";
 import {
+  applyManualScores,
+  gradeSubmission,
+} from "@/lib/tests/grading";
+import {
+  computeMaxScore,
+  snapshotFromHomework,
+} from "@/lib/tests/helpers";
+import {
   findStudentScheduleConflict,
   uniqueStudentIds,
 } from "@/lib/schedule";
@@ -27,10 +35,31 @@ import type {
   HomeworkAssignmentStatus,
   Lesson,
   Student,
+  StudentAnswer,
   Teacher,
   Topic,
   TopicSection,
 } from "@/lib/types";
+
+type AssignHomeworkInput = {
+  homeworkId: string;
+  topicId: string;
+  teacherId: string;
+  studentIds: string[];
+  lessonId?: string;
+  dueAt?: string;
+};
+
+type CompleteLessonInput = {
+  lessonId: string;
+  topicId: string;
+  attendances: { studentId: string; status: AttendanceStatus }[];
+  homeworkAssign?: {
+    homeworkId: string;
+    studentIds: string[];
+    dueAt?: string;
+  };
+};
 
 type DemoStoreValue = {
   data: DemoData;
@@ -47,11 +76,7 @@ type DemoStoreValue = {
     lesson: Omit<Lesson, "id"> & { id?: string }
   ) => { ok: boolean; error?: string };
   deleteLesson: (id: string) => void;
-  completeLesson: (input: {
-    lessonId: string;
-    topicId: string;
-    attendances: { studentId: string; status: AttendanceStatus }[];
-  }) => { ok: boolean; error?: string };
+  completeLesson: (input: CompleteLessonInput) => { ok: boolean; error?: string };
   setAttendance: (
     lessonId: string,
     studentId: string,
@@ -88,12 +113,29 @@ type DemoStoreValue = {
   ) => void;
   upsertHomework: (hw: Omit<Homework, "id"> & { id?: string }) => string;
   deleteHomework: (id: string) => void;
+  publishHomework: (id: string) => { ok: boolean; error?: string };
+  assignHomework: (
+    input: AssignHomeworkInput
+  ) => { ok: boolean; error?: string; created: number };
   upsertHomeworkAssignment: (
     a: Omit<HomeworkAssignment, "id"> & { id?: string }
   ) => void;
+  saveHomeworkDraft: (
+    id: string,
+    answers: StudentAnswer[]
+  ) => { ok: boolean; error?: string };
   submitHomeworkAssignment: (
     id: string,
-    answerText: string
+    answers: StudentAnswer[]
+  ) => { ok: boolean; error?: string };
+  reviewHomeworkAssignment: (
+    id: string,
+    updates: {
+      questionId: string;
+      manualScore: number;
+      teacherComment?: string;
+    }[],
+    overallFeedback?: string
   ) => { ok: boolean; error?: string };
   deleteHomeworkAssignment: (id: string) => void;
   studentsForTeacher: (teacherId: string) => Student[];
@@ -103,6 +145,7 @@ type DemoStoreValue = {
   sectionsForTeacher: (teacherId: string) => TopicSection[];
   topicsForTeacher: (teacherId: string) => Topic[];
   homeworksForTopic: (topicId: string) => Homework[];
+  publishedHomeworksForTopic: (topicId: string) => Homework[];
   assignmentsForTeacher: (teacherId: string) => HomeworkAssignment[];
   assignmentsForStudent: (studentId: string) => HomeworkAssignment[];
   attendancesForLesson: (lessonId: string) => Attendance[];
@@ -111,7 +154,7 @@ type DemoStoreValue = {
 const DemoStoreContext = createContext<DemoStoreValue | null>(null);
 
 const EMPTY_DATA: DemoData = {
-  version: 4,
+  version: 5,
   teachers: [],
   students: [],
   lessons: [],
@@ -130,7 +173,11 @@ function refreshOverdue(
 ): HomeworkAssignment[] {
   const now = Date.now();
   return list.map((a) => {
-    if (a.status === "assigned" && new Date(a.dueAt).getTime() < now) {
+    if (
+      (a.status === "assigned" || a.status === "in_progress") &&
+      a.dueAt &&
+      new Date(a.dueAt).getTime() < now
+    ) {
       return { ...a, status: "overdue" as const };
     }
     return a;
@@ -164,6 +211,17 @@ function applyOrder<T extends { id: string; sortOrder: number }>(
   return ordered;
 }
 
+function normalizeHomework(
+  hw: Omit<Homework, "id"> & { id: string }
+): Homework {
+  const questions = hw.questions ?? [];
+  return {
+    ...hw,
+    questions,
+    maxScore: computeMaxScore(questions) || hw.maxScore,
+  };
+}
+
 export function DemoStoreProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<DemoData>(EMPTY_DATA);
   const [ready, setReady] = useState(false);
@@ -173,6 +231,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage bootstrap
     setData({
       ...loaded,
+      version: 5,
       homeworkAssignments: refreshOverdue(loaded.homeworkAssignments),
     });
     setReady(true);
@@ -364,13 +423,101 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
     [patch]
   );
 
-  const completeLesson = useCallback(
-    (input: {
-      lessonId: string;
-      topicId: string;
-      attendances: { studentId: string; status: AttendanceStatus }[];
-    }) => {
+  const assignHomework = useCallback(
+    (input: AssignHomeworkInput): { ok: boolean; error?: string; created: number } => {
       let error: string | undefined;
+      let created = 0;
+      patch((d) => {
+        const hw = d.homeworks.find((h) => h.id === input.homeworkId);
+        if (!hw) {
+          error = "Тест не найден";
+          return d;
+        }
+        if (hw.status !== "published") {
+          error = "Назначить можно только опубликованный тест";
+          return d;
+        }
+        if (!hw.questions?.length) {
+          error = "В тесте нет заданий";
+          return d;
+        }
+        const snapshot = snapshotFromHomework(hw);
+        const studentIds = [...new Set(input.studentIds.filter(Boolean))];
+        if (studentIds.length === 0) {
+          error = "Выберите учеников";
+          return d;
+        }
+
+        const nextAssignments = [...d.homeworkAssignments];
+        for (const studentId of studentIds) {
+          const duplicate = nextAssignments.find(
+            (a) =>
+              a.homeworkId === input.homeworkId &&
+              a.studentId === studentId &&
+              (input.lessonId
+                ? a.lessonId === input.lessonId
+                : !a.lessonId || a.status === "assigned" || a.status === "in_progress" || a.status === "overdue")
+          );
+          // Не дублируем активное назначение того же теста тому же ученику с того же занятия
+          if (
+            input.lessonId &&
+            nextAssignments.some(
+              (a) =>
+                a.homeworkId === input.homeworkId &&
+                a.studentId === studentId &&
+                a.lessonId === input.lessonId
+            )
+          ) {
+            continue;
+          }
+          if (
+            !input.lessonId &&
+            duplicate &&
+            (duplicate.status === "assigned" ||
+              duplicate.status === "in_progress" ||
+              duplicate.status === "overdue")
+          ) {
+            continue;
+          }
+
+          let status: HomeworkAssignmentStatus = "assigned";
+          if (
+            input.dueAt &&
+            new Date(input.dueAt).getTime() < Date.now()
+          ) {
+            status = "overdue";
+          }
+
+          nextAssignments.push({
+            id: newId("ha"),
+            homeworkId: input.homeworkId,
+            topicId: input.topicId,
+            teacherId: input.teacherId,
+            studentId,
+            lessonId: input.lessonId,
+            dueAt: input.dueAt || undefined,
+            status,
+            maxScore: snapshot.maxScore,
+            testSnapshot: snapshot,
+            answers: [],
+          });
+          created += 1;
+        }
+        return { ...d, homeworkAssignments: nextAssignments };
+      });
+      if (error) {
+        toast.error(error);
+        return { ok: false, error, created: 0 };
+      }
+      return { ok: true, created };
+    },
+    [patch]
+  );
+
+  const completeLesson = useCallback(
+    (input: CompleteLessonInput) => {
+      let error: string | undefined;
+      let assignedCount = 0;
       patch((d) => {
         const lesson = d.lessons.find((l) => l.id === input.lessonId);
         if (!lesson) {
@@ -419,13 +566,73 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
             status: byStudent.get(sid)!,
           });
         }
-        return { ...d, lessons, attendances };
+
+        let homeworkAssignments = d.homeworkAssignments;
+        if (input.homeworkAssign?.homeworkId) {
+          const hw = d.homeworks.find(
+            (h) => h.id === input.homeworkAssign!.homeworkId
+          );
+          if (!hw || hw.status !== "published") {
+            error = "Выберите опубликованный тест для назначения";
+            return d;
+          }
+          if (!hw.questions?.length) {
+            error = "В тесте нет заданий";
+            return d;
+          }
+          const targetIds = [
+            ...new Set(input.homeworkAssign.studentIds.filter(Boolean)),
+          ];
+          for (const sid of targetIds) {
+            if (!participantIds.includes(sid)) {
+              error = "Нельзя назначить ДЗ ученику вне занятия";
+              return d;
+            }
+          }
+          const snapshot = snapshotFromHomework(hw);
+          const next = [...homeworkAssignments];
+          for (const studentId of targetIds) {
+            const already = next.some(
+              (a) =>
+                a.homeworkId === hw.id &&
+                a.studentId === studentId &&
+                a.lessonId === input.lessonId
+            );
+            if (already) continue;
+            let status: HomeworkAssignmentStatus = "assigned";
+            const dueAt = input.homeworkAssign.dueAt;
+            if (dueAt && new Date(dueAt).getTime() < Date.now()) {
+              status = "overdue";
+            }
+            next.push({
+              id: newId("ha"),
+              homeworkId: hw.id,
+              topicId: input.topicId,
+              teacherId: lesson.teacherId,
+              studentId,
+              lessonId: input.lessonId,
+              dueAt: dueAt || undefined,
+              status,
+              maxScore: snapshot.maxScore,
+              testSnapshot: snapshot,
+              answers: [],
+            });
+            assignedCount += 1;
+          }
+          homeworkAssignments = next;
+        }
+
+        return { ...d, lessons, attendances, homeworkAssignments };
       });
       if (error) {
         toast.error(error);
         return { ok: false, error };
       }
-      toast.success("Занятие отмечено как проведённое");
+      toast.success(
+        assignedCount > 0
+          ? `Занятие проведено, назначено ДЗ: ${assignedCount}`
+          : "Занятие отмечено как проведённое"
+      );
       return { ok: true };
     },
     [patch]
@@ -572,10 +779,14 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
 
   const deleteTopic = useCallback(
     (id: string) => {
+      // Архивация темы: тесты архивируются, назначения и снимки сохраняются
       patch((d) => ({
         ...d,
         topics: d.topics.map((t) =>
           t.id === id ? { ...t, status: "archived" as const } : t
+        ),
+        homeworks: d.homeworks.map((h) =>
+          h.topicId === id ? { ...h, status: "archived" as const } : h
         ),
       }));
     },
@@ -633,7 +844,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
     (hw: Omit<Homework, "id"> & { id?: string }) => {
       const id = hw.id ?? newId("hw");
       patch((d) => {
-        const next: Homework = { ...hw, id };
+        const next = normalizeHomework({ ...hw, id });
         const exists = d.homeworks.some((h) => h.id === id);
         return {
           ...d,
@@ -649,6 +860,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
 
   const deleteHomework = useCallback(
     (id: string) => {
+      // Архивация: история назначений со снимками сохраняется
       patch((d) => ({
         ...d,
         homeworks: d.homeworks.map((h) =>
@@ -659,13 +871,51 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
     [patch]
   );
 
+  const publishHomework = useCallback(
+    (id: string) => {
+      let error: string | undefined;
+      patch((d) => {
+        const hw = d.homeworks.find((h) => h.id === id);
+        if (!hw) {
+          error = "Тест не найден";
+          return d;
+        }
+        if (!hw.questions?.length) {
+          error = "Добавьте хотя бы одно задание перед публикацией";
+          return d;
+        }
+        const incomplete = hw.questions.some((q) => !q.prompt.trim());
+        if (incomplete) {
+          error = "У всех заданий должен быть текст вопроса";
+          return d;
+        }
+        return {
+          ...d,
+          homeworks: d.homeworks.map((h) =>
+            h.id === id
+              ? normalizeHomework({ ...h, status: "published" })
+              : h
+          ),
+        };
+      });
+      if (error) {
+        toast.error(error);
+        return { ok: false, error };
+      }
+      toast.success("Тест опубликован");
+      return { ok: true };
+    },
+    [patch]
+  );
+
   const upsertHomeworkAssignment = useCallback(
     (a: Omit<HomeworkAssignment, "id"> & { id?: string }) => {
       patch((d) => {
         const id = a.id ?? newId("ha");
         let status: HomeworkAssignmentStatus = a.status;
         if (
-          status === "assigned" &&
+          (status === "assigned" || status === "in_progress") &&
+          a.dueAt &&
           new Date(a.dueAt).getTime() < Date.now()
         ) {
           status = "overdue";
@@ -683,19 +933,18 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
     [patch]
   );
 
-  const submitHomeworkAssignment = useCallback(
-    (id: string, answerText: string): { ok: boolean; error?: string } => {
-      const text = answerText.trim();
-      if (!text) {
-        return { ok: false, error: "Напишите ответ перед отправкой" };
-      }
+  const saveHomeworkDraft = useCallback(
+    (id: string, answers: StudentAnswer[]) => {
       let found = false;
       let blocked = false;
       patch((d) => {
         const current = d.homeworkAssignments.find((a) => a.id === id);
         if (!current) return d;
         found = true;
-        if (current.status === "reviewed") {
+        if (
+          current.status === "reviewed" ||
+          current.status === "completed"
+        ) {
           blocked = true;
           return d;
         }
@@ -705,9 +954,11 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
             a.id === id
               ? {
                   ...a,
-                  answerText: text,
-                  status: "completed" as const,
-                  completedAt: new Date().toISOString(),
+                  answers,
+                  status:
+                    a.status === "overdue"
+                      ? ("overdue" as const)
+                      : ("in_progress" as const),
                 }
               : a
           ),
@@ -715,9 +966,96 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       });
       if (!found) return { ok: false, error: "Задание не найдено" };
       if (blocked) {
-        return { ok: false, error: "Проверенное задание нельзя отправить снова" };
+        return { ok: false, error: "Отправленное задание нельзя изменить" };
       }
-      toast.success("Ответ отправлен на проверку");
+      toast.success("Черновик сохранён");
+      return { ok: true };
+    },
+    [patch]
+  );
+
+  const submitHomeworkAssignment = useCallback(
+    (id: string, answers: StudentAnswer[]): { ok: boolean; error?: string } => {
+      let found = false;
+      let blocked = false;
+      let empty = false;
+      patch((d) => {
+        const current = d.homeworkAssignments.find((a) => a.id === id);
+        if (!current) return d;
+        found = true;
+        if (current.status === "reviewed" || current.status === "completed") {
+          blocked = true;
+          return d;
+        }
+        const questions = current.testSnapshot?.questions ?? [];
+        if (questions.length === 0) {
+          empty = true;
+          return d;
+        }
+        const graded = gradeSubmission(questions, answers);
+        const status: HomeworkAssignmentStatus = graded.needsManualReview
+          ? "completed"
+          : "reviewed";
+        return {
+          ...d,
+          homeworkAssignments: d.homeworkAssignments.map((a) =>
+            a.id === id
+              ? {
+                  ...a,
+                  answers: graded.answers,
+                  maxScore: graded.maxScore,
+                  score: graded.needsManualReview
+                    ? undefined
+                    : graded.autoScore,
+                  status,
+                  completedAt: new Date().toISOString(),
+                  reviewedAt:
+                    status === "reviewed"
+                      ? new Date().toISOString()
+                      : undefined,
+                }
+              : a
+          ),
+        };
+      });
+      if (!found) return { ok: false, error: "Задание не найдено" };
+      if (blocked) {
+        return { ok: false, error: "Работа уже отправлена" };
+      }
+      if (empty) {
+        return { ok: false, error: "В тесте нет заданий" };
+      }
+      toast.success("Работа отправлена");
+      return { ok: true };
+    },
+    [patch]
+  );
+
+  const reviewHomeworkAssignment = useCallback(
+    (
+      id: string,
+      updates: {
+        questionId: string;
+        manualScore: number;
+        teacherComment?: string;
+      }[],
+      overallFeedback?: string
+    ) => {
+      let found = false;
+      patch((d) => {
+        const current = d.homeworkAssignments.find((a) => a.id === id);
+        if (!current) return d;
+        found = true;
+        const next = applyManualScores(current, updates, overallFeedback);
+        return {
+          ...d,
+          homeworkAssignments: d.homeworkAssignments.map((a) =>
+            a.id === id ? next : a
+          ),
+        };
+      });
+      if (!found) return { ok: false, error: "Назначение не найдено" };
+      toast.success("Проверка сохранена");
       return { ok: true };
     },
     [patch]
@@ -775,6 +1113,14 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
     [data.homeworks]
   );
 
+  const publishedHomeworksForTopic = useCallback(
+    (topicId: string) =>
+      data.homeworks.filter(
+        (h) => h.topicId === topicId && h.status === "published"
+      ),
+    [data.homeworks]
+  );
+
   const assignmentsForTeacher = useCallback(
     (teacherId: string) =>
       data.homeworkAssignments.filter((a) => a.teacherId === teacherId),
@@ -817,8 +1163,12 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       reorderTopics,
       upsertHomework,
       deleteHomework,
+      publishHomework,
+      assignHomework,
       upsertHomeworkAssignment,
+      saveHomeworkDraft,
       submitHomeworkAssignment,
+      reviewHomeworkAssignment,
       deleteHomeworkAssignment,
       studentsForTeacher,
       unassignedStudents,
@@ -827,6 +1177,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       sectionsForTeacher,
       topicsForTeacher,
       homeworksForTopic,
+      publishedHomeworksForTopic,
       assignmentsForTeacher,
       assignmentsForStudent,
       attendancesForLesson,
@@ -855,8 +1206,12 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       reorderTopics,
       upsertHomework,
       deleteHomework,
+      publishHomework,
+      assignHomework,
       upsertHomeworkAssignment,
+      saveHomeworkDraft,
       submitHomeworkAssignment,
+      reviewHomeworkAssignment,
       deleteHomeworkAssignment,
       studentsForTeacher,
       unassignedStudents,
@@ -865,6 +1220,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       sectionsForTeacher,
       topicsForTeacher,
       homeworksForTopic,
+      publishedHomeworksForTopic,
       assignmentsForTeacher,
       assignmentsForStudent,
       attendancesForLesson,

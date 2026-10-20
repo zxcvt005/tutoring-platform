@@ -89,7 +89,8 @@ export const homeworkAssignmentStatusLabel: Record<
   string
 > = {
   assigned: "Назначено",
-  completed: "Выполнено",
+  in_progress: "Черновик",
+  completed: "На проверке",
   reviewed: "Проверено",
   overdue: "Просрочено",
 };
@@ -100,9 +101,15 @@ export const studentHomeworkStatusLabel: Record<
   string
 > = {
   assigned: "Нужно выполнить",
+  in_progress: "Черновик",
   completed: "На проверке",
   reviewed: "Проверено",
   overdue: "Просрочено",
 };
+
+export function formatDueAt(dueAt?: string): string {
+  if (!dueAt) return "Без срока";
+  return formatDateTime(dueAt);
+}
 
 export const weekdayShort = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"] as const;

@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -43,7 +45,7 @@ export function CompleteLessonDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Завершить занятие</DialogTitle>
         </DialogHeader>
@@ -66,8 +68,14 @@ function CompleteForm({
   lesson: Lesson;
   onClose: () => void;
 }) {
-  const { data, topicsForTeacher, completeLesson, upsertTopic, sectionsForTeacher } =
-    useDemoStore();
+  const {
+    data,
+    topicsForTeacher,
+    completeLesson,
+    upsertTopic,
+    sectionsForTeacher,
+    publishedHomeworksForTopic,
+  } = useDemoStore();
   const topics = topicsForTeacher(lesson.teacherId).filter(
     (t) => t.status === "active"
   );
@@ -82,9 +90,38 @@ function CompleteForm({
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
 
+  const [assignHw, setAssignHw] = useState(false);
+  const [homeworkId, setHomeworkId] = useState("");
+  const [dueAt, setDueAt] = useState("");
+  const [assignMode, setAssignMode] = useState<"present" | "selected">(
+    "present"
+  );
+  const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
+
   const nameOf = (id: string) =>
     data.students.find((s) => s.id === id)?.fullName ?? "Ученик";
   const sections = sectionsForTeacher(lesson.teacherId);
+
+  const publishedTests = useMemo(
+    () => (topicId ? publishedHomeworksForTopic(topicId) : []),
+    [publishedHomeworksForTopic, topicId]
+  );
+
+  const presentIds = participantIds.filter(
+    (id) => attendanceByStudent[id] === "present"
+  );
+
+  // При смене темы сбрасываем выбранный тест
+  function onTopicChange(id: string) {
+    setTopicId(id);
+    setHomeworkId("");
+  }
+
+  function toggleStudent(id: string) {
+    setSelectedStudents((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
 
   function save() {
     let tid = topicId;
@@ -100,6 +137,29 @@ function CompleteForm({
       });
     }
     if (!tid) return;
+
+    let homeworkAssign:
+      | {
+          homeworkId: string;
+          studentIds: string[];
+          dueAt?: string;
+        }
+      | undefined;
+
+    if (assignHw) {
+      if (!homeworkId) return;
+      const studentIds =
+        assignMode === "present"
+          ? presentIds
+          : selectedStudents.filter((id) => participantIds.includes(id));
+      if (studentIds.length === 0) return;
+      homeworkAssign = {
+        homeworkId,
+        studentIds,
+        dueAt: dueAt ? new Date(dueAt).toISOString() : undefined,
+      };
+    }
+
     const result = completeLesson({
       lessonId: lesson.id,
       topicId: tid,
@@ -107,9 +167,18 @@ function CompleteForm({
         studentId,
         status: attendanceByStudent[studentId] ?? "present",
       })),
+      homeworkAssign,
     });
     if (result.ok) onClose();
   }
+
+  const canSave =
+    participantIds.length > 0 &&
+    (!assignHw ||
+      (!!homeworkId &&
+        (assignMode === "present"
+          ? presentIds.length > 0
+          : selectedStudents.length > 0)));
 
   return (
     <>
@@ -162,7 +231,7 @@ function CompleteForm({
             <Label>Пройденная тема</Label>
             <Select
               value={topicId || null}
-              onValueChange={(v) => v && setTopicId(v)}
+              onValueChange={(v) => v && onTopicChange(v)}
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Выберите тему">
@@ -213,12 +282,147 @@ function CompleteForm({
             </button>
           </div>
         )}
+
+        {!creatingTopic && topicId ? (
+          <div className="space-y-3 rounded-xl border border-border/80 p-3">
+            <label className="flex items-start gap-2.5">
+              <Checkbox
+                checked={assignHw}
+                onCheckedChange={(v) => {
+                  const on = v === true;
+                  setAssignHw(on);
+                  if (on && publishedTests[0] && !homeworkId) {
+                    setHomeworkId(publishedTests[0].id);
+                  }
+                }}
+                className="mt-0.5"
+              />
+              <span className="text-sm leading-snug">
+                <span className="font-medium">Назначить тест как ДЗ</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  Явное действие: без галочки задание не создаётся.
+                </span>
+              </span>
+            </label>
+
+            {assignHw ? (
+              <div className="grid gap-3 pl-0 sm:pl-1">
+                {publishedTests.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Для этой темы нет опубликованного теста.{" "}
+                    <Link
+                      href={`/kafedra/topics/${topicId}`}
+                      className="font-medium underline-offset-2 hover:underline"
+                      onClick={onClose}
+                    >
+                      Создать тест в теме
+                    </Link>
+                  </p>
+                ) : (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label>Тест</Label>
+                      <Select
+                        value={homeworkId || null}
+                        onValueChange={(v) => v && setHomeworkId(v)}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue>
+                            {(v) =>
+                              publishedTests.find((h) => h.id === v)?.title ??
+                              "Тест"
+                            }
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {publishedTests.map((h) => (
+                            <SelectItem key={h.id} value={h.id}>
+                              {h.title}
+                              {h.maxScore != null ? ` · ${h.maxScore} б.` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Кому назначить</Label>
+                      <div className="flex flex-wrap gap-3 text-sm">
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            checked={assignMode === "present"}
+                            onChange={() => setAssignMode("present")}
+                          />
+                          Всем присутствовавшим ({presentIds.length})
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            checked={assignMode === "selected"}
+                            onChange={() => {
+                              setAssignMode("selected");
+                              setSelectedStudents(presentIds);
+                            }}
+                          />
+                          Выбранным
+                        </label>
+                      </div>
+                      {assignMode === "selected" ? (
+                        <ul className="space-y-1.5 rounded-lg border border-border/70 p-2">
+                          {participantIds.map((sid) => {
+                            const present =
+                              attendanceByStudent[sid] === "present";
+                            return (
+                              <li key={sid}>
+                                <label className="flex items-center gap-2 text-sm">
+                                  <Checkbox
+                                    checked={selectedStudents.includes(sid)}
+                                    onCheckedChange={() => toggleStudent(sid)}
+                                  />
+                                  <span>
+                                    {nameOf(sid)}
+                                    {!present ? (
+                                      <span className="text-xs text-muted-foreground">
+                                        {" "}
+                                        (не отмечен как присутствующий)
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                </label>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : null}
+                      {assignMode === "present" && presentIds.length === 0 ? (
+                        <p className="text-xs text-destructive">
+                          Нет присутствующих — выберите учеников вручную или
+                          отметьте посещаемость.
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label>Срок (необязательно)</Label>
+                      <Input
+                        type="datetime-local"
+                        value={dueAt}
+                        onChange={(e) => setDueAt(e.target.value)}
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onClose}>
           Отмена
         </Button>
-        <Button type="button" onClick={save} disabled={participantIds.length === 0}>
+        <Button type="button" onClick={save} disabled={!canSave}>
           Сохранить
         </Button>
       </DialogFooter>

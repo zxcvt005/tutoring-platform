@@ -14,16 +14,135 @@ export type AttendanceStatus =
 
 export type TopicStatus = "active" | "archived";
 
-export type HomeworkTemplateStatus = "active" | "archived";
+/** Статус теста (шаблона ДЗ) */
+export type HomeworkTemplateStatus = "draft" | "published" | "archived";
 
+/** @deprecated legacy check type — сохраняем для миграции */
 export type CheckType = "score" | "pass_fail" | "comment";
 
-/** Статус назначения ДЗ ученику (не путать с баллом) */
+/** Типы вопросов в тесте */
+export type QuestionType =
+  | "single_choice"
+  | "multiple_choice"
+  | "short_answer"
+  | "essay"
+  | "matching"
+  | "ordering";
+
+export type QuestionOption = {
+  id: string;
+  text: string;
+};
+
+export type MatchingPair = {
+  id: string;
+  left: string;
+  right: string;
+};
+
+export type OrderItem = {
+  id: string;
+  text: string;
+};
+
+export type TestQuestion = {
+  id: string;
+  type: QuestionType;
+  prompt: string;
+  maxScore: number;
+  explanation?: string;
+  /** Варианты для single/multiple choice */
+  options?: QuestionOption[];
+  /** Правильные id вариантов */
+  correctOptionIds?: string[];
+  /** Краткий ответ: допустимые строки/числа */
+  correctAnswers?: string[];
+  answerKind?: "text" | "number";
+  /** Допустимая погрешность для числового ответа */
+  numericTolerance?: number;
+  /** Пары для сопоставления (правильный порядок = верные пары) */
+  matchingPairs?: MatchingPair[];
+  /** Элементы в правильном порядке */
+  orderItems?: OrderItem[];
+};
+
+/**
+ * Тест / шаблон ДЗ, принадлежащий теме.
+ * Поле называется Homework для совместимости с существующим store.
+ */
+export type Homework = {
+  id: string;
+  topicId: string;
+  teacherId: string;
+  title: string;
+  description?: string;
+  status: HomeworkTemplateStatus;
+  questions: TestQuestion[];
+  /** Сумма maxScore вопросов (кэш; пересчитывается при сохранении) */
+  maxScore?: number;
+  /** legacy */
+  checkType?: CheckType;
+};
+
+/** Снимок теста на момент назначения — не меняется при правках шаблона */
+export type TestSnapshot = {
+  title: string;
+  description?: string;
+  questions: TestQuestion[];
+  maxScore: number;
+};
+
+/** Ответ ученика на одно задание */
+export type StudentAnswer = {
+  questionId: string;
+  selectedOptionIds?: string[];
+  textAnswer?: string;
+  /** left pair id → right pair id */
+  matching?: Record<string, string>;
+  /** id элементов в порядке ученика */
+  order?: string[];
+  autoScore?: number;
+  manualScore?: number;
+  needsManualReview?: boolean;
+  /** null — ещё не проверено / ручная проверка */
+  isCorrect?: boolean | null;
+  teacherComment?: string;
+};
+
+/**
+ * Статус назначения ДЗ ученику.
+ * in_progress — черновик сохранён, ещё не отправлено.
+ * completed — отправлено; может ждать ручной проверки.
+ */
 export type HomeworkAssignmentStatus =
   | "assigned"
+  | "in_progress"
   | "completed"
   | "reviewed"
   | "overdue";
+
+export type HomeworkAssignment = {
+  id: string;
+  homeworkId: string;
+  topicId: string;
+  teacherId: string;
+  studentId: string;
+  /** Занятие, с которого назначили (если есть) */
+  lessonId?: string;
+  /** Срок необязателен — без даты задание всё равно доступно */
+  dueAt?: string;
+  status: HomeworkAssignmentStatus;
+  score?: number;
+  maxScore?: number;
+  feedback?: string;
+  /** legacy текстовый ответ */
+  answerText?: string;
+  completedAt?: string;
+  reviewedAt?: string;
+  /** Снимок вопросов и ключей на момент назначения */
+  testSnapshot?: TestSnapshot;
+  answers?: StudentAnswer[];
+};
 
 export type WorkInterval = {
   start: string;
@@ -99,36 +218,8 @@ export type Topic = {
   sortOrder: number;
 };
 
-export type Homework = {
-  id: string;
-  topicId: string;
-  teacherId: string;
-  title: string;
-  description?: string;
-  checkType: CheckType;
-  maxScore?: number;
-  status: HomeworkTemplateStatus;
-};
-
-export type HomeworkAssignment = {
-  id: string;
-  homeworkId: string;
-  topicId: string;
-  teacherId: string;
-  studentId: string;
-  dueAt: string;
-  status: HomeworkAssignmentStatus;
-  score?: number;
-  maxScore?: number;
-  feedback?: string;
-  /** Ответ ученика при сдаче (прототип) */
-  answerText?: string;
-  completedAt?: string;
-  reviewedAt?: string;
-};
-
 export type DemoData = {
-  version: 4;
+  version: 5;
   teachers: Teacher[];
   students: Student[];
   lessons: Lesson[];
@@ -143,11 +234,12 @@ export type DemoData = {
   currentStudentId: string;
 };
 
-export const STORAGE_KEY = "naemnye.demo.v4";
+export const STORAGE_KEY = "naemnye.demo.v5";
 export const LEGACY_STORAGE_KEYS = [
   "naemnye.demo.v1",
   "naemnye.demo.v2",
   "naemnye.demo.v3",
+  "naemnye.demo.v4",
 ];
 
 export const DURATION_OPTIONS = [30, 45, 60, 90, 120] as const;

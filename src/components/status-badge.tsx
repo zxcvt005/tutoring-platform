@@ -116,7 +116,9 @@ export function HomeworkAssignmentStatusBadge({
         ? "danger"
         : status === "completed"
           ? "warn"
-          : "neutral";
+          : status === "in_progress"
+            ? "warn"
+            : "neutral";
   const label =
     perspective === "student"
       ? studentHomeworkStatusLabel[status]

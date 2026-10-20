@@ -128,7 +128,9 @@ export function TopicsWorkspace() {
       (a) => a.status === "completed" || a.status === "reviewed"
     ).length;
     return {
-      hwCount: hws.filter((h) => h.status === "active").length,
+      hwCount: hws.filter(
+        (h) => h.status === "published" || h.status === "draft"
+      ).length,
       assigned: assignments.length,
       doneHw,
       lessons: lessons.length,

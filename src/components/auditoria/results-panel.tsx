@@ -2,10 +2,10 @@
 
 import { useMemo, useState } from "react";
 
-import { HomeworkSubmitDialog } from "@/components/auditoria/homework-submit-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
 import { HomeworkAssignmentStatusBadge } from "@/components/status-badge";
+import { TestTakeDialog } from "@/components/tests/test-take-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -16,6 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/format";
+import { getAssignmentTitle } from "@/lib/tests/helpers";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { HomeworkAssignment } from "@/lib/types";
 
@@ -29,8 +30,12 @@ export function AuditoriaResultsPanel() {
     return assignmentsForStudent(studentId)
       .filter((a) => a.status === "reviewed" || a.status === "completed")
       .sort((a, b) => {
-        const ta = new Date(a.reviewedAt ?? a.completedAt ?? a.dueAt).getTime();
-        const tb = new Date(b.reviewedAt ?? b.completedAt ?? b.dueAt).getTime();
+        const ta = new Date(
+          a.reviewedAt ?? a.completedAt ?? a.dueAt ?? 0
+        ).getTime();
+        const tb = new Date(
+          b.reviewedAt ?? b.completedAt ?? b.dueAt ?? 0
+        ).getTime();
         return tb - ta;
       });
   }, [assignmentsForStudent, studentId]);
@@ -42,14 +47,14 @@ export function AuditoriaResultsPanel() {
       .reverse();
     return reviewed.map((a) => {
       const max = a.maxScore && a.maxScore > 0 ? a.maxScore : 1;
+      const hw = data.homeworks.find((h) => h.id === a.homeworkId);
       return {
         id: a.id,
         pct: Math.round((a.score! / max) * 100),
         score: a.score!,
         maxScore: a.maxScore,
         at: a.reviewedAt ?? a.completedAt ?? a.dueAt,
-        title:
-          data.homeworks.find((h) => h.id === a.homeworkId)?.title ?? "Задание",
+        title: getAssignmentTitle(a, hw),
       };
     });
   }, [rows, data.homeworks]);
@@ -123,13 +128,18 @@ export function AuditoriaResultsPanel() {
             {rows.map((a) => {
               const hw = data.homeworks.find((h) => h.id === a.homeworkId);
               const topic = data.topics.find((t) => t.id === a.topicId);
+              const dateIso = a.reviewedAt ?? a.completedAt ?? a.dueAt;
               return (
                 <TableRow key={a.id}>
                   <TableCell className="font-medium">
-                    {hw?.title ?? "—"}
+                    {getAssignmentTitle(a, hw)}
                     {a.feedback && a.status === "reviewed" ? (
                       <p className="mt-0.5 text-xs font-normal text-muted-foreground line-clamp-2">
                         {a.feedback}
+                      </p>
+                    ) : a.status === "completed" ? (
+                      <p className="mt-0.5 text-xs font-normal text-muted-foreground">
+                        Итог после проверки развёрнутых ответов
                       </p>
                     ) : null}
                   </TableCell>
@@ -148,9 +158,7 @@ export function AuditoriaResultsPanel() {
                       : "—"}
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-muted-foreground">
-                    {formatDateTime(
-                      a.reviewedAt ?? a.completedAt ?? a.dueAt
-                    )}
+                    {dateIso ? formatDateTime(dateIso) : "—"}
                   </TableCell>
                   <TableCell>
                     <Button
@@ -169,7 +177,7 @@ export function AuditoriaResultsPanel() {
         </Table>
       )}
 
-      <HomeworkSubmitDialog
+      <TestTakeDialog
         assignment={openHw}
         open={!!openHw}
         onOpenChange={(o) => !o && setOpenHw(null)}

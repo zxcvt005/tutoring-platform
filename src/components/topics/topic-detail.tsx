@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import { PageHeader } from "@/components/layout/page-header";
 import {
@@ -10,6 +11,8 @@ import {
   LessonStatusBadge,
   TopicStatusBadge,
 } from "@/components/status-badge";
+import { AssignmentReviewDialog } from "@/components/tests/assignment-review-dialog";
+import { TestEditorDialog } from "@/components/tests/test-editor-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -35,10 +38,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatDueAt } from "@/lib/format";
+import { computeMaxScore, questionTypeLabel } from "@/lib/tests/helpers";
 import { useDemoStore } from "@/lib/store/demo-store";
-import type { CheckType, Homework } from "@/lib/types";
+import type { Homework, HomeworkAssignment } from "@/lib/types";
+
+const statusLabel: Record<Homework["status"], string> = {
+  draft: "Черновик",
+  published: "Опубликован",
+  archived: "В архиве",
+};
 
 export function TopicDetail({ topicId }: { topicId: string }) {
   const {
@@ -46,9 +55,9 @@ export function TopicDetail({ topicId }: { topicId: string }) {
     ready,
     homeworksForTopic,
     studentsForTeacher,
-    upsertHomework,
     deleteHomework,
-    upsertHomeworkAssignment,
+    publishHomework,
+    assignHomework,
   } = useDemoStore();
 
   const topic = data.topics.find((t) => t.id === topicId);
@@ -57,17 +66,14 @@ export function TopicDetail({ topicId }: { topicId: string }) {
     () => data.lessons.filter((l) => l.topicId === topicId),
     [data.lessons, topicId]
   );
-  const assignments = data.homeworkAssignments.filter((a) => a.topicId === topicId);
+  const assignments = data.homeworkAssignments.filter(
+    (a) => a.topicId === topicId
+  );
 
-  const [hwOpen, setHwOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editingHw, setEditingHw] = useState<Homework | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
-  const [hwForm, setHwForm] = useState({
-    id: undefined as string | undefined,
-    title: "",
-    description: "",
-    checkType: "score" as CheckType,
-    maxScore: "10",
-  });
+  const [reviewOpen, setReviewOpen] = useState<HomeworkAssignment | null>(null);
   const [assignForm, setAssignForm] = useState({
     homeworkId: "",
     studentId: "",
@@ -89,56 +95,33 @@ export function TopicDetail({ topicId }: { topicId: string }) {
   }
 
   const students = studentsForTeacher(data.currentTeacherId);
+  const visibleTests = homeworks.filter((h) => h.status !== "archived");
 
-  function openHw(h?: Homework) {
-    setHwForm(
-      h
-        ? {
-            id: h.id,
-            title: h.title,
-            description: h.description ?? "",
-            checkType: h.checkType,
-            maxScore: h.maxScore != null ? String(h.maxScore) : "",
-          }
-        : {
-            id: undefined,
-            title: "",
-            description: "",
-            checkType: "score",
-            maxScore: "10",
-          }
-    );
-    setHwOpen(true);
-  }
-
-  function saveHw() {
-    if (!hwForm.title.trim()) return;
-    upsertHomework({
-      id: hwForm.id,
-      topicId,
-      teacherId: topic!.teacherId,
-      title: hwForm.title.trim(),
-      description: hwForm.description.trim() || undefined,
-      checkType: hwForm.checkType,
-      maxScore: hwForm.maxScore ? Number(hwForm.maxScore) : undefined,
-      status: "active",
-    });
-    setHwOpen(false);
+  function openEditor(h?: Homework) {
+    setEditingHw(h ?? null);
+    setEditorOpen(true);
   }
 
   function saveAssign() {
-    if (!assignForm.homeworkId || !assignForm.studentId || !assignForm.dueAt)
+    if (!assignForm.homeworkId || !assignForm.studentId) {
+      toast.error("Выберите тест и ученика");
       return;
-    const hw = data.homeworks.find((h) => h.id === assignForm.homeworkId);
-    upsertHomeworkAssignment({
+    }
+    const result = assignHomework({
       homeworkId: assignForm.homeworkId,
       topicId,
       teacherId: topic!.teacherId,
-      studentId: assignForm.studentId,
-      dueAt: new Date(assignForm.dueAt).toISOString(),
-      status: "assigned",
-      maxScore: hw?.maxScore,
+      studentIds: [assignForm.studentId],
+      dueAt: assignForm.dueAt
+        ? new Date(assignForm.dueAt).toISOString()
+        : undefined,
     });
+    if (!result.ok) return;
+    if (result.created === 0) {
+      toast.message("Такое назначение уже есть");
+    } else {
+      toast.success("Тест назначен");
+    }
     setAssignOpen(false);
   }
 
@@ -169,7 +152,7 @@ export function TopicDetail({ topicId }: { topicId: string }) {
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-display text-xl font-semibold tracking-tight">
-            Домашние задания
+            Тесты
           </h2>
           <div className="flex gap-2">
             <Button
@@ -178,8 +161,11 @@ export function TopicDetail({ topicId }: { topicId: string }) {
               variant="outline"
               className="rounded-full"
               onClick={() => {
+                const published = visibleTests.filter(
+                  (h) => h.status === "published"
+                );
                 setAssignForm({
-                  homeworkId: homeworks[0]?.id ?? "",
+                  homeworkId: published[0]?.id ?? "",
                   studentId: students[0]?.id ?? "",
                   dueAt: "",
                 });
@@ -192,42 +178,77 @@ export function TopicDetail({ topicId }: { topicId: string }) {
               type="button"
               size="sm"
               className="rounded-full"
-              onClick={() => openHw()}
+              onClick={() => openEditor()}
             >
-              Добавить ДЗ
+              Создать тест
             </Button>
           </div>
         </div>
-        {homeworks.filter((h) => h.status === "active").length === 0 ? (
-          <p className="text-sm text-muted-foreground">Пока нет заданий к теме.</p>
+        {visibleTests.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Пока нет тестов к теме. Создайте тест с заданиями разных типов.
+          </p>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Название</TableHead>
-                <TableHead>Проверка</TableHead>
+                <TableHead>Статус</TableHead>
+                <TableHead>Заданий</TableHead>
                 <TableHead>Макс. балл</TableHead>
                 <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {homeworks
-                .filter((h) => h.status === "active")
-                .map((h) => (
+              {visibleTests.map((h) => {
+                const qCount = h.questions?.length ?? 0;
+                const max = computeMaxScore(h.questions ?? []) || h.maxScore;
+                return (
                   <TableRow key={h.id}>
-                    <TableCell className="font-medium">{h.title}</TableCell>
-                    <TableCell>{h.checkType}</TableCell>
-                    <TableCell>{h.maxScore ?? "—"}</TableCell>
+                    <TableCell className="font-medium">
+                      <div>
+                        {h.title}
+                        {h.description ? (
+                          <p className="mt-0.5 text-xs font-normal text-muted-foreground line-clamp-1">
+                            {h.description}
+                          </p>
+                        ) : null}
+                        {qCount > 0 ? (
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">
+                            {[
+                              ...new Set(
+                                (h.questions ?? []).map(
+                                  (q) => questionTypeLabel[q.type]
+                                )
+                              ),
+                            ].join(" · ")}
+                          </p>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                    <TableCell>{statusLabel[h.status]}</TableCell>
+                    <TableCell className="tabular-nums">{qCount}</TableCell>
+                    <TableCell className="tabular-nums">{max ?? "—"}</TableCell>
                     <TableCell>
-                      <div className="flex gap-1">
+                      <div className="flex flex-wrap gap-1">
                         <Button
                           type="button"
                           size="sm"
                           variant="ghost"
-                          onClick={() => openHw(h)}
+                          onClick={() => openEditor(h)}
                         >
                           Изменить
                         </Button>
+                        {h.status === "draft" ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => publishHomework(h.id)}
+                          >
+                            Опубликовать
+                          </Button>
+                        ) : null}
                         <Button
                           type="button"
                           size="sm"
@@ -239,7 +260,8 @@ export function TopicDetail({ topicId }: { topicId: string }) {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                );
+              })}
             </TableBody>
           </Table>
         )}
@@ -247,7 +269,7 @@ export function TopicDetail({ topicId }: { topicId: string }) {
 
       <section className="space-y-3">
         <h2 className="font-display text-xl font-semibold tracking-tight">
-          Назначения ученикам
+          Назначения и результаты
         </h2>
         {assignments.length === 0 ? (
           <p className="text-sm text-muted-foreground">Ещё не назначали.</p>
@@ -255,31 +277,56 @@ export function TopicDetail({ topicId }: { topicId: string }) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Задание</TableHead>
+                <TableHead>Тест</TableHead>
                 <TableHead>Ученик</TableHead>
                 <TableHead>Срок</TableHead>
                 <TableHead>Статус</TableHead>
                 <TableHead>Балл</TableHead>
+                <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {assignments.map((a) => (
-                <TableRow key={a.id}>
-                  <TableCell>
-                    {data.homeworks.find((h) => h.id === a.homeworkId)?.title}
-                  </TableCell>
-                  <TableCell>
-                    {data.students.find((s) => s.id === a.studentId)?.fullName}
-                  </TableCell>
-                  <TableCell>{formatDateTime(a.dueAt)}</TableCell>
-                  <TableCell>
-                    <HomeworkAssignmentStatusBadge status={a.status} />
-                  </TableCell>
-                  <TableCell>
-                    {a.score != null ? `${a.score}/${a.maxScore ?? "—"}` : "—"}
-                  </TableCell>
-                </TableRow>
-              ))}
+              {assignments.map((a) => {
+                const title =
+                  a.testSnapshot?.title ||
+                  data.homeworks.find((h) => h.id === a.homeworkId)?.title;
+                const pct =
+                  a.score != null && a.maxScore
+                    ? Math.round((a.score / a.maxScore) * 100)
+                    : null;
+                return (
+                  <TableRow key={a.id}>
+                    <TableCell>{title}</TableCell>
+                    <TableCell>
+                      {data.students.find((s) => s.id === a.studentId)
+                        ?.fullName}
+                    </TableCell>
+                    <TableCell>{formatDueAt(a.dueAt)}</TableCell>
+                    <TableCell>
+                      <HomeworkAssignmentStatusBadge status={a.status} />
+                    </TableCell>
+                    <TableCell className="tabular-nums">
+                      {a.score != null
+                        ? `${a.score}/${a.maxScore ?? "—"}${
+                            pct != null ? ` (${pct}%)` : ""
+                          }`
+                        : a.status === "completed"
+                          ? "ждёт проверки"
+                          : "—"}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setReviewOpen(a)}
+                      >
+                        Открыть
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}
@@ -325,77 +372,28 @@ export function TopicDetail({ topicId }: { topicId: string }) {
         )}
       </section>
 
-      <Dialog open={hwOpen} onOpenChange={setHwOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {hwForm.id ? "Редактировать ДЗ" : "Новое ДЗ"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-3">
-            <div className="space-y-1.5">
-              <Label>Название</Label>
-              <Input
-                value={hwForm.title}
-                onChange={(e) => setHwForm({ ...hwForm, title: e.target.value })}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Условие</Label>
-              <Textarea
-                value={hwForm.description}
-                onChange={(e) =>
-                  setHwForm({ ...hwForm, description: e.target.value })
-                }
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Тип проверки</Label>
-              <Select
-                value={hwForm.checkType}
-                onValueChange={(v) =>
-                  v && setHwForm({ ...hwForm, checkType: v as CheckType })
-                }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="score">Балл</SelectItem>
-                  <SelectItem value="pass_fail">Зачёт</SelectItem>
-                  <SelectItem value="comment">Комментарий</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Макс. балл</Label>
-              <Input
-                value={hwForm.maxScore}
-                onChange={(e) =>
-                  setHwForm({ ...hwForm, maxScore: e.target.value })
-                }
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setHwOpen(false)}>
-              Отмена
-            </Button>
-            <Button type="button" onClick={saveHw}>
-              Сохранить
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <TestEditorDialog
+        topicId={topicId}
+        teacherId={topic.teacherId}
+        homework={editingHw}
+        open={editorOpen}
+        onOpenChange={setEditorOpen}
+      />
+
+      <AssignmentReviewDialog
+        assignment={reviewOpen}
+        open={!!reviewOpen}
+        onOpenChange={(o) => !o && setReviewOpen(null)}
+      />
 
       <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Назначить ДЗ ученику</DialogTitle>
+            <DialogTitle>Назначить тест ученику</DialogTitle>
           </DialogHeader>
           <div className="grid gap-3">
             <div className="space-y-1.5">
-              <Label>Задание</Label>
+              <Label>Опубликованный тест</Label>
               <Select
                 value={assignForm.homeworkId || null}
                 onValueChange={(v) =>
@@ -405,13 +403,13 @@ export function TopicDetail({ topicId }: { topicId: string }) {
                 <SelectTrigger className="w-full">
                   <SelectValue>
                     {(v) =>
-                      homeworks.find((h) => h.id === v)?.title ?? "Задание"
+                      visibleTests.find((h) => h.id === v)?.title ?? "Тест"
                     }
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {homeworks
-                    .filter((h) => h.status === "active")
+                  {visibleTests
+                    .filter((h) => h.status === "published")
                     .map((h) => (
                       <SelectItem key={h.id} value={h.id}>
                         {h.title}
@@ -419,6 +417,22 @@ export function TopicDetail({ topicId }: { topicId: string }) {
                     ))}
                 </SelectContent>
               </Select>
+              {visibleTests.filter((h) => h.status === "published").length ===
+              0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Нет опубликованных тестов.{" "}
+                  <button
+                    type="button"
+                    className="underline"
+                    onClick={() => {
+                      setAssignOpen(false);
+                      openEditor();
+                    }}
+                  >
+                    Создать тест
+                  </button>
+                </p>
+              ) : null}
             </div>
             <div className="space-y-1.5">
               <Label>Ученик</Label>
@@ -445,7 +459,7 @@ export function TopicDetail({ topicId }: { topicId: string }) {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Срок</Label>
+              <Label>Срок (необязательно)</Label>
               <Input
                 type="datetime-local"
                 value={assignForm.dueAt}
@@ -453,6 +467,9 @@ export function TopicDetail({ topicId }: { topicId: string }) {
                   setAssignForm({ ...assignForm, dueAt: e.target.value })
                 }
               />
+              <p className="text-xs text-muted-foreground">
+                Если не указать — задание будет без дедлайна.
+              </p>
             </div>
           </div>
           <DialogFooter>

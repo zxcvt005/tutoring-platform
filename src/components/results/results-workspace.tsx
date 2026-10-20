@@ -7,16 +7,8 @@ import { EmptyState } from "@/components/empty-state";
 import { FilterBar } from "@/components/layout/filter-bar";
 import { PageHeader } from "@/components/layout/page-header";
 import { HomeworkAssignmentStatusBadge } from "@/components/status-badge";
+import { AssignmentReviewDialog } from "@/components/tests/assignment-review-dialog";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -32,17 +24,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
-import { formatDateTime } from "@/lib/format";
+import { formatDueAt } from "@/lib/format";
+import { hasPendingManual } from "@/lib/tests/grading";
+import { getAssignmentTitle } from "@/lib/tests/helpers";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { HomeworkAssignment, HomeworkAssignmentStatus } from "@/lib/types";
-
-const reviewStatusLabel: Record<HomeworkAssignmentStatus, string> = {
-  assigned: "Назначено",
-  completed: "Выполнено",
-  reviewed: "Проверено",
-  overdue: "Просрочено",
-};
 
 export function ResultsWorkspace({
   mode,
@@ -53,7 +39,6 @@ export function ResultsWorkspace({
     data,
     setDirekciyaTeacherId,
     assignmentsForTeacher,
-    upsertHomeworkAssignment,
   } = useDemoStore();
 
   const teacherId =
@@ -63,10 +48,7 @@ export function ResultsWorkspace({
   const [statusFilter, setStatusFilter] = useState<"all" | HomeworkAssignmentStatus>(
     "all"
   );
-  const [editing, setEditing] = useState<HomeworkAssignment | null>(null);
-  const [score, setScore] = useState("");
-  const [feedback, setFeedback] = useState("");
-  const [status, setStatus] = useState<HomeworkAssignmentStatus>("reviewed");
+  const [reviewing, setReviewing] = useState<HomeworkAssignment | null>(null);
 
   const rows = useMemo(() => {
     return assignmentsForTeacher(teacherId)
@@ -75,36 +57,18 @@ export function ResultsWorkspace({
         if (statusFilter !== "all" && a.status !== statusFilter) return false;
         return true;
       })
-      .sort(
-        (a, b) => new Date(b.dueAt).getTime() - new Date(a.dueAt).getTime()
-      );
+      .sort((a, b) => {
+        const ta = new Date(a.dueAt ?? a.completedAt ?? 0).getTime();
+        const tb = new Date(b.dueAt ?? b.completedAt ?? 0).getTime();
+        return tb - ta;
+      });
   }, [assignmentsForTeacher, teacherId, studentFilter, statusFilter]);
 
   const students = data.students.filter((s) => s.teacherId === teacherId);
 
-  function openReview(a: HomeworkAssignment) {
-    setEditing(a);
-    setScore(a.score != null ? String(a.score) : "");
-    setFeedback(a.feedback ?? "");
-    setStatus(a.status === "assigned" || a.status === "overdue" ? "completed" : "reviewed");
-  }
-
-  function saveReview() {
-    if (!editing) return;
-    upsertHomeworkAssignment({
-      ...editing,
-      status,
-      score: score ? Number(score) : undefined,
-      feedback: feedback.trim() || undefined,
-      reviewedAt:
-        status === "reviewed" ? new Date().toISOString() : editing.reviewedAt,
-      completedAt:
-        status === "completed" || status === "reviewed"
-          ? editing.completedAt || new Date().toISOString()
-          : editing.completedAt,
-    });
-    setEditing(null);
-  }
+  const pendingCount = rows.filter(
+    (a) => a.status === "completed" && hasPendingManual(a)
+  ).length;
 
   return (
     <div>
@@ -112,8 +76,8 @@ export function ResultsWorkspace({
         title="Результаты"
         description={
           mode === "direkciya"
-            ? "Результаты выбранного преподавателя: назначения ДЗ и история проверок."
-            : "Проверка домашних заданий ваших учеников."
+            ? "Результаты выбранного преподавателя: назначения тестов и проверки."
+            : "Проверка тестов и домашних заданий ваших учеников."
         }
         actions={
           mode === "direkciya" ? (
@@ -136,6 +100,10 @@ export function ResultsWorkspace({
                 ))}
               </SelectContent>
             </Select>
+          ) : pendingCount > 0 ? (
+            <span className="text-sm text-muted-foreground">
+              Ждут ручной проверки: {pendingCount}
+            </span>
           ) : null
         }
       />
@@ -175,7 +143,8 @@ export function ResultsWorkspace({
           <SelectContent>
             <SelectItem value="all">Все статусы</SelectItem>
             <SelectItem value="assigned">Назначено</SelectItem>
-            <SelectItem value="completed">Выполнено</SelectItem>
+            <SelectItem value="in_progress">Черновик</SelectItem>
+            <SelectItem value="completed">На проверке</SelectItem>
             <SelectItem value="reviewed">Проверено</SelectItem>
             <SelectItem value="overdue">Просрочено</SelectItem>
           </SelectContent>
@@ -188,21 +157,34 @@ export function ResultsWorkspace({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Задание</TableHead>
+              <TableHead>Тест</TableHead>
               <TableHead>Ученик</TableHead>
               <TableHead>Срок</TableHead>
               <TableHead>Статус</TableHead>
               <TableHead>Балл</TableHead>
-              <TableHead className="w-24" />
+              <TableHead className="w-28" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.map((a) => {
               const hw = data.homeworks.find((h) => h.id === a.homeworkId);
               const student = data.students.find((s) => s.id === a.studentId);
+              const title = getAssignmentTitle(a, hw);
+              const pct =
+                a.score != null && a.maxScore
+                  ? Math.round((a.score / a.maxScore) * 100)
+                  : null;
+              const pending = hasPendingManual(a);
               return (
                 <TableRow key={a.id}>
-                  <TableCell className="font-medium">{hw?.title ?? "—"}</TableCell>
+                  <TableCell className="font-medium">
+                    {title}
+                    {pending ? (
+                      <p className="text-[11px] font-normal text-[oklch(0.45_0.08_55)]">
+                        есть развёрнутые ответы
+                      </p>
+                    ) : null}
+                  </TableCell>
                   <TableCell>
                     <Link
                       href={`/${mode === "direkciya" ? "direkciya" : "kafedra"}/students/${a.studentId}`}
@@ -211,12 +193,18 @@ export function ResultsWorkspace({
                       {student?.fullName ?? "—"}
                     </Link>
                   </TableCell>
-                  <TableCell>{formatDateTime(a.dueAt)}</TableCell>
+                  <TableCell>{formatDueAt(a.dueAt)}</TableCell>
                   <TableCell>
                     <HomeworkAssignmentStatusBadge status={a.status} />
                   </TableCell>
                   <TableCell className="tabular-nums">
-                    {a.score != null ? `${a.score}/${a.maxScore ?? "—"}` : "—"}
+                    {a.score != null
+                      ? `${a.score}/${a.maxScore ?? "—"}${
+                          pct != null ? ` (${pct}%)` : ""
+                        }`
+                      : a.status === "completed"
+                        ? "—"
+                        : "—"}
                   </TableCell>
                   <TableCell>
                     {mode === "kafedra" ? (
@@ -224,9 +212,11 @@ export function ResultsWorkspace({
                         type="button"
                         size="sm"
                         variant="ghost"
-                        onClick={() => openReview(a)}
+                        onClick={() => setReviewing(a)}
                       >
-                        Проверить
+                        {pending || a.status === "completed"
+                          ? "Проверить"
+                          : "Открыть"}
                       </Button>
                     ) : (
                       <span className="text-xs text-muted-foreground">
@@ -241,71 +231,11 @@ export function ResultsWorkspace({
         </Table>
       )}
 
-      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Проверка задания</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-3">
-            {editing?.answerText ? (
-              <div className="space-y-1.5 rounded-xl border border-border/80 bg-muted/40 px-3 py-2.5">
-                <Label>Ответ ученика</Label>
-                <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                  {editing.answerText}
-                </p>
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                Ученик ещё не отправил текстовый ответ.
-              </p>
-            )}
-            <div className="space-y-1.5">
-              <Label>Статус</Label>
-              <Select
-                value={status}
-                onValueChange={(v) =>
-                  v && setStatus(v as HomeworkAssignmentStatus)
-                }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue>
-                    {(v) =>
-                      v
-                        ? reviewStatusLabel[v as HomeworkAssignmentStatus]
-                        : "Статус"
-                    }
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="completed">Выполнено</SelectItem>
-                  <SelectItem value="reviewed">Проверено</SelectItem>
-                  <SelectItem value="assigned">Назначено</SelectItem>
-                  <SelectItem value="overdue">Просрочено</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Балл (необязательно)</Label>
-              <Input value={score} onChange={(e) => setScore(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Комментарий</Label>
-              <Textarea
-                value={feedback}
-                onChange={(e) => setFeedback(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setEditing(null)}>
-              Отмена
-            </Button>
-            <Button type="button" onClick={saveReview}>
-              Сохранить
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AssignmentReviewDialog
+        assignment={reviewing}
+        open={!!reviewing}
+        onOpenChange={(o) => !o && setReviewing(null)}
+      />
     </div>
   );
 }

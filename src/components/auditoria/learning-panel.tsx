@@ -2,12 +2,13 @@
 
 import { useMemo, useState } from "react";
 
-import { HomeworkSubmitDialog } from "@/components/auditoria/homework-submit-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
 import { HomeworkAssignmentStatusBadge } from "@/components/status-badge";
+import { TestTakeDialog } from "@/components/tests/test-take-dialog";
 import { Button } from "@/components/ui/button";
-import { formatDateTime } from "@/lib/format";
+import { formatDueAt } from "@/lib/format";
+import { getAssignmentTitle } from "@/lib/tests/helpers";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { HomeworkAssignment, Topic } from "@/lib/types";
 import { UNSECTIONED_ID } from "@/lib/types";
@@ -137,11 +138,11 @@ export function AuditoriaLearningPanel() {
                   const status = studyStatus(topic);
                   const related = assignments
                     .filter((a) => a.topicId === topic.id)
-                    .sort(
-                      (a, b) =>
-                        new Date(a.dueAt).getTime() -
-                        new Date(b.dueAt).getTime()
-                    );
+                    .sort((a, b) => {
+                      const ta = a.dueAt ? new Date(a.dueAt).getTime() : Infinity;
+                      const tb = b.dueAt ? new Date(b.dueAt).getTime() : Infinity;
+                      return ta - tb;
+                    });
                   return (
                     <li key={topic.id} className="py-4">
                       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -169,7 +170,14 @@ export function AuditoriaLearningPanel() {
                             const hw = data.homeworks.find(
                               (h) => h.id === a.homeworkId
                             );
-                            const canOpen = true;
+                            const qCount =
+                              a.testSnapshot?.questions?.length ??
+                              hw?.questions?.length ??
+                              0;
+                            const max =
+                              a.maxScore ??
+                              a.testSnapshot?.maxScore ??
+                              hw?.maxScore;
                             return (
                               <li
                                 key={a.id}
@@ -177,12 +185,14 @@ export function AuditoriaLearningPanel() {
                               >
                                 <div className="min-w-0">
                                   <p className="text-sm font-medium">
-                                    {hw?.title ?? "ДЗ"}
+                                    {getAssignmentTitle(a, hw)}
                                   </p>
                                   <p className="text-xs text-muted-foreground">
-                                    Срок {formatDateTime(a.dueAt)}
+                                    {formatDueAt(a.dueAt)}
+                                    {qCount ? ` · ${qCount} вопр.` : ""}
+                                    {max != null ? ` · до ${max} б.` : ""}
                                     {a.score != null
-                                      ? ` · ${a.score}${a.maxScore != null ? `/${a.maxScore}` : ""}`
+                                      ? ` · ${a.score}${max != null ? `/${max}` : ""}`
                                       : ""}
                                   </p>
                                 </div>
@@ -191,20 +201,19 @@ export function AuditoriaLearningPanel() {
                                     status={a.status}
                                     perspective="student"
                                   />
-                                  {canOpen ? (
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant="outline"
-                                      className="rounded-xl"
-                                      onClick={() => setOpenHw(a)}
-                                    >
-                                      {a.status === "assigned" ||
-                                      a.status === "overdue"
-                                        ? "Выполнить"
-                                        : "Открыть"}
-                                    </Button>
-                                  ) : null}
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="rounded-xl"
+                                    onClick={() => setOpenHw(a)}
+                                  >
+                                    {a.status === "assigned" ||
+                                    a.status === "overdue" ||
+                                    a.status === "in_progress"
+                                      ? "Выполнить"
+                                      : "Открыть"}
+                                  </Button>
                                 </div>
                               </li>
                             );
@@ -224,7 +233,7 @@ export function AuditoriaLearningPanel() {
         </div>
       )}
 
-      <HomeworkSubmitDialog
+      <TestTakeDialog
         assignment={openHw}
         open={!!openHw}
         onOpenChange={(o) => !o && setOpenHw(null)}

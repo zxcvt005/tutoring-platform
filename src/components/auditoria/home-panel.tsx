@@ -3,15 +3,16 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
-import { HomeworkSubmitDialog } from "@/components/auditoria/homework-submit-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
 import {
   HomeworkAssignmentStatusBadge,
   LessonStatusBadge,
 } from "@/components/status-badge";
+import { TestTakeDialog } from "@/components/tests/test-take-dialog";
 import { Button } from "@/components/ui/button";
-import { formatDateTime, formatTime } from "@/lib/format";
+import { formatDateTime, formatDueAt, formatTime } from "@/lib/format";
+import { getAssignmentTitle } from "@/lib/tests/helpers";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { HomeworkAssignment } from "@/lib/types";
 
@@ -83,11 +84,14 @@ export function AuditoriaHomePanel() {
       );
     });
     const dueToday = assignments.filter((a) => {
+      if (!a.dueAt) return false;
       const t = new Date(a.dueAt).getTime();
       return (
         t >= clock.dayStart &&
         t <= clock.dayEnd &&
-        (a.status === "assigned" || a.status === "overdue")
+        (a.status === "assigned" ||
+          a.status === "overdue" ||
+          a.status === "in_progress")
       );
     });
     return { todayLessons, dueToday };
@@ -100,11 +104,14 @@ export function AuditoriaHomePanel() {
           (a) =>
             a.status === "assigned" ||
             a.status === "overdue" ||
+            a.status === "in_progress" ||
             a.status === "completed"
         )
-        .sort(
-          (a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime()
-        ),
+        .sort((a, b) => {
+          const ta = a.dueAt ? new Date(a.dueAt).getTime() : Infinity;
+          const tb = b.dueAt ? new Date(b.dueAt).getTime() : Infinity;
+          return ta - tb;
+        }),
     [assignments]
   );
 
@@ -131,7 +138,10 @@ export function AuditoriaHomePanel() {
         : null;
     const doneLessons = lessons.filter((l) => l.status === "done").length;
     const openHw = assignments.filter(
-      (a) => a.status === "assigned" || a.status === "overdue"
+      (a) =>
+        a.status === "assigned" ||
+        a.status === "overdue" ||
+        a.status === "in_progress"
     ).length;
     return {
       reviewedCount: reviewed.length,
@@ -228,9 +238,11 @@ export function AuditoriaHomePanel() {
                       className="flex flex-wrap items-center justify-between gap-3 py-3"
                     >
                       <div className="min-w-0">
-                        <p className="font-medium">{hw?.title ?? "Задание"}</p>
+                        <p className="font-medium">
+                          {getAssignmentTitle(a, hw)}
+                        </p>
                         <p className="text-xs text-muted-foreground">
-                          Срок {formatDateTime(a.dueAt)}
+                          {formatDueAt(a.dueAt)}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
@@ -245,7 +257,9 @@ export function AuditoriaHomePanel() {
                           className="rounded-xl"
                           onClick={() => setOpenHw(a)}
                         >
-                          {a.status === "assigned" || a.status === "overdue"
+                          {a.status === "assigned" ||
+                          a.status === "overdue" ||
+                          a.status === "in_progress"
                             ? "Открыть"
                             : "Смотреть"}
                         </Button>
@@ -284,7 +298,8 @@ export function AuditoriaHomePanel() {
                     const hw = data.homeworks.find((h) => h.id === a.homeworkId);
                     return (
                       <li key={a.id}>
-                        Сдать: {hw?.title ?? "ДЗ"} (до {formatTime(a.dueAt)})
+                        Сдать: {getAssignmentTitle(a, hw)}
+                        {a.dueAt ? ` (до ${formatTime(a.dueAt)})` : ""}
                       </li>
                     );
                   })}
@@ -347,7 +362,7 @@ export function AuditoriaHomePanel() {
         </div>
       </div>
 
-      <HomeworkSubmitDialog
+      <TestTakeDialog
         assignment={openHw}
         open={!!openHw}
         onOpenChange={(o) => !o && setOpenHw(null)}

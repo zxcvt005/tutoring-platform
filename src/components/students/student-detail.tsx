@@ -18,7 +18,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatDueAt } from "@/lib/format";
+import { getAssignmentTitle } from "@/lib/tests/helpers";
 import { useDemoStore } from "@/lib/store/demo-store";
 
 export function StudentDetail({
@@ -132,16 +133,18 @@ export function StudentDetail({
                   return (
                     <TableRow key={a.id}>
                       <TableCell className="font-medium">
-                        {hw?.title ?? "—"}
+                        {getAssignmentTitle(a, hw)}
                       </TableCell>
-                      <TableCell>{formatDateTime(a.dueAt)}</TableCell>
+                      <TableCell>{formatDueAt(a.dueAt)}</TableCell>
                       <TableCell>
                         <HomeworkAssignmentStatusBadge status={a.status} />
                       </TableCell>
                       <TableCell className="tabular-nums">
                         {a.score != null
                           ? `${a.score}/${a.maxScore ?? "—"}`
-                          : "—"}
+                          : a.status === "completed"
+                            ? "ждёт проверки"
+                            : "—"}
                       </TableCell>
                     </TableRow>
                   );

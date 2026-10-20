@@ -28,7 +28,11 @@ export const metadata: Metadata = {
   description: "Локальный прототип управления репетиторским бизнесом",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
     <html
       lang="ru"

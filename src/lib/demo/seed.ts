@@ -259,45 +259,240 @@ export function createSeedData(): DemoData {
       id: "hw1",
       topicId: "tp1",
       teacherId: "t1",
-      title: "Таблица производных — 10 примеров",
-      description: "Вычислить производные, сдать решения.",
-      checkType: "score" as const,
-      maxScore: 10,
-      status: "active" as const,
+      title: "Производная: базовый тест",
+      description: "Проверка табличных производных и понимания определения.",
+      status: "published" as const,
+      maxScore: 12,
+      questions: [
+        {
+          id: "q1a",
+          type: "single_choice" as const,
+          prompt: "Чему равна производная функции f(x) = x²?",
+          maxScore: 1,
+          options: [
+            { id: "o1a1", text: "2x" },
+            { id: "o1a2", text: "x" },
+            { id: "o1a3", text: "2" },
+            { id: "o1a4", text: "x²" },
+          ],
+          correctOptionIds: ["o1a1"],
+          explanation: "По степенному правилу (xⁿ)' = n·xⁿ⁻¹.",
+        },
+        {
+          id: "q1b",
+          type: "multiple_choice" as const,
+          prompt: "Какие из функций дифференцируемы во всех точках ℝ?",
+          maxScore: 2,
+          options: [
+            { id: "o1b1", text: "f(x) = x³" },
+            { id: "o1b2", text: "f(x) = |x|" },
+            { id: "o1b3", text: "f(x) = sin x" },
+            { id: "o1b4", text: "f(x) = eˣ" },
+          ],
+          correctOptionIds: ["o1b1", "o1b3", "o1b4"],
+          explanation: "|x| не дифференцируема в нуле.",
+        },
+        {
+          id: "q1c",
+          type: "short_answer" as const,
+          prompt: "Вычислите f'(2) для f(x) = 3x². Ответ — число.",
+          maxScore: 2,
+          answerKind: "number" as const,
+          correctAnswers: ["12"],
+          numericTolerance: 0,
+          explanation: "f'(x) = 6x, f'(2) = 12.",
+        },
+        {
+          id: "q1d",
+          type: "matching" as const,
+          prompt: "Сопоставьте функцию и её производную",
+          maxScore: 3,
+          matchingPairs: [
+            { id: "m1", left: "sin x", right: "cos x" },
+            { id: "m2", left: "cos x", right: "−sin x" },
+            { id: "m3", left: "eˣ", right: "eˣ" },
+          ],
+          explanation: "Стандартная таблица производных.",
+        },
+        {
+          id: "q1e",
+          type: "ordering" as const,
+          prompt: "Порядок действий при нахождении производной сложной функции",
+          maxScore: 2,
+          orderItems: [
+            { id: "ord1", text: "Выделить внешнюю и внутреннюю функции" },
+            { id: "ord2", text: "Найти производную внешней" },
+            { id: "ord3", text: "Найти производную внутренней" },
+            { id: "ord4", text: "Перемножить по правилу цепочки" },
+          ],
+        },
+        {
+          id: "q1f",
+          type: "essay" as const,
+          prompt:
+            "Кратко объясните геометрический смысл производной (2–4 предложения).",
+          maxScore: 2,
+          explanation:
+            "Производная — угловой коэффициент касательной к графику в точке.",
+        },
+      ],
     },
     {
       id: "hw2",
       topicId: "tp1",
       teacherId: "t1",
       title: "Мини-тест: определение производной",
-      checkType: "score" as const,
+      description: "Короткий тест на определение через предел.",
+      status: "published" as const,
       maxScore: 5,
-      status: "active" as const,
+      questions: [
+        {
+          id: "q2a",
+          type: "single_choice" as const,
+          prompt: "Определение производной использует предел…",
+          maxScore: 2,
+          options: [
+            { id: "o2a1", text: "отношения приращения функции к приращению аргумента" },
+            { id: "o2a2", text: "суммы функции и аргумента" },
+            { id: "o2a3", text: "квадрата приращения" },
+          ],
+          correctOptionIds: ["o2a1"],
+        },
+        {
+          id: "q2b",
+          type: "short_answer" as const,
+          prompt: "Как называется (f(x+Δx) − f(x)) / Δx?",
+          maxScore: 1,
+          answerKind: "text" as const,
+          correctAnswers: [
+            "разностное отношение",
+            "отношение приращений",
+          ],
+        },
+        {
+          id: "q2c",
+          type: "essay" as const,
+          prompt: "Приведите пример функции, не дифференцируемой в точке.",
+          maxScore: 2,
+        },
+      ],
     },
     {
       id: "hw3",
       topicId: "tp2",
       teacherId: "t1",
       title: "Формулы приведения — карточки",
-      checkType: "pass_fail" as const,
-      status: "active" as const,
+      status: "published" as const,
+      maxScore: 3,
+      questions: [
+        {
+          id: "q3a",
+          type: "single_choice" as const,
+          prompt: "sin(π − x) равно…",
+          maxScore: 1,
+          options: [
+            { id: "o3a1", text: "sin x" },
+            { id: "o3a2", text: "−sin x" },
+            { id: "o3a3", text: "cos x" },
+          ],
+          correctOptionIds: ["o3a1"],
+        },
+        {
+          id: "q3b",
+          type: "short_answer" as const,
+          prompt: "cos(π/2 − x) = ?",
+          maxScore: 1,
+          answerKind: "text" as const,
+          correctAnswers: ["sin x", "sin(x)"],
+        },
+        {
+          id: "q3c",
+          type: "ordering" as const,
+          prompt: "Упорядочьте углы по возрастанию",
+          maxScore: 1,
+          orderItems: [
+            { id: "ord3a", text: "π/6" },
+            { id: "ord3b", text: "π/4" },
+            { id: "ord3c", text: "π/3" },
+            { id: "ord3d", text: "π/2" },
+          ],
+        },
+      ],
     },
     {
       id: "hw4",
       topicId: "tp4",
       teacherId: "t2",
       title: "Задачи на силу тока",
-      checkType: "score" as const,
-      maxScore: 8,
-      status: "active" as const,
+      status: "published" as const,
+      maxScore: 6,
+      questions: [
+        {
+          id: "q4a",
+          type: "short_answer" as const,
+          prompt: "I = U/R. При U=12 В и R=4 Ом сила тока (А)?",
+          maxScore: 2,
+          answerKind: "number" as const,
+          correctAnswers: ["3"],
+          numericTolerance: 0.01,
+        },
+        {
+          id: "q4b",
+          type: "single_choice" as const,
+          prompt: "Единица силы тока в СИ",
+          maxScore: 1,
+          options: [
+            { id: "o4b1", text: "Ампер" },
+            { id: "o4b2", text: "Вольт" },
+            { id: "o4b3", text: "Ом" },
+          ],
+          correctOptionIds: ["o4b1"],
+        },
+        {
+          id: "q4c",
+          type: "essay" as const,
+          prompt: "Объясните закон Ома своими словами.",
+          maxScore: 3,
+        },
+      ],
     },
     {
       id: "hw5",
       topicId: "tp5",
       teacherId: "t3",
-      title: "Записать 1-мин monologue",
-      checkType: "comment" as const,
-      status: "active" as const,
+      title: "Speaking: past experiences",
+      status: "published" as const,
+      maxScore: 5,
+      questions: [
+        {
+          id: "q5a",
+          type: "essay" as const,
+          prompt: "Write a 1-minute monologue about a past trip (80–120 words).",
+          maxScore: 5,
+        },
+      ],
+    },
+    {
+      id: "hw6",
+      topicId: "tp1",
+      teacherId: "t1",
+      title: "Черновик: сложные производные",
+      description: "Ещё не опубликован.",
+      status: "draft" as const,
+      maxScore: 1,
+      questions: [
+        {
+          id: "q6a",
+          type: "single_choice" as const,
+          prompt: "Производная ln x",
+          maxScore: 1,
+          options: [
+            { id: "o6a1", text: "1/x" },
+            { id: "o6a2", text: "x" },
+          ],
+          correctOptionIds: ["o6a1"],
+        },
+      ],
     },
   ];
 
@@ -433,6 +628,16 @@ export function createSeedData(): DemoData {
     { lessonId: "l8", studentId: "s6", status: "present" as const },
   ];
 
+  const snap = (hwId: string) => {
+    const hw = homeworks.find((h) => h.id === hwId)!;
+    return {
+      title: hw.title,
+      description: hw.description,
+      questions: structuredClone(hw.questions),
+      maxScore: hw.maxScore ?? 0,
+    };
+  };
+
   const homeworkAssignments = [
     {
       id: "ha1",
@@ -440,12 +645,51 @@ export function createSeedData(): DemoData {
       topicId: "tp1",
       teacherId: "t1",
       studentId: "s1",
+      lessonId: "l1",
       dueAt: atDay(-1, 23, 0),
       status: "completed" as const,
-      maxScore: 10,
-      answerText:
-        "1) (x²)' = 2x\n2) (sin x)' = cos x\n3) (e^x)' = e^x\n… остальные примеры в тетради.",
+      maxScore: 12,
       completedAt: atDay(-1, 20, 0),
+      testSnapshot: snap("hw1"),
+      answers: [
+        {
+          questionId: "q1a",
+          selectedOptionIds: ["o1a1"],
+          autoScore: 1,
+          isCorrect: true,
+        },
+        {
+          questionId: "q1b",
+          selectedOptionIds: ["o1b1", "o1b3"],
+          autoScore: 0,
+          isCorrect: false,
+        },
+        {
+          questionId: "q1c",
+          textAnswer: "12",
+          autoScore: 2,
+          isCorrect: true,
+        },
+        {
+          questionId: "q1d",
+          matching: { m1: "m1", m2: "m2", m3: "m3" },
+          autoScore: 3,
+          isCorrect: true,
+        },
+        {
+          questionId: "q1e",
+          order: ["ord1", "ord2", "ord3", "ord4"],
+          autoScore: 2,
+          isCorrect: true,
+        },
+        {
+          questionId: "q1f",
+          textAnswer:
+            "Производная показывает наклон касательной к графику функции в данной точке.",
+          needsManualReview: true,
+          isCorrect: null,
+        },
+      ],
     },
     {
       id: "ha2",
@@ -455,7 +699,9 @@ export function createSeedData(): DemoData {
       studentId: "s2",
       dueAt: atDay(2, 23, 0),
       status: "assigned" as const,
-      maxScore: 10,
+      maxScore: 12,
+      testSnapshot: snap("hw1"),
+      answers: [],
     },
     {
       id: "ha3",
@@ -468,9 +714,31 @@ export function createSeedData(): DemoData {
       score: 4,
       maxScore: 5,
       feedback: "Хорошо, следите за знаками.",
-      answerText: "Определение через предел приращения; таблица базовых производных.",
       completedAt: atDay(-3, 18, 0),
       reviewedAt: atDay(-2, 12, 0),
+      testSnapshot: snap("hw2"),
+      answers: [
+        {
+          questionId: "q2a",
+          selectedOptionIds: ["o2a1"],
+          autoScore: 2,
+          isCorrect: true,
+        },
+        {
+          questionId: "q2b",
+          textAnswer: "разностное отношение",
+          autoScore: 1,
+          isCorrect: true,
+        },
+        {
+          questionId: "q2c",
+          textAnswer: "f(x)=|x| в точке 0",
+          manualScore: 1,
+          isCorrect: false,
+          needsManualReview: false,
+          teacherComment: "Верный пример, можно чуть подробнее.",
+        },
+      ],
     },
     {
       id: "ha4",
@@ -480,7 +748,9 @@ export function createSeedData(): DemoData {
       studentId: "s3",
       dueAt: atDay(-5, 23, 0),
       status: "overdue" as const,
-      maxScore: undefined,
+      maxScore: 3,
+      testSnapshot: snap("hw3"),
+      answers: [],
     },
     {
       id: "ha5",
@@ -490,7 +760,9 @@ export function createSeedData(): DemoData {
       studentId: "s5",
       dueAt: atDay(1, 23, 0),
       status: "assigned" as const,
-      maxScore: 8,
+      maxScore: 6,
+      testSnapshot: snap("hw4"),
+      answers: [],
     },
     {
       id: "ha6",
@@ -500,8 +772,17 @@ export function createSeedData(): DemoData {
       studentId: "s7",
       dueAt: atDay(3, 23, 0),
       status: "completed" as const,
-      answerText: "Last summer I travelled to Kazan and…",
+      maxScore: 5,
       completedAt: atDay(0, 10, 0),
+      testSnapshot: snap("hw5"),
+      answers: [
+        {
+          questionId: "q5a",
+          textAnswer: "Last summer I travelled to Kazan and…",
+          needsManualReview: true,
+          isCorrect: null,
+        },
+      ],
     },
     {
       id: "ha7",
@@ -511,11 +792,14 @@ export function createSeedData(): DemoData {
       studentId: "s1",
       dueAt: atDay(1, 23, 0),
       status: "assigned" as const,
+      maxScore: 3,
+      testSnapshot: snap("hw3"),
+      answers: [],
     },
   ];
 
   return {
-    version: 4,
+    version: 5,
     teachers,
     students,
     lessons,
