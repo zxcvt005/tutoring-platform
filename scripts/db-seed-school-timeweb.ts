@@ -1,17 +1,9 @@
 /**
- * Явно разрешённый seed тестовой школы на БД Timeweb.
+ * Seed тестовой школы на БД Timeweb (только org_school_qa).
  *
- * Не подменяет NODE_ENV. Не удаляет всю базу — только организацию org_school_qa.
- * Локальный npm run db:seed:school по-прежнему отказывается от облачных хостов.
+ *   ALLOW_TIMEWEB_TEST_SEED=1 TIMEWEB_TEST_SEED_ORG=org_school_qa npm run db:seed:school:timeweb
  *
- * Обязательные переменные:
- *   ALLOW_TIMEWEB_TEST_SEED=1
- *   TIMEWEB_TEST_SEED_ORG=org_school_qa
- *   TIMEWEB_TEST_SEED_DB=<точное имя базы из DATABASE_URL>
- *
- *   npm run db:migrate
- *   node scripts/db-print-target.mjs
- *   ALLOW_TIMEWEB_TEST_SEED=1 TIMEWEB_TEST_SEED_ORG=org_school_qa TIMEWEB_TEST_SEED_DB='…' npm run db:seed:school:timeweb
+ * Не меняет NODE_ENV. Не удаляет всю базу. Локальный db:seed:school облако по-прежнему блокирует.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -57,7 +49,7 @@ loadEnvFile(".env");
 
 async function main() {
   if (SCHOOL_ORG_ID !== TIMEWEB_ALLOWED_ORG_ID) {
-    throw new Error("Внутренняя ошибка: SCHOOL_ORG_ID не совпадает с разрешённой организацией.");
+    throw new Error("SCHOOL_ORG_ID не совпадает с разрешённой организацией.");
   }
 
   const url = requireDatabaseUrl();
@@ -66,32 +58,29 @@ async function main() {
     `Timeweb school seed → org ${SCHOOL_ORG_ID} (${SCHOOL_ORG_SLUG}) @ ${safety.hostname}/${safety.database}`
   );
   console.log(`Connection: ${redactConnectionString(url)}`);
-  console.log(`NODE_ENV=${process.env.NODE_ENV ?? "(unset)"} (не изменяется)`);
 
   const { db, sql } = createDb(url);
   try {
     await sql`select 1 as ok`;
     const seeded = await seedSchoolOrganization(db);
     const { stats, errors } = await verifySchoolOrganization(db);
-    console.log("School seed wrote:", JSON.stringify(seeded, null, 2));
-    console.log("Verify counts:", JSON.stringify(stats, null, 2));
+    console.log("Seed:", JSON.stringify(seeded));
+    console.log("Verify:", JSON.stringify(stats));
     if (errors.length) {
       console.error("Verify failed:");
       for (const e of errors) console.error(`- ${e}`);
       process.exit(1);
     }
-    console.log("Timeweb school seed OK. Связи учеников, преподавателей, занятий, тарифов и платежей проверены.");
+    console.log("Timeweb school seed OK");
     console.log(
-      "Вход: /login → director@umba-school.test | morozova@umba-school.test | student01@umba-school.test"
+      "Login: director@umba-school.test | morozova@umba-school.test | student01@umba-school.test"
     );
-    console.log("Пароль: SCHOOL_PASSWORD / DEMO_PASSWORD в коде (значение не печатаем).");
   } finally {
     await sql.end({ timeout: 5 });
   }
 }
 
 main().catch((err) => {
-  const safe = sanitizeDbError(err);
-  console.error(safe.message);
+  console.error(sanitizeDbError(err).message);
   process.exit(1);
 });

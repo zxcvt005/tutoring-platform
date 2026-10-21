@@ -70,8 +70,12 @@ describe("Timeweb test seed gate", () => {
     TIMEWEB_TEST_SEED_DB: "default_db",
   } as NodeJS.ProcessEnv;
 
-  it("allows Timeweb host in production when org and db name match", () => {
-    const r = assertTimewebTestDatabase(timewebUrl, allowEnv);
+  it("allows Timeweb host in production when org matches", () => {
+    const r = assertTimewebTestDatabase(timewebUrl, {
+      NODE_ENV: "production",
+      ALLOW_TIMEWEB_TEST_SEED: "1",
+      TIMEWEB_TEST_SEED_ORG: TIMEWEB_ALLOWED_ORG_ID,
+    } as NodeJS.ProcessEnv);
     expect(r.ok).toBe(true);
     expect(r.database).toBe("default_db");
   });
@@ -87,12 +91,11 @@ describe("Timeweb test seed gate", () => {
         NODE_ENV: "production",
         ALLOW_TEST_SEED: "1",
         TIMEWEB_TEST_SEED_ORG: TIMEWEB_ALLOWED_ORG_ID,
-        TIMEWEB_TEST_SEED_DB: "default_db",
       } as NodeJS.ProcessEnv)
     ).toThrow(/ALLOW_TIMEWEB_TEST_SEED/);
   });
 
-  it("rejects mismatched database name", () => {
+  it("rejects mismatched database name when explicitly set", () => {
     expect(() =>
       assertTimewebTestDatabase(timewebUrl, {
         ...allowEnv,

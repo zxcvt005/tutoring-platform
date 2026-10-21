@@ -167,12 +167,8 @@ export function assertTimewebTestDatabase(
   }
 
   const expectedDb = (env.TIMEWEB_TEST_SEED_DB ?? "").trim().toLowerCase();
-  if (!expectedDb) {
-    throw new Error(
-      `Отказ: задайте TIMEWEB_TEST_SEED_DB=<имя_базы>. Подключено: ${hostname} / ${database}.`
-    );
-  }
-  if (expectedDb !== database) {
+  // Если имя не задано — берём database из DATABASE_URL (одна тестовая БД приложения).
+  if (expectedDb && expectedDb !== database) {
     throw new Error(
       "Отказ: TIMEWEB_TEST_SEED_DB не совпадает с именем базы в DATABASE_URL (секреты скрыты)."
     );

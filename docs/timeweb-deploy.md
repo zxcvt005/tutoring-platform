@@ -58,21 +58,16 @@
 
 Платформа в разработке, реальных пользователей нет. Для заполнения **только** организации `org_school_qa` (остальные org и таблицы не дропаются) есть отдельный сценарий. Он **не** меняет `NODE_ENV` и **не** ослабляет локальный `db:seed:school`.
 
-В консоли приложения Timeweb, каталог `/app`:
+Нужен деплой коммита с `scripts/db-seed-school-timeweb.ts` (иначе `MODULE_NOT_FOUND`). В консоли `/app`:
 
 ```bash
 cd /app
+test -f scripts/db-seed-school-timeweb.ts || { echo "Нужен редеплой с GitHub main"; exit 1; }
 npm run db:migrate
-node scripts/db-print-target.mjs
-export ALLOW_TIMEWEB_TEST_SEED=1
-export TIMEWEB_TEST_SEED_ORG=org_school_qa
-export TIMEWEB_TEST_SEED_DB='<имя из database= предыдущей команды>'
-npm run db:seed:school:timeweb
+ALLOW_TIMEWEB_TEST_SEED=1 TIMEWEB_TEST_SEED_ORG=org_school_qa npm run db:seed:school:timeweb
 ```
 
-Скрипт откажется, если хост не Timeweb, имя БД не совпало или организация не `org_school_qa`. Пароли и `DATABASE_URL` в лог не пишутся.
-
-После появления тестовой школы вход: `/login` (демо-вход в production выключен).
+Успех: строка `Timeweb school seed OK`. Пересоздаётся только `org_school_qa`. Вход: `/login` (демо-вход в production выключен).
 
 4. Открыть `https://…/setup` **или** CLI:
    ```bash
