@@ -69,6 +69,31 @@ npm run db:seed
 
 Затем обновите страницу в браузере. Кнопка «Сбросить демо» в сайдбаре только напоминает об этой команде.
 
+## Реалистичный QA-набор «школа Умба»
+
+Отдельная организация `org_school_qa` (1 директор, 3 преподавателя, 20 учеников, регулярные расписания, тарифы). **Не затирает** `org_demo`.
+
+Только локальная БД. Скрипт откажется при `NODE_ENV=production`, без `ALLOW_TEST_SEED=1`, при хосте не-localhost или при hostname вроде Timeweb.
+
+Для тестовой БД Timeweb (без подмены `NODE_ENV`) см. отдельный сценарий в [timeweb-deploy.md](timeweb-deploy.md): `npm run db:seed:school:timeweb`.
+
+PowerShell:
+
+```powershell
+$env:ALLOW_TEST_SEED="1"
+npm run db:seed:school
+```
+
+Учётные записи (пароль как у demo-seed, см. `DEMO_PASSWORD` / `SCHOOL_PASSWORD` в коде):
+
+| Роль | Email |
+|------|-------|
+| Директор | director@umba-school.test |
+| Преподаватель | morozova@umba-school.test |
+| Ученик | student01@umba-school.test |
+
+Перед запуском: миграции применены (`npm run db:migrate`), в т.ч. `0005_lesson_schedules`.
+
 ## Проверки
 
 ```bash

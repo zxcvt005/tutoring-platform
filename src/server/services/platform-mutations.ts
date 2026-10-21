@@ -286,6 +286,19 @@ export async function upsertLesson(
   if (new Date(lesson.endsAt) <= new Date(lesson.startsAt)) {
     throw badRequest("Конец занятия должен быть позже начала");
   }
+
+  const [existing] = await db.select().from(lessons).where(eq(lessons.id, id)).limit(1);
+  // Новое planned-занятие нельзя ставить в прошлое
+  if (
+    !existing &&
+    lesson.status === "planned" &&
+    new Date(lesson.startsAt).getTime() <= Date.now()
+  ) {
+    throw badRequest(
+      "Нельзя создать занятие в прошлом. Выберите будущее время или регулярное расписание."
+    );
+  }
+
   const existingLessons = await loadLessonsAsDomain(db, ctx.organizationId);
   const draft: Lesson = { ...lesson, id, studentIds };
   const conflictLesson = findStudentScheduleConflict(existingLessons, draft);
@@ -293,7 +306,6 @@ export async function upsertLesson(
     throw conflict("Конфликт расписания у ученика");
   }
 
-  const [existing] = await db.select().from(lessons).where(eq(lessons.id, id)).limit(1);
   const values = {
     id,
     organizationId: ctx.organizationId,
@@ -307,6 +319,7 @@ export async function upsertLesson(
   };
   if (existing) {
     if (existing.organizationId !== ctx.organizationId) throw forbidden();
+    // Не переписываем историю: done/cancelled оставляем как есть при смене времени только если явно редактируют
     await db.update(lessons).set(values).where(eq(lessons.id, id));
     await db.delete(lessonStudents).where(eq(lessonStudents.lessonId, id));
   } else {
@@ -318,6 +331,25 @@ export async function upsertLesson(
     );
   }
   return { ok: true, id };
+}
+
+export async function createRecurringScheduleAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { createLessonSchedule } = await import(
+    "@/server/services/schedule-service"
+  );
+  return createLessonSchedule(db, ctx, {
+    teacherId: String(payload.teacherId),
+    studentIds: (payload.studentIds as string[]) ?? [],
+    weekdays: (payload.weekdays as number[]) ?? [],
+    startTime: String(payload.startTime ?? ""),
+    durationMin: Number(payload.durationMin ?? 60),
+    subject: payload.subject as string | undefined,
+    activeFrom: payload.activeFrom as string | undefined,
+  });
 }
 
 export async function deleteLesson(db: AppDb, ctx: AuthContext, id: string) {
@@ -1025,6 +1057,7 @@ export const platformActions = {
   upsertStudent,
   deleteStudent,
   upsertLesson,
+  createRecurringSchedule: createRecurringScheduleAction,
   deleteLesson,
   completeLesson,
   setAttendance,

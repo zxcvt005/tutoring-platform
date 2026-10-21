@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -22,6 +22,10 @@ import {
 } from "@/components/ui/select";
 import { lessonStatusLabel } from "@/lib/format";
 import {
+  firstUpcomingOccurrence,
+  jsDayToWeekday,
+} from "@/lib/recurring-schedule";
+import {
   combineDateAndTime,
   durationMinutes,
   fromLocalInput,
@@ -37,6 +41,16 @@ import {
 
 type Initial = Partial<Lesson> & { day?: Date; hour?: number; minute?: number };
 
+export type RecurringSaveInput = {
+  teacherId: string;
+  studentIds: string[];
+  weekdays: number[];
+  startTime: string;
+  durationMin: number;
+  subject?: string;
+  activeFrom?: string;
+};
+
 type LessonDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -46,8 +60,21 @@ type LessonDialogProps = {
   onSave: (
     lesson: Omit<Lesson, "id"> & { id?: string }
   ) => { ok: boolean } | Promise<{ ok: boolean }>;
+  onSaveRecurring?: (
+    input: RecurringSaveInput
+  ) => { ok: boolean } | Promise<{ ok: boolean }>;
   onDelete?: (id: string) => void;
 };
+
+const WEEKDAY_OPTS = [
+  { v: 1, label: "Пн" },
+  { v: 2, label: "Вт" },
+  { v: 3, label: "Ср" },
+  { v: 4, label: "Чт" },
+  { v: 5, label: "Пт" },
+  { v: 6, label: "Сб" },
+  { v: 7, label: "Вс" },
+];
 
 function formKey(initial?: Initial) {
   if (initial?.id) return initial.id;
@@ -65,6 +92,7 @@ function buildDefaults(initial: Initial | undefined, students: Student[]) {
       startsLocal: toLocalInputValue(initial.startsAt),
       duration: durationMinutes(initial.startsAt, initial.endsAt),
       status: (initial.status ?? "planned") as LessonStatus,
+      defaultWeekday: jsDayToWeekday(new Date(initial.startsAt).getDay()),
     };
   }
   const day = initial?.day ?? new Date();
@@ -78,6 +106,7 @@ function buildDefaults(initial: Initial | undefined, students: Student[]) {
     startsLocal: toLocalInputValue(start.toISOString()),
     duration: 60,
     status: "planned" as LessonStatus,
+    defaultWeekday: jsDayToWeekday(day.getDay()),
   };
 }
 
@@ -88,6 +117,7 @@ export function LessonDialog({
   students,
   initial,
   onSave,
+  onSaveRecurring,
   onDelete,
 }: LessonDialogProps) {
   return (
@@ -105,6 +135,7 @@ export function LessonDialog({
             students={students}
             initial={initial}
             onSave={onSave}
+            onSaveRecurring={onSaveRecurring}
             onDelete={onDelete}
             onClose={() => onOpenChange(false)}
           />
@@ -119,6 +150,7 @@ function LessonForm({
   students,
   initial,
   onSave,
+  onSaveRecurring,
   onDelete,
   onClose,
 }: {
@@ -128,15 +160,37 @@ function LessonForm({
   onSave: (
     lesson: Omit<Lesson, "id"> & { id?: string }
   ) => { ok: boolean } | Promise<{ ok: boolean }>;
+  onSaveRecurring?: (
+    input: RecurringSaveInput
+  ) => { ok: boolean } | Promise<{ ok: boolean }>;
   onDelete?: (id: string) => void;
   onClose: () => void;
 }) {
   const defaults = buildDefaults(initial, students);
+  const isEdit = Boolean(initial?.id);
   const [studentIds, setStudentIds] = useState<string[]>(defaults.studentIds);
   const [subject, setSubject] = useState(defaults.subject);
   const [startsLocal, setStartsLocal] = useState(defaults.startsLocal);
   const [duration, setDuration] = useState(defaults.duration);
   const [status, setStatus] = useState<LessonStatus>(defaults.status);
+  const [recurring, setRecurring] = useState(false);
+  const [weekdays, setWeekdays] = useState<number[]>([defaults.defaultWeekday]);
+
+  const preview = useMemo(() => {
+    if (!recurring || !startsLocal) return null;
+    const start = new Date(fromLocalInput(startsLocal));
+    const hh = String(start.getHours()).padStart(2, "0");
+    const mm = String(start.getMinutes()).padStart(2, "0");
+    return firstUpcomingOccurrence(
+      {
+        weekdays,
+        startTime: `${hh}:${mm}`,
+        durationMin: duration,
+        activeFrom: new Date(),
+      },
+      new Date()
+    );
+  }, [recurring, startsLocal, weekdays, duration]);
 
   function toggleStudent(id: string, checked: boolean) {
     setStudentIds((prev) => {
@@ -145,14 +199,38 @@ function LessonForm({
     });
   }
 
+  function toggleWeekday(v: number, checked: boolean) {
+    setWeekdays((prev) => {
+      if (checked) return [...new Set([...prev, v])].sort();
+      return prev.filter((x) => x !== v);
+    });
+  }
+
   function save() {
     const ids = uniqueStudentIds(studentIds);
     if (!ids.length || !startsLocal) return;
-    const startsAt = fromLocalInput(startsLocal);
-    const endsAt = new Date(
-      new Date(startsAt).getTime() + duration * 60_000
-    ).toISOString();
     void (async () => {
+      if (recurring && !isEdit && onSaveRecurring) {
+        const start = new Date(fromLocalInput(startsLocal));
+        const hh = String(start.getHours()).padStart(2, "0");
+        const mm = String(start.getMinutes()).padStart(2, "0");
+        if (weekdays.length === 0) return;
+        const result = await onSaveRecurring({
+          teacherId,
+          studentIds: ids,
+          weekdays,
+          startTime: `${hh}:${mm}`,
+          durationMin: duration,
+          subject: subject.trim() || undefined,
+          activeFrom: new Date().toISOString(),
+        });
+        if (result.ok) onClose();
+        return;
+      }
+      const startsAt = fromLocalInput(startsLocal);
+      const endsAt = new Date(
+        new Date(startsAt).getTime() + duration * 60_000
+      ).toISOString();
       const result = await onSave({
         id: initial?.id,
         teacherId,
@@ -198,17 +276,13 @@ function LessonForm({
               })}
             </ul>
           )}
-          <p className="text-xs text-muted-foreground">
-            Несколько учеников — одно совместное занятие. Параллельные занятия
-            создаются отдельно.
-          </p>
         </div>
         <div className="space-y-1.5">
-          <Label>Предмет</Label>
+          <Label>Предмет / тема</Label>
           <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
         </div>
         <div className="space-y-1.5">
-          <Label>Начало</Label>
+          <Label>{recurring ? "Время (день — образец)" : "Начало"}</Label>
           <Input
             type="datetime-local"
             value={startsLocal}
@@ -233,34 +307,73 @@ function LessonForm({
             </SelectContent>
           </Select>
         </div>
-        <div className="space-y-1.5">
-          <Label>Статус</Label>
-          <Select
-            value={status}
-            onValueChange={(v) => v && setStatus(v as LessonStatus)}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue>
-                {(v) => lessonStatusLabel[v as LessonStatus] ?? "Статус"}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="planned">
-                {lessonStatusLabel.planned}
-              </SelectItem>
-              <SelectItem value="done">{lessonStatusLabel.done}</SelectItem>
-              <SelectItem value="cancelled">
-                {lessonStatusLabel.cancelled}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          {status === "done" ? (
-            <p className="text-xs text-muted-foreground">
-              Для фиксации темы и посещаемости по ученикам используйте
-              «Завершить занятие» в Кафедре.
-            </p>
-          ) : null}
-        </div>
+
+        {!isEdit && onSaveRecurring ? (
+          <div className="space-y-2 rounded-xl border border-border/70 p-3">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={recurring}
+                onCheckedChange={(v) => setRecurring(v === true)}
+                id="lesson-recurring"
+              />
+              <label htmlFor="lesson-recurring" className="text-sm font-medium">
+                Повторять каждую неделю
+              </label>
+            </div>
+            {recurring ? (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  {WEEKDAY_OPTS.map((d) => (
+                    <label
+                      key={d.v}
+                      className="flex items-center gap-1.5 text-sm"
+                    >
+                      <Checkbox
+                        checked={weekdays.includes(d.v)}
+                        onCheckedChange={(v) =>
+                          toggleWeekday(d.v, v === true)
+                        }
+                      />
+                      {d.label}
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Занятия создаются только в будущем. Если день на этой неделе
+                  уже прошёл — первое занятие на следующей неделе.
+                  {preview
+                    ? ` Ближайшее: ${preview.startsAt.toLocaleString("ru-RU")}.`
+                    : " Нет подходящих слотов в ближайшие дни."}
+                </p>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+
+        {!recurring ? (
+          <div className="space-y-1.5">
+            <Label>Статус</Label>
+            <Select
+              value={status}
+              onValueChange={(v) => v && setStatus(v as LessonStatus)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue>
+                  {(v) => lessonStatusLabel[v as LessonStatus] ?? "Статус"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="planned">
+                  {lessonStatusLabel.planned}
+                </SelectItem>
+                <SelectItem value="done">{lessonStatusLabel.done}</SelectItem>
+                <SelectItem value="cancelled">
+                  {lessonStatusLabel.cancelled}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
       </div>
       <DialogFooter className="gap-2 sm:justify-between">
         {initial?.id && onDelete ? (
@@ -284,7 +397,9 @@ function LessonForm({
           <Button
             type="button"
             onClick={save}
-            disabled={studentIds.length === 0}
+            disabled={
+              studentIds.length === 0 || (recurring && weekdays.length === 0)
+            }
           >
             Сохранить
           </Button>

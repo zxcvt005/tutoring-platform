@@ -54,6 +54,12 @@ export async function buildBootstrap(
 ): Promise<DemoData> {
   const orgId = ctx.organizationId;
   await refreshExpiredAssignments(db, orgId);
+  if (ctx.role === "director" || ctx.role === "teacher") {
+    const { ensureOrgSchedulesMaterialized } = await import(
+      "@/server/services/schedule-service"
+    );
+    await ensureOrgSchedulesMaterialized(db, orgId);
+  }
 
   const teacherRows = await db
     .select()

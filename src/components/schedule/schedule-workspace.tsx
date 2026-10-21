@@ -26,6 +26,7 @@ export function ScheduleWorkspace({
     studentsForTeacher,
     lessonsForTeacher,
     upsertLesson,
+    createRecurringSchedule,
     deleteLesson,
   } = useDemoStore();
 
@@ -111,6 +112,7 @@ export function ScheduleWorkspace({
         students={students}
         initial={editing}
         onSave={(lesson) => upsertLesson(lesson)}
+        onSaveRecurring={(input) => createRecurringSchedule(input)}
         onDelete={deleteLesson}
       />
     </div>

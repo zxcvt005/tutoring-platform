@@ -247,6 +247,55 @@ export const testAnswerKeys = pgTable("test_answer_keys", {
   ),
 ]);
 
+/** Шаблон регулярного расписания (вторник/четверг 17:00 и т.п.). */
+export const lessonSchedules = pgTable(
+  "lesson_schedules",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    teacherId: text("teacher_id")
+      .notNull()
+      .references(() => teachers.id, { onDelete: "cascade" }),
+    subject: text("subject"),
+    /** Дни недели: 1=пн … 7=вс */
+    weekdays: jsonb("weekdays").$type<number[]>().notNull(),
+    /** Локальное время начала HH:MM */
+    startTime: text("start_time").notNull(),
+    durationMin: integer("duration_min").notNull().default(60),
+    /** С этой даты (локальный день) шаблон действует */
+    activeFrom: timestamp("active_from", { withTimezone: true }).notNull(),
+    activeUntil: timestamp("active_until", { withTimezone: true }),
+    status: text("status").notNull().default("active"),
+    ...timestamps,
+  },
+  (t) => [
+    index("lesson_schedules_org_idx").on(t.organizationId),
+    index("lesson_schedules_teacher_idx").on(t.teacherId),
+    check(
+      "lesson_schedules_status_check",
+      sql`${t.status} in ('active', 'paused', 'archived')`
+    ),
+  ]
+);
+
+export const lessonScheduleStudents = pgTable(
+  "lesson_schedule_students",
+  {
+    scheduleId: text("schedule_id")
+      .notNull()
+      .references(() => lessonSchedules.id, { onDelete: "cascade" }),
+    studentId: text("student_id")
+      .notNull()
+      .references(() => students.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.scheduleId, t.studentId] }),
+    index("lesson_schedule_students_student_idx").on(t.studentId),
+  ]
+);
+
 export const lessons = pgTable("lessons", {
   id: text("id").primaryKey(),
   organizationId: text("organization_id")
@@ -258,6 +307,12 @@ export const lessons = pgTable("lessons", {
   topicId: text("topic_id").references(() => topics.id, {
     onDelete: "set null",
   }),
+  /** Шаблон, из которого материализовано занятие (null — разовое) */
+  scheduleId: text("schedule_id").references(() => lessonSchedules.id, {
+    onDelete: "set null",
+  }),
+  /** Ключ вхождения YYYY-MM-DD для идемпотентной генерации */
+  scheduleOccurrenceKey: text("schedule_occurrence_key"),
   subject: text("subject"),
   startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
   endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
@@ -266,6 +321,11 @@ export const lessons = pgTable("lessons", {
 }, (t) => [
   index("lessons_teacher_starts_idx").on(t.teacherId, t.startsAt),
   index("lessons_org_starts_idx").on(t.organizationId, t.startsAt),
+  index("lessons_schedule_idx").on(t.scheduleId),
+  uniqueIndex("lessons_schedule_occurrence_uidx").on(
+    t.scheduleId,
+    t.scheduleOccurrenceKey
+  ),
   check(
     "lessons_status_check",
     sql`${t.status} in ('planned', 'done', 'cancelled')`
@@ -596,6 +656,8 @@ export const schema = {
   topics,
   tests,
   testAnswerKeys,
+  lessonSchedules,
+  lessonScheduleStudents,
   lessons,
   lessonStudents,
   attendances,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { AuditoriaMonthCalendar } from "@/components/auditoria/month-calendar";
 import { EmptyState } from "@/components/empty-state";
@@ -15,13 +15,17 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDateTime, formatTime } from "@/lib/format";
+import {
+  AUDITORIA_UPCOMING_DAYS,
+  filterUpcomingLessonsForAuditoria,
+} from "@/lib/recurring-schedule";
 import { useDemoStore } from "@/lib/store/demo-store";
 
 export function AuditoriaSchedulePanel() {
   const { data, lessonsForStudent } = useDemoStore();
   const studentId = data.currentStudentId;
   const student = data.students.find((s) => s.id === studentId);
-  const now = useMemo(() => new Date().getTime(), []);
+  const [nowMs] = useState(() => new Date().getTime());
 
   const allLessons = useMemo(
     () => lessonsForStudent(studentId),
@@ -29,23 +33,22 @@ export function AuditoriaSchedulePanel() {
   );
 
   const { upcoming, past } = useMemo(() => {
-    const all = [...allLessons].sort(
-      (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()
-    );
-    const upcoming = all.filter(
-      (l) =>
-        l.status === "planned" && new Date(l.startsAt).getTime() >= now - 60_000
-    );
-    const past = all
+    const clock = new Date(nowMs);
+    const upcoming = filterUpcomingLessonsForAuditoria(allLessons, clock);
+    const past = [...allLessons]
       .filter(
         (l) =>
           l.status === "done" ||
           l.status === "cancelled" ||
-          (l.status === "planned" && new Date(l.startsAt).getTime() < now - 60_000)
+          (l.status === "planned" &&
+            new Date(l.startsAt).getTime() < clock.getTime())
       )
-      .reverse();
+      .sort(
+        (a, b) =>
+          new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime()
+      );
     return { upcoming, past };
-  }, [allLessons, now]);
+  }, [allLessons, nowMs]);
 
   if (!student) {
     return (
@@ -125,9 +128,9 @@ export function AuditoriaSchedulePanel() {
 
       <section className="mb-10 space-y-3">
         <h2 className="font-display text-lg font-semibold tracking-tight">
-          Предстоящие
+          Предстоящие (ближайшие {AUDITORIA_UPCOMING_DAYS} дней)
         </h2>
-        {renderRows(upcoming, "Нет предстоящих занятий")}
+        {renderRows(upcoming, "Нет предстоящих занятий в ближайшие 14 дней")}
       </section>
 
       <section className="space-y-3">

@@ -51,7 +51,29 @@
    npm run db:migrate
    ```
    Скрипт — `node scripts/db-migrate.mjs` (без `tsx`; `tsx` в production не ставится).
-   Seed **не** запускать. Повторный `db:migrate` безопасен (журнал Drizzle).
+   Обычный `npm run db:seed` / `db:seed:school` на Timeweb **не** запускать.
+   Повторный `db:migrate` безопасен (журнал Drizzle).
+
+## Тестовое наполнение школы на БД Timeweb
+
+Платформа в разработке, реальных пользователей нет. Для заполнения **только** организации `org_school_qa` (остальные org и таблицы не дропаются) есть отдельный сценарий. Он **не** меняет `NODE_ENV` и **не** ослабляет локальный `db:seed:school`.
+
+В консоли приложения Timeweb, каталог `/app`:
+
+```bash
+cd /app
+npm run db:migrate
+node scripts/db-print-target.mjs
+export ALLOW_TIMEWEB_TEST_SEED=1
+export TIMEWEB_TEST_SEED_ORG=org_school_qa
+export TIMEWEB_TEST_SEED_DB='<имя из database= предыдущей команды>'
+npm run db:seed:school:timeweb
+```
+
+Скрипт откажется, если хост не Timeweb, имя БД не совпало или организация не `org_school_qa`. Пароли и `DATABASE_URL` в лог не пишутся.
+
+После появления тестовой школы вход: `/login` (демо-вход в production выключен).
+
 4. Открыть `https://…/setup` **или** CLI:
    ```bash
    npm run auth:bootstrap-admin -- --email you@school.example --password '…' --name 'Директор' --org 'Школа'

@@ -38,6 +38,8 @@ export async function POST(request: Request) {
           return m.deleteStudent(db, ctx, String(p.id));
         case "upsertLesson":
           return m.upsertLesson(db, ctx, p as never);
+        case "createRecurringSchedule":
+          return m.createRecurringScheduleAction(db, ctx, p);
         case "deleteLesson":
           return m.deleteLesson(db, ctx, String(p.id));
         case "completeLesson":

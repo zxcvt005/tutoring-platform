@@ -15,6 +15,7 @@ import {
 import { TestTakeDialog } from "@/components/tests/test-take-dialog";
 import { Button } from "@/components/ui/button";
 import { formatDateTime, formatDueAt, formatTime } from "@/lib/format";
+import { filterUpcomingLessonsForAuditoria } from "@/lib/recurring-schedule";
 import { getAssignmentTitle } from "@/lib/tests/helpers";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { HomeworkAssignment } from "@/lib/types";
@@ -63,17 +64,7 @@ export function AuditoriaHomePanel() {
   }, []);
 
   const upcoming = useMemo(
-    () =>
-      lessons
-        .filter(
-          (l) =>
-            l.status === "planned" &&
-            new Date(l.startsAt).getTime() >= clock.now
-        )
-        .sort(
-          (a, b) =>
-            new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()
-        ),
+    () => filterUpcomingLessonsForAuditoria(lessons, new Date(clock.now)),
     [lessons, clock.now]
   );
 

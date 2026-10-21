@@ -77,6 +77,15 @@ type DemoStoreValue = {
   upsertLesson: (
     lesson: Omit<Lesson, "id"> & { id?: string }
   ) => Promise<OkResult>;
+  createRecurringSchedule: (input: {
+    teacherId: string;
+    studentIds: string[];
+    weekdays: number[];
+    startTime: string;
+    durationMin: number;
+    subject?: string;
+    activeFrom?: string;
+  }) => Promise<OkResult>;
   deleteLesson: (id: string) => void;
   completeLesson: (input: CompleteLessonInput) => Promise<OkResult>;
   setAttendance: (
@@ -368,6 +377,17 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         void run("deleteStudent", { id });
       },
       upsertLesson: (lesson) => run("upsertLesson", lesson),
+      createRecurringSchedule: async (input) => {
+        const r = await run("createRecurringSchedule", input);
+        if (r.ok) {
+          toast.success(
+            r.created
+              ? `Регулярное расписание: создано занятий — ${r.created}`
+              : "Регулярное расписание сохранено"
+          );
+        }
+        return r;
+      },
       deleteLesson: (id) => {
         void run("deleteLesson", { id });
       },

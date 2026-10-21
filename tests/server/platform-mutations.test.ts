@@ -73,18 +73,27 @@ describe("platform mutations + bootstrap", () => {
     close = t.close;
     const anna = await asRole(t.db, "anna@example.com");
 
-    // Берём существующий урок s1 и пытаемся создать пересечение
-    const boot = await buildBootstrap(t.db, anna);
-    const existing = boot.lessons.find((l) => l.studentIds.includes("s1"));
-    expect(existing).toBeTruthy();
+    const startsAt = new Date(Date.now() + 3 * 86_400_000);
+    startsAt.setHours(20, 0, 0, 0);
+    const endsAt = new Date(startsAt.getTime() + 60 * 60_000);
+
+    await upsertLesson(t.db, anna, {
+      teacherId: "t1",
+      studentIds: ["s1"],
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      status: "planned",
+      subject: "Конфликт-база",
+    });
 
     await expect(
       upsertLesson(t.db, anna, {
         teacherId: "t1",
         studentIds: ["s1"],
-        startsAt: existing!.startsAt,
-        endsAt: existing!.endsAt,
+        startsAt: new Date(startsAt.getTime() + 15 * 60_000).toISOString(),
+        endsAt: new Date(endsAt.getTime() + 15 * 60_000).toISOString(),
         status: "planned",
+        subject: "Конфликт-дубль",
       })
     ).rejects.toMatchObject({ status: 409 });
   });
