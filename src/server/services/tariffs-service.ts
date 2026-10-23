@@ -18,11 +18,7 @@ import {
   validationError,
 } from "@/server/errors";
 import { getPaymentProvider } from "@/server/payments/provider";
-import type {
-  TariffAssignmentStatus,
-  TariffFeatureKey,
-  TariffStatus,
-} from "@/lib/types";
+import type { TariffFeatureKey, TariffStatus } from "@/lib/types";
 
 function newId(prefix: string) {
   return `${prefix}_${randomBytes(6).toString("hex")}`;
@@ -50,6 +46,7 @@ export type UpsertTariffInput = {
   price: number;
   durationDays: number;
   lessonsLimit?: number | null;
+  weeklyFrequency?: number;
   includesText?: string | null;
   features?: string[];
   status?: TariffStatus;
@@ -81,6 +78,7 @@ export async function listTariffs(db: AppDb, ctx: AuthContext) {
     currency: "RUB" as const,
     durationDays: t.durationDays,
     lessonsLimit: t.lessonsLimit ?? undefined,
+    weeklyFrequency: t.weeklyFrequency,
     includesText: t.includesText ?? undefined,
     features: (t.features as TariffFeatureKey[]) ?? [],
     status: t.status as TariffStatus,
@@ -101,7 +99,14 @@ export async function upsertTariff(
     throw validationError("Некорректная стоимость");
   }
   if (!input.durationDays || input.durationDays < 1) {
-    throw validationError("Срок действия — не менее 1 дня");
+    throw validationError("Прогнозируемая длительность — не менее 1 дня");
+  }
+  if (!input.lessonsLimit || input.lessonsLimit < 1) {
+    throw validationError("Укажите количество занятий");
+  }
+  const weeklyFrequency = input.weeklyFrequency ?? 1;
+  if (!weeklyFrequency || weeklyFrequency < 1) {
+    throw validationError("Частота — не менее 1 занятия в неделю");
   }
   const features = normalizeFeatures(input.features);
   const id = input.id ?? newId("tariff");
@@ -116,7 +121,8 @@ export async function upsertTariff(
     price: String(input.price),
     currency: "RUB" as const,
     durationDays: input.durationDays,
-    lessonsLimit: input.lessonsLimit ?? null,
+    lessonsLimit: input.lessonsLimit,
+    weeklyFrequency,
     includesText: input.includesText?.trim() || null,
     features,
     status: (input.status ?? "active") as TariffStatus,
@@ -184,6 +190,9 @@ export async function assignTariffToStudent(
   if (tariff.status !== "active") {
     throw badRequest("Нельзя назначить архивный тариф");
   }
+  if (!tariff.lessonsLimit || tariff.lessonsLimit < 1) {
+    throw badRequest("У тарифа не задано количество занятий");
+  }
 
   const startsAt = input.startsAt ? new Date(input.startsAt) : new Date();
   const endsAt = input.endsAt
@@ -219,6 +228,10 @@ export async function assignTariffToStudent(
     currency: "RUB",
     status: "pending_payment",
     paymentStatus: "unpaid",
+    lessonsLimitSnapshot: tariff.lessonsLimit,
+    weeklyFrequencySnapshot: tariff.weeklyFrequency,
+    durationDaysSnapshot: tariff.durationDays,
+    tariffNameSnapshot: tariff.name,
   });
 
   // Создаём ожидающий платёж (идемпотентный ключ на назначение)
@@ -401,26 +414,14 @@ export async function studentRequestPayment(
   };
 }
 
-export async function refreshExpiredAssignments(db: AppDb, organizationId: string) {
-  const now = new Date();
-  const active = await db
-    .select({
-      id: studentTariffAssignments.id,
-      endsAt: studentTariffAssignments.endsAt,
-    })
-    .from(studentTariffAssignments)
-    .where(
-      and(
-        eq(studentTariffAssignments.organizationId, organizationId),
-        inArray(studentTariffAssignments.status, ["active", "pending_payment"])
-      )
-    );
-  for (const a of active) {
-    if (a.endsAt <= now) {
-      await db
-        .update(studentTariffAssignments)
-        .set({ status: "expired" as TariffAssignmentStatus, updatedAt: now })
-        .where(eq(studentTariffAssignments.id, a.id));
-    }
-  }
+/**
+ * Прогнозируемая дата окончания больше не сжигает пакет.
+ * Статус expired выставляется только при замене назначения.
+ */
+export async function refreshExpiredAssignments(
+  db: AppDb,
+  organizationId: string
+) {
+  void db;
+  void organizationId;
 }

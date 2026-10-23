@@ -36,7 +36,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 
-import { initialsFromName } from "@/lib/format";
+import { initialsFromName, teacherStatusLabel } from "@/lib/format";
 import { ensureCsrfToken } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { Teacher, TeacherStatus } from "@/lib/types";
@@ -392,12 +392,22 @@ export function TeachersWorkspace() {
                 }
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue />
+                  <SelectValue>
+                    {(v) =>
+                      teacherStatusLabel[v as TeacherStatus] ?? "Статус"
+                    }
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="active">Активен</SelectItem>
-                  <SelectItem value="inactive">Временно не работает</SelectItem>
-                  <SelectItem value="archived">Архивный</SelectItem>
+                  <SelectItem value="active">
+                    {teacherStatusLabel.active}
+                  </SelectItem>
+                  <SelectItem value="inactive">
+                    {teacherStatusLabel.inactive}
+                  </SelectItem>
+                  <SelectItem value="archived">
+                    {teacherStatusLabel.archived}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>

@@ -20,6 +20,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDateTime, formatDueAt } from "@/lib/format";
+import {
+  gradeLabel,
+  phoneHref,
+  telegramDisplay,
+  telegramHref,
+} from "@/lib/student-contacts";
 import { getAssignmentTitle } from "@/lib/tests/helpers";
 import { useDemoStore } from "@/lib/store/demo-store";
 
@@ -109,22 +115,58 @@ export function StudentDetail({
               <PersonStatusBadge status={student.status} />
             </div>
             <div className="flex justify-between gap-2">
-              <span className="text-muted-foreground">Контакты</span>
-              <span>{student.contacts || "—"}</span>
+              <span className="text-muted-foreground">Класс</span>
+              <span>{gradeLabel(student.grade)}</span>
             </div>
+            {telegramDisplay(student.telegram) ? (
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">Telegram</span>
+                {telegramHref(student.telegram) ? (
+                  <a
+                    href={telegramHref(student.telegram)!}
+                    className="underline-offset-2 hover:underline"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {telegramDisplay(student.telegram)}
+                  </a>
+                ) : (
+                  <span>{telegramDisplay(student.telegram)}</span>
+                )}
+              </div>
+            ) : null}
+            {student.phone?.trim() ? (
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">Телефон</span>
+                {phoneHref(student.phone) ? (
+                  <a
+                    href={phoneHref(student.phone)!}
+                    className="underline-offset-2 hover:underline"
+                  >
+                    {student.phone.trim()}
+                  </a>
+                ) : (
+                  <span>{student.phone.trim()}</span>
+                )}
+              </div>
+            ) : null}
             {mode === "direkciya" ? (
               <>
                 <div className="flex justify-between gap-2">
                   <span className="text-muted-foreground">Email входа</span>
                   <span>{student.accountEmail || "нет учётной записи"}</span>
                 </div>
-                <div className="flex justify-between gap-2">
-                  <span className="text-muted-foreground">Роль</span>
-                  <span>{student.userId ? "student" : "—"}</span>
-                </div>
+                {student.parentContacts?.trim() ? (
+                  <div>
+                    <p className="text-muted-foreground">Контакты родителей</p>
+                    <p className="mt-1 whitespace-pre-wrap">
+                      {student.parentContacts.trim()}
+                    </p>
+                  </div>
+                ) : null}
               </>
             ) : null}
-            {student.notes ? (
+            {mode === "direkciya" && student.notes ? (
               <p className="rounded-xl bg-muted/40 px-3 py-2 text-muted-foreground">
                 {student.notes}
               </p>

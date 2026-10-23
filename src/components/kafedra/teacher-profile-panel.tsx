@@ -18,9 +18,6 @@ function TeacherProfileForm({ teacher }: { teacher: Teacher }) {
   const [phone, setPhone] = useState(teacher.phone ?? "");
   const [email, setEmail] = useState(teacher.email ?? "");
   const [subjects, setSubjects] = useState(teacher.subjects.join(", "));
-  const [specializations, setSpecializations] = useState(
-    (teacher.specializations ?? []).join(", ")
-  );
 
   function save() {
     if (!fullName.trim()) return;
@@ -33,10 +30,7 @@ function TeacherProfileForm({ teacher }: { teacher: Teacher }) {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
-      specializations: specializations
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
+      specializations: teacher.specializations,
     });
     toast.success("Профиль сохранён");
   }
@@ -91,15 +85,6 @@ function TeacherProfileForm({ teacher }: { teacher: Teacher }) {
               id="t-subjects"
               value={subjects}
               onChange={(e) => setSubjects(e.target.value)}
-              placeholder="через запятую"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="t-spec">Специализации</Label>
-            <Input
-              id="t-spec"
-              value={specializations}
-              onChange={(e) => setSpecializations(e.target.value)}
               placeholder="через запятую"
             />
           </div>

@@ -6,7 +6,73 @@ export type ErrorCode =
   | "conflict"
   | "validation_error"
   | "rate_limited"
+  | "service_unavailable"
   | "internal_error";
+
+const DB_UNAVAILABLE_CODES = new Set([
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "CONNECT_TIMEOUT",
+  "57P01", // admin_shutdown
+  "57P03", // cannot_connect_now
+  "53300", // too_many_connections
+  "08000",
+  "08001",
+  "08003",
+  "08006",
+]);
+
+/** Ошибки недоступности PostgreSQL / сети к БД (без секретов в сообщении). */
+export function isDatabaseUnavailableError(err: unknown): boolean {
+  if (!err || typeof err !== "object") {
+    return /ECONNREFUSED|ENOTFOUND|ECONNRESET|too many clients/i.test(String(err));
+  }
+  const anyErr = err as {
+    code?: string;
+    errno?: string | number;
+    message?: string;
+    cause?: unknown;
+    errors?: unknown[];
+  };
+  const code = String(anyErr.code ?? anyErr.errno ?? "");
+  const message = String(anyErr.message ?? "");
+  if (DB_UNAVAILABLE_CODES.has(code)) {
+    return true;
+  }
+  if (
+    /ECONNREFUSED|ENOTFOUND|ECONNRESET|connect ECONNREFUSED|Connection refused|CONNECT_TIMEOUT|too many clients|remaining connection slots|не удалось подключиться|database.*unavailable/i.test(
+      message
+    )
+  ) {
+    return true;
+  }
+  if (anyErr.cause) return isDatabaseUnavailableError(anyErr.cause);
+  if (Array.isArray(anyErr.errors)) {
+    return anyErr.errors.some((e) => isDatabaseUnavailableError(e));
+  }
+  return false;
+}
+
+function logServerError(err: unknown) {
+  console.error(err);
+  let current: unknown = err;
+  const seen = new Set<unknown>();
+  while (current && typeof current === "object" && "cause" in current) {
+    const cause = (current as { cause?: unknown }).cause;
+    if (cause == null || seen.has(cause)) break;
+    seen.add(cause);
+    console.error(cause);
+    current = cause;
+  }
+}
+
+export function databaseUnavailable(
+  message = "PostgreSQL недоступен или отклонил подключение. Если база уже запущена, перезапустите локальный сервер (npm run start:local:keep) и обновите страницу."
+) {
+  return new ApiError(503, "service_unavailable", message);
+}
 
 export class ApiError extends Error {
   readonly status: number;
@@ -72,7 +138,20 @@ export function toErrorBody(err: unknown): { status: number; body: ErrorBody } {
       },
     };
   }
-  console.error(err);
+  if (isDatabaseUnavailableError(err)) {
+    const unavailable = databaseUnavailable();
+    logServerError(err);
+    return {
+      status: unavailable.status,
+      body: {
+        error: {
+          code: unavailable.code,
+          message: unavailable.message,
+        },
+      },
+    };
+  }
+  logServerError(err);
   return {
     status: 500,
     body: {

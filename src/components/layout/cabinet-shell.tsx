@@ -3,9 +3,12 @@
 import { useState } from "react";
 import { Menu } from "lucide-react";
 
+import { ChatWidget } from "@/components/chat/chat-widget";
+import { NotesWidget } from "@/components/notes/notes-widget";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { ImpersonationBanner } from "@/components/layout/impersonation-banner";
 import { Button } from "@/components/ui/button";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   Sheet,
   SheetContent,
@@ -13,6 +16,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useDemoStore } from "@/lib/store/demo-store";
+import { cn } from "@/lib/utils";
 
 export type CabinetRole = "direkciya" | "kafedra" | "auditoria";
 
@@ -66,7 +70,12 @@ export function CabinetShell({
           </SheetContent>
         </Sheet>
 
-        <main className="flex-1 px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
+        <main
+          className={cn(
+            "flex-1 px-4 py-4 sm:px-6 sm:py-5 lg:px-8",
+            "pb-20"
+          )}
+        >
           {!ready ? (
             <p className="text-sm text-muted-foreground">Загрузка данных с сервера…</p>
           ) : (
@@ -75,6 +84,14 @@ export function CabinetShell({
         </main>
       </div>
       </div>
+      <TooltipProvider delay={300} closeDelay={80}>
+        <NotesWidget
+          offsetForChat={role === "kafedra" || role === "auditoria"}
+        />
+        {role === "kafedra" || role === "auditoria" ? (
+          <ChatWidget role={role} />
+        ) : null}
+      </TooltipProvider>
     </div>
   );
 }

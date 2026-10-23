@@ -1,109 +1,65 @@
 # Локальный запуск (PostgreSQL + кабинеты)
 
-Кабинеты работают через серверное API и PostgreSQL. localStorage больше не является источником данных UI.
+Кабинеты работают через серверное API и PostgreSQL.
 
 ## Требования
 
-- Node.js 18+
+- Node.js 20+
 - npm
 
-Docker **не обязателен**: `npm run db:up` поднимает embedded PostgreSQL в `C:\tutoring-pg-data`.
+## Одна команда (рекомендуется)
 
-## Быстрый старт (Windows)
+Дважды щёлкните **`start-local.bat`** или в PowerShell:
 
-**Терминал 1 — база:**
-
-```bash
+```powershell
 npm install
-npm run db:up
+npm run start:local
 ```
 
 Скрипт:
 
-1. Создаёт/переиспользует кластер PostgreSQL
-2. Пишет `.env.local` (`DATABASE_URL`, `ALLOW_DEMO_LOGIN=1`)
-3. Применяет миграции и демо-seed
-4. Держит процесс живым (Ctrl+C — остановка БД)
+1. Поднимает локальный PostgreSQL (порт 55432), если ещё не запущен  
+2. Применяет миграции  
+3. Заполняет тестовую школу `org_school_qa` (1 директор, 3 преподавателя, 20 учеников, расписание, тарифы, платежи)  
+4. Запускает сайт на http://127.0.0.1:43127/
 
-**Терминал 2 — приложение:**
+Остановка: **Ctrl+C** в этом окне.
 
-```bash
-npm run dev:local
+Без перезаписи данных при каждом старте:
+
+```powershell
+npm run start:local:keep
 ```
 
-Откройте http://127.0.0.1:43127/
+или `start-local-keep.bat`.
 
-| Кабинет | URL |
-|---------|-----|
-| Выбор | http://127.0.0.1:43127/ |
-| Дирекция | http://127.0.0.1:43127/direkciya |
-| Кафедра | http://127.0.0.1:43127/kafedra |
-| Аудитория | http://127.0.0.1:43127/auditoria |
+## Переключение тестовых аккаунтов
 
-Демо-вход в development при `ALLOW_DEMO_LOGIN=1` (по умолчанию в dev). В **production демо-вход невозможен**.
+В боковой панели (блок **Dev · тестовые аккаунты**, при демо-входе: локально или `ALLOW_OPEN_TEST_LOGIN=1`):
 
-Production-вход: http://127.0.0.1:43127/login  
-Первый администратор (пустая БД): http://127.0.0.1:43127/setup + `BOOTSTRAP_ADMIN_TOKEN` в `.env.local`.
+- кнопка директора;
+- кнопки трёх преподавателей;
+- выпадающий список всех 20 учеников;
+- «Выйти из кабинета».
 
-Пароль seed-пользователей: `DEMO_PASSWORD` в `src/server/db/seed.ts` (только разработка).
+Это настоящий серверный вход (cookie-сессия). В обычном production блок и `/api/auth/demo*` недоступны. На открытом тестовом Timeweb их включает `ALLOW_OPEN_TEST_LOGIN=1`.
 
-## Свой PostgreSQL / Docker
-
-```bash
-docker run --name tutoring-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=tutoring_platform -p 5432:5432 -d postgres:16
-```
-
-Скопируйте `.env.example` → `.env.local`, поправьте `DATABASE_URL`, затем:
-
-```bash
-npm run db:migrate
-npm run db:seed
-npm run dev:local
-```
-
-## Сброс демо-данных
-
-```bash
-npm run db:seed
-```
-
-Затем обновите страницу в браузере. Кнопка «Сбросить демо» в сайдбаре только напоминает об этой команде.
-
-## Реалистичный QA-набор «школа Умба»
-
-Отдельная организация `org_school_qa` (1 директор, 3 преподавателя, 20 учеников, регулярные расписания, тарифы). **Не затирает** `org_demo`.
-
-Только локальная БД. Скрипт откажется при `NODE_ENV=production`, без `ALLOW_TEST_SEED=1`, при хосте не-localhost или при hostname вроде Timeweb.
-
-Для тестовой БД Timeweb (без подмены `NODE_ENV`) см. отдельный сценарий в [timeweb-deploy.md](timeweb-deploy.md): `npm run db:seed:school:timeweb`.
-
-PowerShell:
+## Обновить тестовые данные
 
 ```powershell
 $env:ALLOW_TEST_SEED="1"
 npm run db:seed:school
 ```
 
-Учётные записи (пароль как у demo-seed, см. `DEMO_PASSWORD` / `SCHOOL_PASSWORD` в коде):
+Пересоздаётся только организация `org_school_qa`, без удаления всей базы. Затем обновите страницу в браузере.
 
-| Роль | Email |
-|------|-------|
-| Директор | director@umba-school.test |
-| Преподаватель | morozova@umba-school.test |
-| Ученик | student01@umba-school.test |
+## Раздельный запуск (как раньше)
 
-Перед запуском: миграции применены (`npm run db:migrate`), в т.ч. `0005_lesson_schedules`.
-
-## Проверки
-
-```bash
-npm run lint
-npm run build
-npm test
-npm run db:verify
-npm run db:verify:pg
+```powershell
+npm run db:up          # терминал 1 — БД (теперь тоже seed школы)
+npm run dev:local      # терминал 2 — Next.js :43127
 ```
 
-## Важно для Windows
+## Production / Timeweb
 
-Если путь пользователя содержит кириллицу, data dir кластера — ASCII-путь (`C:\tutoring-pg-data`). Encoding кластера может быть WIN1251; seed нормализует проблемные символы. Прод / Timeweb — только UTF-8.
+Не используйте `start:local` и `db:seed:school` против Timeweb без отдельного сценария `db:seed:school:timeweb`. Обычный production держит демо-вход выключенным; открытый тест — только через `ALLOW_OPEN_TEST_LOGIN=1`.

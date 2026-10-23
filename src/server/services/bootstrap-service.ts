@@ -4,6 +4,7 @@ import type { AuthContext } from "@/server/authz/context";
 import {
   assignmentAnswers,
   assignmentSnapshots,
+  attemptAnswers,
   attendances,
   lessonStudents,
   lessons,
@@ -14,20 +15,37 @@ import {
   teachers,
   testAnswerKeys,
   testAssignments,
+  testAttempts,
   tests,
   topicSections,
   topics,
   users,
 } from "@/server/db/schema";
 import { publicMediaUrl } from "@/server/media/storage";
+import {
+  balanceFromDelta,
+  derivePackageStatus,
+  getLedgerDeltaByAssignmentIds,
+} from "@/server/services/lesson-balance";
 import { refreshExpiredAssignments } from "@/server/services/tariffs-service";
 import type { AppDb } from "@/server/db/types";
-import { mergeQuestionsWithKeys } from "@/server/services/question-merge";
+import { isMissedNextLesson } from "@/lib/homework-missed";
+import {
+  attemptPercent,
+  buildQuestionOutcomes,
+  canRevealKeys,
+  mergeLatestAnswers,
+  retryQuestionIds,
+  unansweredQuestionIds,
+} from "@/lib/tests/attempts";
+import { loadLessonTopicsMap } from "@/server/services/platform-mutations";
+import { mergeQuestionsWithKeys, stripQuestionKeys } from "@/server/services/question-merge";
 import type {
   Attendance,
   DemoData,
   Homework,
   HomeworkAssignment,
+  HomeworkAssignmentStatus,
   Lesson,
   PaymentRecord,
   Student,
@@ -168,21 +186,34 @@ export async function buildBootstrap(
     keysByTest.set(k.testId, m);
   }
 
+  const assignmentCountByTest = new Map<string, number>();
+  for (const a of assignmentRows) {
+    assignmentCountByTest.set(
+      a.testId,
+      (assignmentCountByTest.get(a.testId) ?? 0) + 1
+    );
+  }
+
   const homeworks: Homework[] = testRows.map((t) => {
     const publicQ = (t.questionsPublic as Homework["questions"]) ?? [];
     const keys = keysByTest.get(t.id) ?? {};
     const questions = includeKeys
       ? mergeQuestionsWithKeys(publicQ, keys)
-      : publicQ;
+      : (stripQuestionKeys(publicQ) as Homework["questions"]);
+    const publicQs = t.questionsPublic as unknown[];
     return {
       id: t.id,
       topicId: t.topicId,
+      sectionId: t.sectionId,
       teacherId: t.teacherId,
       title: t.title,
       description: t.description ?? undefined,
       status: t.status as Homework["status"],
+      purpose: (t.purpose as Homework["purpose"]) ?? "homework",
       questions,
       maxScore: n(t.maxScore),
+      questionCount: Array.isArray(publicQs) ? publicQs.length : 0,
+      assignmentCount: assignmentCountByTest.get(t.id) ?? 0,
     };
   });
 
@@ -221,24 +252,80 @@ export async function buildBootstrap(
     ansByAssignment.set(a.assignmentId, list);
   }
 
+  const attemptRows =
+    assignmentIds.length > 0
+      ? await db
+          .select()
+          .from(testAttempts)
+          .where(inArray(testAttempts.assignmentId, assignmentIds))
+      : [];
+  const attemptsByAssignment = new Map<
+    string,
+    { n: number; id: string; status: string }[]
+  >();
+  for (const row of attemptRows) {
+    const list = attemptsByAssignment.get(row.assignmentId) ?? [];
+    list.push({ n: row.attemptNumber, id: row.id, status: row.status });
+    attemptsByAssignment.set(row.assignmentId, list);
+  }
+  const attemptIds = attemptRows.map((r) => r.id);
+  const attemptAnsRows =
+    attemptIds.length > 0
+      ? await db
+          .select()
+          .from(attemptAnswers)
+          .where(inArray(attemptAnswers.attemptId, attemptIds))
+      : [];
+  const answersByAttempt = new Map<string, StudentAnswer[]>();
+  for (const a of attemptAnsRows) {
+    const list = answersByAttempt.get(a.attemptId) ?? [];
+    list.push({
+      questionId: a.questionId,
+      selectedOptionIds: (a.payload.selectedOptionIds as string[]) ?? [],
+      textAnswer: (a.payload.textAnswer as string) ?? "",
+      matching: (a.payload.matching as Record<string, string>) ?? {},
+      order: (a.payload.order as string[]) ?? [],
+      autoScore: n(a.autoScore),
+      manualScore: n(a.manualScore),
+      needsManualReview: a.needsManualReview,
+      isCorrect: a.isCorrect,
+      teacherComment: a.teacherComment ?? undefined,
+    });
+    answersByAttempt.set(a.attemptId, list);
+  }
+
   const homeworkAssignments: HomeworkAssignment[] = assignmentRows.map((a) => {
     const snap = snapById.get(a.id);
     const keys = (snap?.answerKeys as Record<string, unknown>) ?? {};
     const publicQ = (snap?.questions as Homework["questions"]) ?? [];
-    const showKeys =
-      includeKeys || a.status === "reviewed";
+    const questionsWithKeys = mergeQuestionsWithKeys(publicQ, keys);
+    const attempts = attemptsByAssignment.get(a.id) ?? [];
+    const a1 = attempts.find((x) => x.n === 1);
+    const a2 = attempts.find((x) => x.n === 2);
+    const attempt1Answers = a1 ? answersByAttempt.get(a1.id) ?? [] : [];
+    const attempt2Answers = a2 ? answersByAttempt.get(a2.id) ?? [] : [];
+    const retryIds = retryQuestionIds(questionsWithKeys, attempt1Answers);
+    const reveal = canRevealKeys({
+      attempt1Submitted: a1?.status === "submitted",
+      attempt2Submitted: a2?.status === "submitted",
+      retryCount: retryIds.length,
+    });
+    const showKeys = includeKeys || (ctx.role === "student" && reveal);
     const questions = showKeys
-      ? mergeQuestionsWithKeys(publicQ, keys)
-      : publicQ;
-    // Ученику даже после reviewed не отдаём сырые keys в отдельном поле —
-    // только вопросы (с explanation после reviewed через merge если нужно).
-    // Для reviewed merge добавляет correct* — для разбора. Ок по политике «после reviewed».
-    const studentSafeQuestions =
-      ctx.role === "student" && a.status !== "reviewed"
-        ? publicQ
-        : ctx.role === "student" && a.status === "reviewed"
-          ? mergeQuestionsWithKeys(publicQ, keys)
-          : questions;
+      ? questionsWithKeys
+      : (stripQuestionKeys(publicQ) as Homework["questions"]);
+    const latest =
+      attempt1Answers.length || attempt2Answers.length
+        ? mergeLatestAnswers(questionsWithKeys, attempt1Answers, attempt2Answers)
+        : ansByAssignment.get(a.id) ?? [];
+    const a1Pct =
+      a.attempt1Percent != null
+        ? Number(a.attempt1Percent)
+        : attemptPercent(questionsWithKeys, attempt1Answers);
+    const a2Pct =
+      a.attempt2Percent != null
+        ? Number(a.attempt2Percent)
+        : attemptPercent(questionsWithKeys, attempt2Answers, retryIds);
 
     return {
       id: a.id,
@@ -246,9 +333,11 @@ export async function buildBootstrap(
       topicId: a.topicId,
       teacherId: a.teacherId,
       studentId: a.studentId,
+      sourceKind: (a.sourceKind as HomeworkAssignment["sourceKind"]) ?? "homework",
       lessonId: a.lessonId ?? undefined,
       dueAt: a.dueAt?.toISOString(),
-      status: a.status as HomeworkAssignment["status"],
+      assignedAt: a.createdAt?.toISOString(),
+      status: a.status as HomeworkAssignmentStatus,
       score: n(a.score),
       maxScore: n(a.maxScore),
       feedback: a.feedback ?? undefined,
@@ -259,12 +348,29 @@ export async function buildBootstrap(
         ? {
             title: snap.title,
             description: snap.description ?? undefined,
-            questions:
-              ctx.role === "student" ? studentSafeQuestions : questions,
+            questions,
             maxScore: Number(snap.maxScore),
           }
         : undefined,
-      answers: ansByAssignment.get(a.id) ?? [],
+      answers: latest,
+      attempt1Answers,
+      attempt2Answers,
+      attempt1Percent: a1Pct,
+      attempt2Percent: a2Pct,
+      attempt1Submitted: a1?.status === "submitted",
+      attempt2Submitted: a2?.status === "submitted",
+      unansweredQuestionIds: unansweredQuestionIds(
+        questionsWithKeys,
+        attempt1Answers
+      ),
+      retryQuestionIds: retryIds,
+      questionOutcomes: buildQuestionOutcomes(
+        questionsWithKeys,
+        attempt1Answers,
+        attempt2Answers,
+        a2?.status === "submitted"
+      ),
+      revealKeys: showKeys,
     };
   });
 
@@ -305,17 +411,32 @@ export async function buildBootstrap(
     accountRole: t.userId ? ("teacher" as const) : null,
   }));
 
-  const mappedStudents: Student[] = studentRows.map((s) => ({
-    id: s.id,
-    fullName: s.fullName,
-    contacts: s.contacts ?? undefined,
-    status: s.status as Student["status"],
-    teacherId: s.primaryTeacherId ?? "",
-    notes: s.notes ?? undefined,
-    userId: s.userId,
-    accountEmail: s.userId ? accountEmailById.get(s.userId) ?? null : null,
-    accountRole: s.userId ? ("student" as const) : null,
-  }));
+  const mappedStudents: Student[] = studentRows.map((s) => {
+    const base: Student = {
+      id: s.id,
+      fullName: s.fullName,
+      grade: (s.grade as Student["grade"]) ?? null,
+      telegram: s.telegram ?? null,
+      phone: s.phone ?? null,
+      contacts: s.contacts ?? undefined,
+      status: s.status as Student["status"],
+      teacherId: s.primaryTeacherId ?? "",
+      createdAt: s.createdAt.toISOString(),
+      userId: s.userId,
+      accountEmail: s.userId ? accountEmailById.get(s.userId) ?? null : null,
+      accountRole: s.userId ? ("student" as const) : null,
+    };
+    // Ученик не получает внутренние заметки и контакты родителей
+    if (ctx.role === "student") {
+      return base;
+    }
+    return {
+      ...base,
+      parentContacts: s.parentContacts ?? null,
+      notes: s.notes ?? undefined,
+    };
+  });
+  const lessonTopicMap = await loadLessonTopicsMap(db, lessonIds);
   const mappedLessons: Lesson[] = lessonRows.map((l) => ({
     id: l.id,
     teacherId: l.teacherId,
@@ -325,6 +446,7 @@ export async function buildBootstrap(
     endsAt: l.endsAt.toISOString(),
     status: l.status as Lesson["status"],
     topicId: l.topicId ?? undefined,
+    lessonTopics: lessonTopicMap.get(l.id) ?? [],
   }));
 
   const mappedAttendances: Attendance[] = attRows.map((a) => ({
@@ -375,10 +497,13 @@ export async function buildBootstrap(
   }
 
   if (ctx.role === "teacher") {
-    // Преподавателю тарифы не нужны в полном виде
-    tariffRows = [];
-    assignmentRowsTariff = [];
+    const studentIds = new Set(studentRows.map((s) => s.id));
+    assignmentRowsTariff = assignmentRowsTariff.filter((a) =>
+      studentIds.has(a.studentId)
+    );
     paymentRows = [];
+    const tariffIds = new Set(assignmentRowsTariff.map((a) => a.tariffId));
+    tariffRows = tariffRows.filter((t) => tariffIds.has(t.id));
   }
 
   const assignedCount = new Map<string, number>();
@@ -396,6 +521,7 @@ export async function buildBootstrap(
     currency: "RUB",
     durationDays: t.durationDays,
     lessonsLimit: t.lessonsLimit ?? undefined,
+    weeklyFrequency: t.weeklyFrequency,
     includesText: t.includesText ?? undefined,
     features: (t.features as TariffFeatureKey[]) ?? [],
     status: t.status as Tariff["status"],
@@ -405,9 +531,15 @@ export async function buildBootstrap(
   }));
 
   const tariffNameById = new Map(tariffRows.map((t) => [t.id, t]));
+  const ledgerDelta = await getLedgerDeltaByAssignmentIds(
+    db,
+    assignmentRowsTariff.map((a) => a.id)
+  );
   const mappedTariffAssignments: StudentTariffAssignment[] =
     assignmentRowsTariff.map((a) => {
       const t = tariffNameById.get(a.tariffId);
+      const limit = a.lessonsLimitSnapshot ?? t?.lessonsLimit ?? null;
+      const bal = balanceFromDelta(ledgerDelta.get(a.id) ?? 0, limit);
       return {
         id: a.id,
         studentId: a.studentId,
@@ -415,10 +547,20 @@ export async function buildBootstrap(
         startsAt: a.startsAt.toISOString(),
         endsAt: a.endsAt.toISOString(),
         priceSnapshot: Number(a.priceSnapshot),
-        currency: "RUB",
+        currency: "RUB" as const,
         status: a.status as StudentTariffAssignment["status"],
         paymentStatus: a.paymentStatus as StudentTariffAssignment["paymentStatus"],
-        tariffName: t?.name,
+        lessonsLimitSnapshot: a.lessonsLimitSnapshot,
+        weeklyFrequencySnapshot: a.weeklyFrequencySnapshot ?? t?.weeklyFrequency,
+        durationDaysSnapshot: a.durationDaysSnapshot ?? t?.durationDays,
+        lessonsUsed: bal.used,
+        lessonsRemaining: bal.remaining,
+        packageStatus: derivePackageStatus({
+          status: a.status,
+          paymentStatus: a.paymentStatus,
+          remaining: bal.remaining,
+        }),
+        tariffName: a.tariffNameSnapshot ?? t?.name,
         includesText: t?.includesText ?? undefined,
       };
     });
@@ -436,6 +578,19 @@ export async function buildBootstrap(
     createdAt: p.createdAt.toISOString(),
   }));
 
+  const now = new Date();
+  const homeworkWithMissed: HomeworkAssignment[] = homeworkAssignments.map(
+    (a) => ({
+      ...a,
+      missedNextLesson: isMissedNextLesson(
+        a,
+        mappedLessons,
+        now,
+        mappedAttendances
+      ),
+    })
+  );
+
   const currentTeacherId =
     ctx.role === "teacher"
       ? ctx.teacherId ?? mappedTeachers[0]?.id ?? ""
@@ -446,6 +601,29 @@ export async function buildBootstrap(
       ? ctx.studentId ?? ""
       : mappedStudents[0]?.id ?? "";
 
+  const { listTheoryMaterialsForBootstrap } = await import(
+    "@/server/services/theory-service"
+  );
+  const { theories, theoryAssignments } =
+    await listTheoryMaterialsForBootstrap(db, ctx);
+
+  const theoryByTestAssignment = new Map(
+    theoryAssignments
+      .filter((a) => a.testAssignmentId)
+      .map((a) => [a.testAssignmentId!, a])
+  );
+  const homeworkAssignmentsWithTheory: HomeworkAssignment[] =
+    homeworkWithMissed.map((a) => {
+      const theory = theoryByTestAssignment.get(a.id);
+      if (!theory) return a;
+      return {
+        ...a,
+        sourceKind: "theory" as const,
+        theoryAssignmentId: theory.id,
+        theoryTitle: theory.title,
+      };
+    });
+
   return {
     version: 6,
     teachers: mappedTeachers,
@@ -455,7 +633,9 @@ export async function buildBootstrap(
     topicSections: mappedSections,
     topics: mappedTopics,
     homeworks,
-    homeworkAssignments,
+    homeworkAssignments: homeworkAssignmentsWithTheory,
+    theories,
+    theoryAssignments,
     tariffs: mappedTariffs,
     tariffAssignments: mappedTariffAssignments,
     payments: mappedPayments,

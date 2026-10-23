@@ -7,33 +7,39 @@ import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/format";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { apiPlatform } from "@/lib/store/api-client";
+import {
+  currentAssignmentForStudent,
+  packageStatusLabel,
+} from "@/lib/tariff-package";
 import type { StudentTariffAssignment } from "@/lib/types";
 
 function statusLabel(a: StudentTariffAssignment): string {
+  if (a.packageStatus) return packageStatusLabel[a.packageStatus];
   if (a.status === "cancelled") return "Отменён";
   if (a.status === "paused") return "Приостановлен";
-  if (a.status === "expired") return "Срок истёк";
   if (a.paymentStatus !== "paid" || a.status === "pending_payment") {
     return "Ожидает оплаты";
   }
-  if (new Date(a.endsAt).getTime() < Date.now()) return "Срок истёк";
+  if (a.lessonsRemaining != null && a.lessonsRemaining <= 0) {
+    return "Занятия закончились";
+  }
   return "Оплачен и действует";
 }
 
-export function MyTariffBlock({ studentId }: { studentId: string }) {
+export function MyTariffBlock({
+  studentId,
+  compact = false,
+}: {
+  studentId: string;
+  compact?: boolean;
+}) {
   const { data, ready } = useDemoStore();
   const [busy, setBusy] = useState(false);
-  const [nowMs] = useState(() => Date.now());
 
-  const assignment = useMemo(() => {
-    const list = data.tariffAssignments
-      .filter((a) => a.studentId === studentId)
-      .sort(
-        (a, b) =>
-          new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime()
-      );
-    return list[0] ?? null;
-  }, [data.tariffAssignments, studentId]);
+  const assignment = useMemo(
+    () => currentAssignmentForStudent(data.tariffAssignments, studentId),
+    [data.tariffAssignments, studentId]
+  );
 
   async function onPay() {
     if (!assignment) return;
@@ -57,9 +63,11 @@ export function MyTariffBlock({ studentId }: { studentId: string }) {
 
   if (!ready) return null;
 
+  const pad = compact ? "p-3.5" : "p-5";
+
   if (!assignment) {
     return (
-      <section className="rounded-2xl border border-border/70 p-5">
+      <section className={`rounded-2xl border border-border/70 ${pad}`}>
         <h2 className="font-display text-lg font-semibold tracking-tight">
           Мой тариф
         </h2>
@@ -74,38 +82,57 @@ export function MyTariffBlock({ studentId }: { studentId: string }) {
   const unpaid =
     assignment.paymentStatus !== "paid" ||
     assignment.status === "pending_payment";
-  const expired =
-    assignment.status === "expired" ||
-    new Date(assignment.endsAt).getTime() < nowMs;
+  const exhausted =
+    assignment.packageStatus === "exhausted" ||
+    (assignment.lessonsRemaining != null && assignment.lessonsRemaining <= 0);
+  const expired = assignment.packageStatus === "cancelled";
 
   return (
-    <section className="rounded-2xl border border-border/70 p-5">
+    <section className={`rounded-2xl border border-border/70 ${pad}`}>
       <h2 className="font-display text-lg font-semibold tracking-tight">
         Мой тариф
       </h2>
-      <p className="mt-2 font-display text-2xl font-semibold tracking-tight">
+      <p
+        className={
+          compact
+            ? "mt-1 font-display text-xl font-semibold tracking-tight"
+            : "mt-2 font-display text-2xl font-semibold tracking-tight"
+        }
+      >
         {assignment.tariffName ?? "Тариф"}
       </p>
       <p className="mt-1 text-sm tabular-nums text-muted-foreground">
         {assignment.priceSnapshot.toLocaleString("ru-RU")} ₽
       </p>
-      {assignment.includesText ? (
+      {assignment.includesText && !compact ? (
         <p className="mt-3 text-sm leading-relaxed">{assignment.includesText}</p>
       ) : null}
-      <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+      <dl className={`grid gap-2 text-sm sm:grid-cols-2 ${compact ? "mt-2" : "mt-4"}`}>
         <div>
           <dt className="text-muted-foreground">Начало</dt>
           <dd>{formatDate(assignment.startsAt)}</dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">Окончание</dt>
+          <dt className="text-muted-foreground">Прогноз окончания</dt>
           <dd>{formatDate(assignment.endsAt)}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Осталось занятий</dt>
+          <dd className="tabular-nums">
+            {assignment.lessonsRemaining == null
+              ? "—"
+              : assignment.lessonsRemaining}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Использовано</dt>
+          <dd className="tabular-nums">{assignment.lessonsUsed ?? "—"}</dd>
         </div>
         <div className="sm:col-span-2">
           <dt className="text-muted-foreground">Статус</dt>
           <dd
             className={
-              unpaid || expired
+              unpaid || exhausted || expired
                 ? "font-medium text-amber-700 dark:text-amber-400"
                 : "font-medium text-emerald-700 dark:text-emerald-400"
             }
@@ -131,9 +158,10 @@ export function MyTariffBlock({ studentId }: { studentId: string }) {
           </p>
         </div>
       ) : null}
-      {expired ? (
+      {exhausted ? (
         <p className="mt-3 text-sm text-muted-foreground">
-          Срок действия закончился. Для продления свяжитесь со школой.
+          Занятия по пакету закончились. Для нового пакета свяжитесь со школой.
+          Прогнозируемая дата не сжигает остаток.
         </p>
       ) : null}
     </section>

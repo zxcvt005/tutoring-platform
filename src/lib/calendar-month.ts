@@ -1,54 +1,56 @@
-/** Утилиты месячного календаря без сдвига даты из‑за UTC. */
+import {
+  addAppDateKey,
+  addAppMonths,
+  appDateKey,
+  appZonedParts,
+  formatInAppZone,
+  fromAppDateTime,
+  startOfAppMonth,
+} from "@/lib/app-time";
 
+/** Ключ календарного дня в часовом поясе приложения (Москва). */
 export function dateKeyLocal(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return appDateKey(d);
 }
 
 export function parseIsoToLocalDateKey(iso: string): string {
-  const d = new Date(iso);
-  return dateKeyLocal(d);
+  return appDateKey(iso);
 }
 
 export function startOfMonth(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), 1);
+  return startOfAppMonth(d);
 }
 
 export function addMonths(d: Date, n: number): Date {
-  return new Date(d.getFullYear(), d.getMonth() + n, 1);
-}
-
-/** Понедельник = 0 … воскресенье = 6 (RU-неделя). */
-export function mondayIndex(d: Date): number {
-  return (d.getDay() + 6) % 7;
+  return addAppMonths(d, n);
 }
 
 export type CalendarCell = {
   date: Date;
   key: string;
+  dayNumber: number;
   inMonth: boolean;
   isToday: boolean;
 };
 
-/** Сетка 6×7 для месяца, начиная с понедельника. */
+/** Сетка 6×7 для месяца, начиная с понедельника (Москва). */
 export function buildMonthGrid(monthAnchor: Date, today = new Date()): CalendarCell[] {
-  const first = startOfMonth(monthAnchor);
-  const startOffset = mondayIndex(first);
-  const gridStart = new Date(first);
-  gridStart.setDate(first.getDate() - startOffset);
-
-  const todayKey = dateKeyLocal(today);
+  const first = startOfAppMonth(monthAnchor);
+  const firstParts = appZonedParts(first);
+  const startOffset = firstParts.weekday - 1;
+  const firstKey = appDateKey(first);
+  const gridStartKey = addAppDateKey(firstKey, -startOffset);
+  const todayKey = appDateKey(today);
+  const month = firstParts.month;
   const cells: CalendarCell[] = [];
   for (let i = 0; i < 42; i++) {
-    const date = new Date(gridStart);
-    date.setDate(gridStart.getDate() + i);
-    const key = dateKeyLocal(date);
+    const key = addAppDateKey(gridStartKey, i);
+    const [, m, day] = key.split("-").map(Number) as [number, number, number];
     cells.push({
-      date,
+      date: fromAppDateTime(key, "12:00"),
       key,
-      inMonth: date.getMonth() === monthAnchor.getMonth(),
+      dayNumber: day,
+      inMonth: m === month,
       isToday: key === todayKey,
     });
   }
@@ -58,5 +60,5 @@ export function buildMonthGrid(monthAnchor: Date, today = new Date()): CalendarC
 export const WEEKDAY_LABELS_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
 export function monthTitleRu(d: Date): string {
-  return d.toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
+  return formatInAppZone(d, { month: "long", year: "numeric" });
 }

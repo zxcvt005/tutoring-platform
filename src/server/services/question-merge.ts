@@ -14,6 +14,7 @@ export function mergeQuestionsWithKeys(
       correctOptionIds: key.correctOptionIds ?? q.correctOptionIds,
       correctAnswers: key.correctAnswers ?? q.correctAnswers,
       numericTolerance: key.numericTolerance ?? q.numericTolerance,
+      explanation: key.explanation ?? q.explanation,
     };
   });
 }
@@ -27,6 +28,7 @@ export function stripQuestionKeys(
     delete rest.correctOptionIds;
     delete rest.correctAnswers;
     delete rest.numericTolerance;
+    delete rest.explanation;
     return rest;
   });
 }

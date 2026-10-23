@@ -7,24 +7,26 @@ import {
   CalendarDays,
   ClipboardList,
   CreditCard,
+  FileQuestion,
   GraduationCap,
+  History,
   LayoutDashboard,
   Package,
+  PlayCircle,
   UserRound,
   Users,
   BookMarked,
 } from "lucide-react";
 
 import type { CabinetRole } from "@/components/layout/cabinet-shell";
+import { DevAccountSwitcher } from "@/components/layout/dev-account-switcher";
 import { RoleSwitcher } from "@/components/layout/role-switcher";
 import { Button } from "@/components/ui/button";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  auditoriaNavItems,
+  direkciyaNavItems,
+  kafedraNavItems,
+} from "@/lib/cabinet-nav";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { cn } from "@/lib/utils";
 
@@ -34,33 +36,42 @@ type NavItem = {
   icon: React.ComponentType<{ className?: string }>;
 };
 
-const direkciyaNav: NavItem[] = [
-  { href: "/direkciya", label: "Обзор", icon: LayoutDashboard },
-  { href: "/direkciya/students", label: "Ученики", icon: GraduationCap },
-  { href: "/direkciya/teachers", label: "Преподаватели", icon: Users },
-  { href: "/direkciya/tariffs", label: "Тарифы", icon: Package },
-  { href: "/direkciya/payments", label: "Платежи", icon: CreditCard },
-  { href: "/direkciya/users", label: "Доступ", icon: UserRound },
-  { href: "/direkciya/schedule", label: "Расписание", icon: CalendarDays },
-  { href: "/direkciya/results", label: "Результаты", icon: ClipboardList },
-];
+const iconsByHref: Record<string, NavItem["icon"]> = {
+  "/direkciya": LayoutDashboard,
+  "/direkciya/students": GraduationCap,
+  "/direkciya/teachers": Users,
+  "/direkciya/tariffs": Package,
+  "/direkciya/payments": CreditCard,
+  "/direkciya/users": UserRound,
+  "/direkciya/schedule": CalendarDays,
+  "/direkciya/results": ClipboardList,
+  "/kafedra": LayoutDashboard,
+  "/kafedra/students": GraduationCap,
+  "/kafedra/schedule": CalendarDays,
+  "/kafedra/topics": BookMarked,
+  "/kafedra/theory": PlayCircle,
+  "/kafedra/tests": FileQuestion,
+  "/kafedra/grades": ClipboardList,
+  "/kafedra/profile": UserRound,
+  "/auditoria": LayoutDashboard,
+  "/auditoria/homework": BookOpen,
+  "/auditoria/theory": PlayCircle,
+  "/auditoria/history": History,
+  "/auditoria/profile": UserRound,
+};
 
-const kafedraNav: NavItem[] = [
-  { href: "/kafedra", label: "Сегодня", icon: LayoutDashboard },
-  { href: "/kafedra/students", label: "Ученики", icon: GraduationCap },
-  { href: "/kafedra/schedule", label: "Расписание", icon: CalendarDays },
-  { href: "/kafedra/topics", label: "Темы", icon: BookMarked },
-  { href: "/kafedra/results", label: "Результаты", icon: ClipboardList },
-  { href: "/kafedra/profile", label: "Мой профиль", icon: UserRound },
-];
+function withIcons(
+  items: { href: string; label: string }[]
+): NavItem[] {
+  return items.map((item) => ({
+    ...item,
+    icon: iconsByHref[item.href] ?? LayoutDashboard,
+  }));
+}
 
-const auditoriaNav: NavItem[] = [
-  { href: "/auditoria", label: "Главная", icon: LayoutDashboard },
-  { href: "/auditoria/schedule", label: "Расписание", icon: CalendarDays },
-  { href: "/auditoria/learning", label: "Обучение", icon: BookOpen },
-  { href: "/auditoria/results", label: "Результаты", icon: ClipboardList },
-  { href: "/auditoria/profile", label: "Мой профиль", icon: UserRound },
-];
+const direkciyaNav = withIcons(direkciyaNavItems);
+const kafedraNav = withIcons(kafedraNavItems);
+const auditoriaNav = withIcons(auditoriaNavItems);
 
 const titles: Record<CabinetRole, string> = {
   direkciya: "Дирекция",
@@ -150,15 +161,7 @@ export function AppSidebar({
   role: CabinetRole;
   onNavigate?: () => void;
 }) {
-  const {
-    data,
-    auth,
-    demoLoginEnabled,
-    setCurrentTeacherId,
-    setCurrentStudentId,
-    resetDemo,
-    logout,
-  } = useDemoStore();
+  const { data, auth, demoLoginEnabled, resetDemo, logout } = useDemoStore();
   const items =
     role === "direkciya"
       ? direkciyaNav
@@ -166,8 +169,6 @@ export function AppSidebar({
         ? kafedraNav
         : auditoriaNav;
   const title = titles[role];
-
-  const demoStudents = data.students.filter((s) => s.teacherId);
 
   const unassignedActiveCount =
     role === "direkciya"
@@ -199,69 +200,7 @@ export function AppSidebar({
 
       <NavLinks items={items} role={role} alertHrefs={alertHrefs} />
 
-      {demoLoginEnabled && role === "kafedra" ? (
-        <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
-          <p className="px-0.5 text-xs font-medium text-muted-foreground">
-            Demo-преподаватель
-          </p>
-          <Select
-            value={data.currentTeacherId || null}
-            onValueChange={(v) => {
-              if (v) setCurrentTeacherId(v);
-            }}
-          >
-            <SelectTrigger className="w-full rounded-xl">
-              <SelectValue placeholder="Выберите">
-                {(v: string | null) =>
-                  data.teachers.find((t) => t.id === v)?.fullName ?? "Выберите"
-                }
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {data.teachers.map((t) => (
-                <SelectItem key={t.id} value={t.id}>
-                  {t.fullName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="px-0.5 text-[11px] leading-snug text-muted-foreground">
-            Только для прототипа: в продукте преподаватель входит в свой кабинет.
-          </p>
-        </div>
-      ) : null}
-
-      {demoLoginEnabled && role === "auditoria" ? (
-        <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
-          <p className="px-0.5 text-xs font-medium text-muted-foreground">
-            Demo-ученик
-          </p>
-          <Select
-            value={data.currentStudentId || null}
-            onValueChange={(v) => {
-              if (v) setCurrentStudentId(v);
-            }}
-          >
-            <SelectTrigger className="w-full rounded-xl">
-              <SelectValue placeholder="Выберите">
-                {(v: string | null) =>
-                  demoStudents.find((s) => s.id === v)?.fullName ?? "Выберите"
-                }
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {demoStudents.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.fullName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="px-0.5 text-[11px] leading-snug text-muted-foreground">
-            Видны только данные выбранного ученика.
-          </p>
-        </div>
-      ) : null}
+      {demoLoginEnabled ? <DevAccountSwitcher auth={auth} /> : null}
 
       <div className="mt-auto space-y-2 pt-2" onClick={(e) => e.stopPropagation()}>
         <Button
@@ -282,10 +221,10 @@ export function AppSidebar({
               className="w-full rounded-xl"
               onClick={resetDemo}
             >
-              Сбросить демо
+              Как обновить данные
             </Button>
             <p className="px-0.5 text-[11px] leading-snug text-muted-foreground">
-              Демо-режим. Данные в PostgreSQL.
+              Локальный режим. Данные в PostgreSQL.
             </p>
           </>
         ) : (

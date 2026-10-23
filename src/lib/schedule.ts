@@ -1,31 +1,32 @@
+import {
+  addAppDateKey,
+  appDateKey,
+  appZonedParts,
+  fromAppDateTime,
+  fromAppDateTimeLocalValue,
+  fromAppWall,
+  minutesSinceAppMidnight,
+  sameAppDay,
+  startOfAppWeek,
+  toAppDateTimeLocalValue,
+} from "@/lib/app-time";
 import type { Lesson } from "@/lib/types";
 
-/** Понедельник недели, содержащей date (локальное время). */
+/** Понедельник недели, содержащей date (Москва). */
 export function startOfWeek(date: Date): Date {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return d;
+  return startOfAppWeek(date);
 }
 
 export function addDays(date: Date, days: number): Date {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d;
+  return fromAppDateTime(addAppDateKey(appDateKey(date), days), "00:00");
 }
 
 export function sameDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
+  return sameAppDay(a, b);
 }
 
 export function minutesSinceMidnight(date: Date): number {
-  return date.getHours() * 60 + date.getMinutes();
+  return minutesSinceAppMidnight(date);
 }
 
 export function overlaps(
@@ -89,19 +90,31 @@ export function combineDateAndTime(
   hours: number,
   minutes: number
 ): Date {
-  const d = new Date(day);
-  d.setHours(hours, minutes, 0, 0);
-  return d;
+  const p = appZonedParts(day);
+  return fromAppWall(p.year, p.month, p.day, hours, minutes, 0);
 }
 
 export function toLocalInputValue(iso: string): string {
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return toAppDateTimeLocalValue(iso);
 }
 
 export function fromLocalInput(value: string): string {
-  return new Date(value).toISOString();
+  return fromAppDateTimeLocalValue(value);
+}
+
+/** Доля ширины слота под карточки; справа остаётся кликабельная зона. */
+export const LESSON_CARD_CONTENT_PCT = 80;
+
+export function lessonCardSlotLayout(
+  column: number,
+  columns: number,
+  contentPct = LESSON_CARD_CONTENT_PCT
+): { leftPct: number; widthPct: number; freePct: number } {
+  const gapPct = 1.2;
+  const cols = Math.max(columns, 1);
+  const widthPct = (contentPct - gapPct * (cols + 1)) / cols;
+  const leftPct = gapPct + column * (widthPct + gapPct);
+  return { leftPct, widthPct, freePct: 100 - contentPct };
 }
 
 /** Раскладка параллельных занятий в колонки внутри дня. */
@@ -168,9 +181,10 @@ export function lessonParticipantsLabel(
 
 /** Сетка часов */
 export const DAY_START_HOUR = 8;
-export const DAY_END_HOUR = 21;
+/** Верхняя граница сетки: 24:00, последний час — 23:00–24:00. */
+export const DAY_END_HOUR = 24;
 export const SLOT_MINUTES = 30;
-/** Недельный календарь */
-export const PX_PER_MINUTE = 1.05;
+/** Недельный календарь — плотная сетка без потери читаемости */
+export const PX_PER_MINUTE = 0.62;
 /** Компактный день Кафедры */
 export const DAY_HOME_PX_PER_MINUTE = 0.72;

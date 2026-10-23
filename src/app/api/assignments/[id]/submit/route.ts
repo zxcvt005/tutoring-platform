@@ -23,6 +23,7 @@ const answerSchema = z.object({
 
 const bodySchema = z.object({
   answers: z.array(answerSchema).max(200),
+  attemptNumber: z.union([z.literal(1), z.literal(2)]).optional(),
 });
 
 type Params = { params: Promise<{ id: string }> };
@@ -38,7 +39,13 @@ export async function POST(request: Request, { params }: Params) {
     const idemKey = getIdempotencyKey(request);
 
     const result = await withIdempotency(db, ctx, routeKey, idemKey, async () => {
-      const bodyOut = await submitAssignment(db, ctx, id, body.answers);
+      const bodyOut = await submitAssignment(
+        db,
+        ctx,
+        id,
+        body.answers,
+        body.attemptNumber === 2 ? 2 : 1
+      );
       return { status: 200, body: bodyOut };
     });
 

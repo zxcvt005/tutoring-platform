@@ -1,5 +1,5 @@
-import { AuditoriaSchedulePanel } from "@/components/auditoria/schedule-panel";
+import { redirect } from "next/navigation";
 
-export default function AuditoriaSchedulePage() {
-  return <AuditoriaSchedulePanel />;
+export default function AuditoriaScheduleRedirectPage() {
+  redirect("/auditoria");
 }

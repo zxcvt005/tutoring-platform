@@ -6,6 +6,8 @@ import {
   personStatusLabel,
   studentHomeworkStatusLabel,
   teacherStatusLabel,
+  theoryAssignmentStatusLabel,
+  theoryStatusLabel,
   topicStatusLabel,
 } from "@/lib/format";
 import type {
@@ -14,6 +16,8 @@ import type {
   LessonStatus,
   PersonStatus,
   TeacherStatus,
+  TheoryAssignmentStatus,
+  TheoryStatus,
   TopicStatus,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -84,9 +88,9 @@ export function AttendanceStatusBadge({
   const tone: Tone =
     status === "present"
       ? "success"
-      : status === "absent"
+      : status === "absent_unexcused"
         ? "danger"
-        : status === "rescheduled"
+        : status === "absent_excused" || status === "rescheduled"
           ? "warn"
           : "muted";
   return <StatusPill label={attendanceStatusLabel[status]} tone={tone} />;
@@ -101,26 +105,59 @@ export function TopicStatusBadge({ status }: { status: TopicStatus }) {
   );
 }
 
+export function TheoryStatusBadge({ status }: { status: TheoryStatus }) {
+  const tone: Tone =
+    status === "published" ? "success" : status === "draft" ? "warn" : "muted";
+  return <StatusPill label={theoryStatusLabel[status]} tone={tone} />;
+}
+
+export function TheoryAssignmentStatusBadge({
+  status,
+}: {
+  status: TheoryAssignmentStatus;
+}) {
+  const tone: Tone =
+    status === "completed"
+      ? "success"
+      : status === "awaiting_review"
+        ? "warn"
+        : status === "assigned"
+          ? "neutral"
+          : "warn";
+  return <StatusPill label={theoryAssignmentStatusLabel[status]} tone={tone} />;
+}
+
 export function HomeworkAssignmentStatusBadge({
   status,
   perspective = "staff",
+  missedNextLesson = false,
 }: {
   status: HomeworkAssignmentStatus;
   /** staff — Дирекция/Кафедра; student — Аудитория */
   perspective?: "staff" | "student";
+  missedNextLesson?: boolean;
 }) {
-  const tone: Tone =
-    status === "reviewed"
+  const showMissed =
+    missedNextLesson &&
+    status !== "completed" &&
+    status !== "reviewed";
+  const tone: Tone = showMissed
+    ? "danger"
+    : status === "reviewed"
       ? "success"
       : status === "overdue"
         ? "danger"
-        : status === "completed"
+        : status === "completed" ||
+            status === "in_progress" ||
+            status === "remaining_questions" ||
+            status === "attempt2_in_progress"
           ? "warn"
-          : status === "in_progress"
-            ? "warn"
+          : status === "attempt1_submitted"
+            ? "success"
             : "neutral";
-  const label =
-    perspective === "student"
+  const label = showMissed
+    ? "Не выполнено к следующему занятию"
+    : perspective === "student"
       ? studentHomeworkStatusLabel[status]
       : homeworkAssignmentStatusLabel[status];
   return <StatusPill label={label} tone={tone} />;

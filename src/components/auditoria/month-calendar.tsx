@@ -18,6 +18,11 @@ import {
   parseIsoToLocalDateKey,
   startOfMonth,
 } from "@/lib/calendar-month";
+import {
+  calendarDisplayStatus,
+  classifyAuditoriaLesson,
+} from "@/lib/auditoria-calendar";
+import { formatInAppZone, fromAppDateTime } from "@/lib/app-time";
 import { formatDateTime, formatTime } from "@/lib/format";
 import type { Attendance, Lesson, Teacher, Topic } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -26,20 +31,16 @@ export type CalendarLessonView = Lesson & {
   displayStatus: "planned" | "done" | "cancelled" | "missed";
 };
 
-function resolveDisplayStatus(
+export function resolveDisplayStatus(
   lesson: Lesson,
   studentId: string,
-  attendances: Attendance[]
+  attendances: Attendance[],
+  now: Date = new Date()
 ): CalendarLessonView["displayStatus"] {
-  if (lesson.status === "cancelled") return "cancelled";
-  if (lesson.status === "done") {
-    const att = attendances.find(
-      (a) => a.lessonId === lesson.id && a.studentId === studentId
-    );
-    if (att?.status === "absent") return "missed";
-    return "done";
-  }
-  return "planned";
+  const att = attendances.find(
+    (a) => a.lessonId === lesson.id && a.studentId === studentId
+  );
+  return calendarDisplayStatus(classifyAuditoriaLesson(lesson, att, now));
 }
 
 const statusDot: Record<CalendarLessonView["displayStatus"], string> = {
@@ -65,14 +66,15 @@ export function AuditoriaMonthCalendar({
   const [anchor, setAnchor] = useState(() => startOfMonth(new Date()));
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [openLesson, setOpenLesson] = useState<CalendarLessonView | null>(null);
+  const now = useMemo(() => new Date(), []);
 
   const views = useMemo(
     () =>
       lessons.map((l) => ({
         ...l,
-        displayStatus: resolveDisplayStatus(l, studentId, attendances),
+        displayStatus: resolveDisplayStatus(l, studentId, attendances, now),
       })),
-    [lessons, studentId, attendances]
+    [lessons, studentId, attendances, now]
   );
 
   const byDay = useMemo(() => {
@@ -161,7 +163,7 @@ export function AuditoriaMonthCalendar({
                   cell.isToday && "bg-[#3166F0] font-semibold text-white"
                 )}
               >
-                {cell.date.getDate()}
+                {cell.dayNumber}
               </span>
               <div className="mt-1 flex flex-wrap gap-0.5 sm:hidden">
                 {dayLessons.slice(0, 3).map((l) => (
@@ -220,7 +222,7 @@ export function AuditoriaMonthCalendar({
         <div className="rounded-2xl border border-border/70 p-3">
           <p className="mb-2 text-sm font-medium">
             Занятия{" "}
-            {new Date(selectedKey + "T12:00:00").toLocaleDateString("ru-RU", {
+            {formatInAppZone(fromAppDateTime(selectedKey, "12:00"), {
               day: "numeric",
               month: "long",
             })}

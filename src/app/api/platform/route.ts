@@ -52,6 +52,17 @@ export async function POST(request: Request) {
             String(p.studentId),
             p.status as never
           );
+        case "setLessonTopic":
+          return m.setLessonTopic(db, ctx, {
+            lessonId: String(p.lessonId),
+            topicId: (p.topicId as string | null | undefined) ?? null,
+            title: (p.title as string | null | undefined) ?? null,
+          });
+        case "setLessonTopics":
+          return m.setLessonTopics(db, ctx, {
+            lessonId: String(p.lessonId),
+            topics: (p.topics as { topicId?: string | null; title?: string | null }[]) ?? [],
+          });
         case "upsertTopicSection":
           return m.upsertTopicSection(db, ctx, p as never);
         case "deleteTopicSection":
@@ -103,14 +114,16 @@ export async function POST(request: Request) {
             db,
             ctx,
             String(p.id),
-            p.answers as StudentAnswer[]
+            p.answers as StudentAnswer[],
+            p.attemptNumber === 2 ? 2 : 1
           );
         case "submitHomeworkAssignment":
           return m.submitHomeworkAction(
             db,
             ctx,
             String(p.id),
-            p.answers as StudentAnswer[]
+            p.answers as StudentAnswer[],
+            p.attemptNumber === 2 ? 2 : 1
           );
         case "reviewHomeworkAssignment":
           return m.reviewHomeworkAction(
@@ -130,6 +143,23 @@ export async function POST(request: Request) {
           return m.adminMarkPaidAction(db, ctx, p);
         case "studentRequestPayment":
           return m.studentPayAction(db, ctx, String(p.assignmentId));
+        case "getIncomeOverview":
+          return m.getIncomeOverviewAction(db, ctx);
+        case "upsertTheory":
+          return m.upsertTheoryAction(db, ctx, p);
+        case "deleteTheory":
+          return m.deleteTheoryAction(db, ctx, String(p.id));
+        case "assignTheory":
+          return m.assignTheoryAction(db, ctx, p);
+        case "markTheoryViewed":
+          return m.markTheoryViewedAction(db, ctx, String(p.id));
+        case "removeTheoryFile":
+          return m.removeTheoryFileAction(
+            db,
+            ctx,
+            String(p.materialId),
+            String(p.fileId)
+          );
         default:
           throw validationError(`Неизвестное действие: ${raw.action}`);
       }
@@ -139,6 +169,8 @@ export async function POST(request: Request) {
       "submitHomeworkAssignment",
       "reviewHomeworkAssignment",
       "assignHomework",
+      "assignTheory",
+      "markTheoryViewed",
       "completeLesson",
       "studentRequestPayment",
       "assignTariff",

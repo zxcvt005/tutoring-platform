@@ -20,6 +20,7 @@ import {
   apiAdminPatchUser,
   apiAdminUsers,
 } from "@/lib/store/api-client";
+import { userAccountStatusLabel, userRoleLabel } from "@/lib/format";
 import { useDemoStore } from "@/lib/store/demo-store";
 
 type Row = {
@@ -149,7 +150,12 @@ export default function DirekciyaUsersPage() {
             }}
           >
             <SelectTrigger>
-              <SelectValue />
+              <SelectValue>
+                {(v) =>
+                  userRoleLabel[v as "director" | "teacher" | "student"] ??
+                  "Роль"
+                }
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="director">Директор</SelectItem>
@@ -179,8 +185,13 @@ export default function DirekciyaUsersPage() {
               <tr key={u.id} className="border-b border-border/60">
                 <td className="py-2 pr-3">{u.fullName}</td>
                 <td className="py-2 pr-3">{u.email}</td>
-                <td className="py-2 pr-3">{u.role}</td>
-                <td className="py-2 pr-3">{u.status}</td>
+                <td className="py-2 pr-3">
+                  {userRoleLabel[u.role as "director" | "teacher" | "student"] ??
+                    u.role}
+                </td>
+                <td className="py-2 pr-3">
+                  {userAccountStatusLabel[u.status] ?? u.status}
+                </td>
                 <td className="py-2">
                   <div className="flex flex-wrap items-center gap-2">
                     {u.role === "teacher" || u.role === "student" ? (

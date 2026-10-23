@@ -54,8 +54,9 @@ describe("schedule service recurring", () => {
       .from(lessons)
       .where(eq(lessons.scheduleId, result.id));
     expect(rows.every((r) => r.startsAt.getTime() > now.getTime())).toBe(true);
-    // первое — следующая среда, не «сегодня задним числом»
-    expect(rows[0]?.startsAt.getDate()).toBe(21);
+    // первое — будущая среда (не сегодня 16:00 задним числом); дата может сдвинуться при конфликте seed
+    expect(rows[0]?.startsAt.getDay()).toBe(3);
+    expect(rows[0]!.startsAt.getTime()).toBeGreaterThan(now.getTime());
   });
 
   it("materialize is idempotent", async () => {
@@ -85,6 +86,55 @@ describe("schedule service recurring", () => {
       now
     );
     expect(again).toBe(0);
+  });
+
+  it("creates a weekly series from the slot weekday without an end date", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const anna = await asAnna(t.db);
+    const slotDay = new Date(2026, 9, 15, 10, 0, 0, 0); // чт
+    const result = await createLessonSchedule(
+      t.db,
+      anna,
+      {
+        teacherId: "t1",
+        studentIds: ["s1"],
+        weekdays: [4],
+        startTime: "11:00",
+        durationMin: 60,
+        activeFrom: slotDay.toISOString(),
+      },
+      slotDay
+    );
+    expect(result.created).toBeGreaterThan(0);
+    const rows = await t.db
+      .select()
+      .from(lessons)
+      .where(eq(lessons.scheduleId, result.id));
+    expect(rows.every((r) => r.startsAt.getDay() === 4)).toBe(true);
+  });
+
+  it("one-off upsert creates a single planned slot without a schedule series", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const anna = await asAnna(t.db);
+    const startsAt = new Date(Date.now() + 3 * 86400_000);
+    startsAt.setHours(12, 0, 0, 0);
+    const endsAt = new Date(startsAt.getTime() + 60 * 60_000);
+    const saved = await upsertLesson(t.db, anna, {
+      teacherId: "t1",
+      studentIds: ["s3"],
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      status: "planned",
+    });
+    expect(saved.ok).toBe(true);
+    const [row] = await t.db
+      .select()
+      .from(lessons)
+      .where(eq(lessons.id, saved.id!))
+      .limit(1);
+    expect(row?.scheduleId).toBeNull();
   });
 
   it("upsertLesson rejects new planned lesson in the past", async () => {

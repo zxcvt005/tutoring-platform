@@ -242,6 +242,12 @@ export function migrateToV5(raw: unknown): DemoData | null {
     topics,
     homeworks,
     homeworkAssignments,
+    theories: Array.isArray((blob as DemoData).theories)
+      ? (blob as DemoData).theories
+      : [],
+    theoryAssignments: Array.isArray((blob as DemoData).theoryAssignments)
+      ? (blob as DemoData).theoryAssignments
+      : [],
     tariffs: Array.isArray((blob as DemoData).tariffs)
       ? (blob as DemoData).tariffs
       : [],

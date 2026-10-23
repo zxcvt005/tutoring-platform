@@ -70,7 +70,10 @@ function TestTakeForm({
   const canEdit =
     assignment.status === "assigned" ||
     assignment.status === "in_progress" ||
-    assignment.status === "overdue";
+    assignment.status === "overdue" ||
+    assignment.status === "remaining_questions" ||
+    assignment.status === "attempt1_submitted" ||
+    assignment.status === "attempt2_in_progress";
   const isReviewed = assignment.status === "reviewed";
   const isSubmitted =
     assignment.status === "completed" || assignment.status === "reviewed";

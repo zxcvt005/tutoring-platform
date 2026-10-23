@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { topicStatusLabel } from "@/lib/format";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { UNSECTIONED_ID, type Topic, type TopicStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -49,7 +50,7 @@ export function TopicsWorkspace() {
     topicsForTeacher,
     sectionsForTeacher,
     homeworksForTopic,
-    upsertTopic,
+    saveTopic,
     deleteTopic,
     upsertTopicSection,
     deleteTopicSection,
@@ -73,10 +74,15 @@ export function TopicsWorkspace() {
     title: "",
     subject: "",
     description: "",
-    programNote: "",
     status: "active" as TopicStatus,
     sectionId: null as string | null,
   });
+  const [topicErrors, setTopicErrors] = useState<{
+    title?: string;
+    description?: string;
+    sectionId?: string;
+  }>({});
+  const [topicSaving, setTopicSaving] = useState(false);
   const [sectionForm, setSectionForm] = useState({
     id: undefined as string | undefined,
     title: "",
@@ -121,7 +127,7 @@ export function TopicsWorkspace() {
   function topicStats(topicId: string) {
     const hws = homeworksForTopic(topicId);
     const assignments = data.homeworkAssignments.filter(
-      (a) => a.topicId === topicId
+      (a) => a.topicId === topicId && a.sourceKind !== "theory"
     );
     const lessons = data.lessons.filter((l) => l.topicId === topicId);
     const doneHw = assignments.filter(
@@ -139,12 +145,12 @@ export function TopicsWorkspace() {
 
   function openCreateTopic(sectionId: string | null = null) {
     const teacher = data.teachers.find((t) => t.id === teacherId);
+    setTopicErrors({});
     setTopicForm({
       id: undefined,
       title: "",
       subject: teacher?.subjects[0] ?? "",
       description: "",
-      programNote: "",
       status: "active",
       sectionId,
     });
@@ -152,31 +158,50 @@ export function TopicsWorkspace() {
   }
 
   function openEditTopic(t: Topic) {
+    setTopicErrors({});
     setTopicForm({
       id: t.id,
       title: t.title,
       subject: t.subject,
       description: t.description ?? "",
-      programNote: t.programNote ?? "",
       status: t.status,
       sectionId: t.sectionId,
     });
     setTopicOpen(true);
   }
 
-  function saveTopic() {
-    if (!topicForm.title.trim() || !topicForm.subject.trim()) return;
-    upsertTopic({
-      id: topicForm.id,
-      teacherId,
-      sectionId: topicForm.sectionId,
-      title: topicForm.title.trim(),
-      subject: topicForm.subject.trim(),
-      description: topicForm.description.trim() || undefined,
-      programNote: topicForm.programNote.trim() || undefined,
-      status: topicForm.status,
-    });
-    setTopicOpen(false);
+  function submitTopic() {
+    const errors: typeof topicErrors = {};
+    if (!topicForm.title.trim()) errors.title = "Укажите название темы";
+    if (!topicForm.description.trim()) {
+      errors.description = "Укажите описание темы";
+    }
+    if (sections.length === 0) {
+      errors.sectionId = "Сначала создайте раздел, затем сохраните тему.";
+    } else if (!topicForm.sectionId) {
+      errors.sectionId = "Выберите раздел";
+    }
+    setTopicErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+
+    const teacher = data.teachers.find((t) => t.id === teacherId);
+    setTopicSaving(true);
+    void (async () => {
+      try {
+        const result = await saveTopic({
+          id: topicForm.id,
+          teacherId,
+          sectionId: topicForm.sectionId,
+          title: topicForm.title.trim(),
+          subject: topicForm.subject.trim() || teacher?.subjects[0] || "Предмет",
+          description: topicForm.description.trim(),
+          status: topicForm.status,
+        });
+        if (result.ok) setTopicOpen(false);
+      } finally {
+        setTopicSaving(false);
+      }
+    })();
   }
 
   function openCreateSection() {
@@ -320,7 +345,15 @@ export function TopicsWorkspace() {
           onValueChange={(v) => v && setStatusFilter(v as "all" | TopicStatus)}
         >
           <SelectTrigger className="w-full border-transparent bg-background sm:w-40">
-            <SelectValue />
+            <SelectValue>
+              {(v) =>
+                v === "active"
+                  ? "Активные"
+                  : v === "archived"
+                    ? "Архив"
+                    : "Все"
+              }
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Все</SelectItem>
@@ -563,40 +596,50 @@ export function TopicsWorkspace() {
                   setTopicForm({ ...topicForm, title: e.target.value })
                 }
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Предмет</Label>
-              <Input
-                value={topicForm.subject}
-                onChange={(e) =>
-                  setTopicForm({ ...topicForm, subject: e.target.value })
-                }
-              />
+              {topicErrors.title ? (
+                <p className="text-xs text-destructive">{topicErrors.title}</p>
+              ) : null}
             </div>
             <div className="space-y-1.5">
               <Label>Раздел</Label>
-              <Select
-                value={topicForm.sectionId ?? UNSECTIONED_ID}
-                onValueChange={(v) =>
-                  v &&
-                  setTopicForm({
-                    ...topicForm,
-                    sectionId: v === UNSECTIONED_ID ? null : v,
-                  })
-                }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={UNSECTIONED_ID}>Без раздела</SelectItem>
-                  {sections.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {sections.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Разделов пока нет. Сначала создайте раздел кнопкой «Новый
+                  раздел».
+                </p>
+              ) : (
+                <Select
+                  value={topicForm.sectionId ?? null}
+                  onValueChange={(v) =>
+                    v &&
+                    setTopicForm({
+                      ...topicForm,
+                      sectionId: v,
+                    })
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Выберите раздел">
+                      {(v) =>
+                        sections.find((s) => s.id === v)?.title ??
+                        "Выберите раздел"
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sections.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {topicErrors.sectionId ? (
+                <p className="text-xs text-destructive">
+                  {topicErrors.sectionId}
+                </p>
+              ) : null}
             </div>
             <div className="space-y-1.5">
               <Label>Описание</Label>
@@ -606,15 +649,11 @@ export function TopicsWorkspace() {
                   setTopicForm({ ...topicForm, description: e.target.value })
                 }
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Связь с программой</Label>
-              <Input
-                value={topicForm.programNote}
-                onChange={(e) =>
-                  setTopicForm({ ...topicForm, programNote: e.target.value })
-                }
-              />
+              {topicErrors.description ? (
+                <p className="text-xs text-destructive">
+                  {topicErrors.description}
+                </p>
+              ) : null}
             </div>
             <div className="space-y-1.5">
               <Label>Статус</Label>
@@ -626,11 +665,19 @@ export function TopicsWorkspace() {
                 }
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue />
+                  <SelectValue>
+                    {(v) =>
+                      topicStatusLabel[v as TopicStatus] ?? "Статус"
+                    }
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="active">Активна</SelectItem>
-                  <SelectItem value="archived">В архиве</SelectItem>
+                  <SelectItem value="active">
+                    {topicStatusLabel.active}
+                  </SelectItem>
+                  <SelectItem value="archived">
+                    {topicStatusLabel.archived}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -658,7 +705,11 @@ export function TopicsWorkspace() {
               >
                 Отмена
               </Button>
-              <Button type="button" onClick={saveTopic}>
+              <Button
+                type="button"
+                onClick={submitTopic}
+                disabled={topicSaving}
+              >
                 Сохранить
               </Button>
             </div>

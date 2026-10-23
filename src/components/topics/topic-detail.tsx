@@ -38,6 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { fromAppDateTimeLocalValue } from "@/lib/app-time";
 import { formatDateTime, formatDueAt } from "@/lib/format";
 import { computeMaxScore, questionTypeLabel } from "@/lib/tests/helpers";
 import { useDemoStore } from "@/lib/store/demo-store";
@@ -67,7 +68,7 @@ export function TopicDetail({ topicId }: { topicId: string }) {
     [data.lessons, topicId]
   );
   const assignments = data.homeworkAssignments.filter(
-    (a) => a.topicId === topicId
+    (a) => a.topicId === topicId && a.sourceKind !== "theory"
   );
 
   const [editorOpen, setEditorOpen] = useState(false);
@@ -114,7 +115,7 @@ export function TopicDetail({ topicId }: { topicId: string }) {
         teacherId: topic!.teacherId,
         studentIds: [assignForm.studentId],
         dueAt: assignForm.dueAt
-          ? new Date(assignForm.dueAt).toISOString()
+          ? fromAppDateTimeLocalValue(assignForm.dueAt)
           : undefined,
       });
       if (!result.ok) return;
@@ -374,6 +375,7 @@ export function TopicDetail({ topicId }: { topicId: string }) {
 
       <TestEditorDialog
         topicId={topicId}
+        sectionId={topic.sectionId}
         teacherId={topic.teacherId}
         homework={editingHw}
         open={editorOpen}

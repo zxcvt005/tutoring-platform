@@ -1,5 +1,5 @@
-import { AuditoriaLearningPanel } from "@/components/auditoria/learning-panel";
+import { redirect } from "next/navigation";
 
-export default function AuditoriaLearningPage() {
-  return <AuditoriaLearningPanel />;
+export default function AuditoriaLearningRedirect() {
+  redirect("/auditoria/history");
 }

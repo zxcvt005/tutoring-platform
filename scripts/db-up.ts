@@ -18,7 +18,11 @@ import EmbeddedPostgres from "embedded-postgres";
 import postgres from "postgres";
 
 import * as schema from "../src/server/db/schema";
-import { seedDemoOrganization } from "../src/server/db/seed";
+import {
+  SCHOOL_ORG_ID,
+  seedSchoolOrganization,
+  verifySchoolOrganization,
+} from "../src/server/db/seed-school";
 
 loadEnv({ path: ".env.local" });
 loadEnv();
@@ -30,6 +34,7 @@ const PORT = Number(process.env.EMBEDDED_PG_PORT ?? 55432);
 const PASSWORD = process.env.EMBEDDED_PG_PASSWORD ?? "postgres";
 const DB_NAME = "tutoring_platform";
 const DATABASE_URL = `postgresql://postgres:${PASSWORD}@127.0.0.1:${PORT}/${DB_NAME}`;
+const SKIP_SEED = process.env.UMBA_SKIP_SEED === "1";
 
 function writeEnvLocal() {
   const envPath = path.join(process.cwd(), ".env.local");
@@ -89,9 +94,21 @@ async function migrateAndSeed(connectionString: string) {
     const win1251Safe = enc.includes("WIN125") || enc === "SQL_ASCII";
     console.log(`server_encoding=${enc} win1251Safe=${win1251Safe}`);
 
-    console.log("seed …");
-    await seedDemoOrganization(db, { win1251Safe });
-    console.log("Seed OK");
+    if (SKIP_SEED) {
+      console.log("seed пропущен (UMBA_SKIP_SEED=1)");
+    } else {
+      console.log(`seed школы ${SCHOOL_ORG_ID} …`);
+      // Основной локальный набор: 1 директор / 3 преподавателя / 20 учеников.
+      // Идемпотентно пересоздаёт только org_school_qa (не всю БД).
+      const stats = await seedSchoolOrganization(db, new Date(), {
+        win1251Safe,
+      });
+      const verify = await verifySchoolOrganization(db);
+      if (verify.errors.length) {
+        console.warn("Seed verify warnings:", verify.errors.join("; "));
+      }
+      console.log("Seed OK", JSON.stringify(stats));
+    }
   } finally {
     await sqlClient.end({ timeout: 5 });
   }

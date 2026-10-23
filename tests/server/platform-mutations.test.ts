@@ -3,12 +3,17 @@ import { describe, it, expect, afterEach } from "vitest";
 import { resolveAuthContext } from "@/server/authz/context";
 import { loginWithPassword } from "@/server/services/auth-service";
 import { buildBootstrap } from "@/server/services/bootstrap-service";
+import { eq } from "drizzle-orm";
+
+import { lessonTopics, lessons, topics } from "@/server/db/schema";
 import {
   assignHomework,
   completeLesson,
   publishHomework,
+  setLessonTopic,
   upsertLesson,
   upsertTeacher,
+  upsertTopic,
 } from "@/server/services/platform-mutations";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
 
@@ -140,5 +145,94 @@ describe("platform mutations + bootstrap", () => {
       studentIds: ["s2"],
     });
     expect(second.created).toBe(0);
+  });
+
+  it("upsertTopic requires title and description", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const anna = await asRole(t.db, "anna@example.com");
+
+    await expect(
+      upsertTopic(t.db, anna, {
+        teacherId: "t1",
+        title: "  ",
+        subject: "Математика",
+        description: "Текст",
+        status: "active",
+        sectionId: "sec1",
+      })
+    ).rejects.toMatchObject({ status: 400 });
+
+    await expect(
+      upsertTopic(t.db, anna, {
+        teacherId: "t1",
+        title: "Новая тема",
+        subject: "Математика",
+        description: "",
+        status: "active",
+        sectionId: "sec1",
+      })
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("setLessonTopic uses catalog or free text without creating a topic", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const anna = await asRole(t.db, "anna@example.com");
+    const student = await asRole(t.db, "s1@demo.local");
+
+    const startsAt = new Date(Date.now() + 2 * 86_400_000);
+    startsAt.setHours(16, 0, 0, 0);
+    const endsAt = new Date(startsAt.getTime() + 60 * 60_000);
+    const created = await upsertLesson(t.db, anna, {
+      teacherId: "t1",
+      studentIds: ["s1"],
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      status: "planned",
+      subject: "Математика",
+    });
+
+    const before = await t.db.select({ id: topics.id }).from(topics);
+
+    await setLessonTopic(t.db, anna, {
+      lessonId: created.id,
+      topicId: "tp1",
+    });
+    let [row] = await t.db
+      .select()
+      .from(lessons)
+      .where(eq(lessons.id, created.id))
+      .limit(1);
+    expect(row?.topicId).toBe("tp1");
+
+    await setLessonTopic(t.db, anna, {
+      lessonId: created.id,
+      title: "Свободная формулировка занятия",
+    });
+    [row] = await t.db
+      .select()
+      .from(lessons)
+      .where(eq(lessons.id, created.id))
+      .limit(1);
+    expect(row?.topicId).toBeNull();
+    expect(row?.subject).toBe("Свободная формулировка занятия");
+    const links = await t.db
+      .select()
+      .from(lessonTopics)
+      .where(eq(lessonTopics.lessonId, created.id));
+    expect(links).toHaveLength(1);
+    expect(links[0]?.title).toBe("Свободная формулировка занятия");
+    expect(links[0]?.topicId).toBeNull();
+
+    const after = await t.db.select({ id: topics.id }).from(topics);
+    expect(after).toHaveLength(before.length);
+
+    await expect(
+      setLessonTopic(t.db, student, {
+        lessonId: created.id,
+        title: "Нельзя",
+      })
+    ).rejects.toMatchObject({ status: 403 });
   });
 });

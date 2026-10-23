@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 
+import { parseAppInstant } from "@/lib/app-time";
 import {
   listUpcomingOccurrences,
   SCHEDULE_HORIZON_WEEKS,
@@ -16,6 +17,7 @@ import {
   requireTeacherProfile,
 } from "@/server/authz/require";
 import {
+  lessonScheduleExceptions,
   lessonScheduleStudents,
   lessonSchedules,
   lessonStudents,
@@ -68,6 +70,7 @@ export type CreateScheduleInput = {
   subject?: string;
   /** ISO; если не задано — сейчас */
   activeFrom?: string;
+  activeUntil?: string;
 };
 
 /**
@@ -86,7 +89,12 @@ export async function createLessonSchedule(
   }
 
   const studentIds = uniqueStudentIds(input.studentIds);
-  if (studentIds.length === 0) throw badRequest("Добавьте хотя бы одного ученика");
+  if (studentIds.length === 0) throw badRequest("Выберите ученика");
+  if (studentIds.length > 1) {
+    throw badRequest(
+      "Занятие может быть только с одним учеником. Для параллельных уроков создайте отдельные записи расписания."
+    );
+  }
   const weekdays = [...new Set(input.weekdays)].filter((d) => d >= 1 && d <= 7);
   if (weekdays.length === 0) throw validationError("Укажите дни недели");
   if (!/^\d{1,2}:\d{2}$/.test(input.startTime.trim())) {
@@ -96,7 +104,15 @@ export async function createLessonSchedule(
     throw validationError("Длительность слишком мала");
   }
 
-  const activeFrom = input.activeFrom ? new Date(input.activeFrom) : now;
+  const activeFrom = input.activeFrom
+    ? parseAppInstant(input.activeFrom)
+    : now;
+  const activeUntil = input.activeUntil
+    ? parseAppInstant(input.activeUntil, true)
+    : null;
+  if (activeUntil && !(activeUntil > activeFrom)) {
+    throw validationError("Дата окончания должна быть позже начала действия");
+  }
   const id = newId("sch");
 
   await db.insert(lessonSchedules).values({
@@ -108,6 +124,7 @@ export async function createLessonSchedule(
     startTime: input.startTime.trim(),
     durationMin: input.durationMin,
     activeFrom,
+    activeUntil,
     status: "active",
   });
   await db.insert(lessonScheduleStudents).values(
@@ -164,6 +181,11 @@ export async function materializeSchedule(
   const have = new Set(
     existing.map((e) => e.occurrenceKey).filter((k): k is string => !!k)
   );
+  const exceptionRows = await db
+    .select({ occurrenceKey: lessonScheduleExceptions.occurrenceKey })
+    .from(lessonScheduleExceptions)
+    .where(eq(lessonScheduleExceptions.scheduleId, scheduleId));
+  for (const e of exceptionRows) have.add(e.occurrenceKey);
 
   const orgLessons = await loadOrgLessonsDomain(db, organizationId);
   let created = 0;
@@ -181,19 +203,9 @@ export async function materializeSchedule(
     };
     const conflictHit = findStudentScheduleConflict(orgLessons, draft);
     if (conflictHit) {
-      // Пропускаем конфликтный слот, не роняем всю генерацию
+      // Конфликт только у того же ученика. Параллельные уроки разных учеников разрешены.
       continue;
     }
-    // Также конфликт преподавателя с другим занятием
-    const teacherBusy = orgLessons.some((l) => {
-      if (l.teacherId !== sch.teacherId || l.status === "cancelled") return false;
-      const a0 = new Date(l.startsAt).getTime();
-      const a1 = new Date(l.endsAt).getTime();
-      const b0 = occ.startsAt.getTime();
-      const b1 = occ.endsAt.getTime();
-      return a0 < b1 && b0 < a1;
-    });
-    if (teacherBusy) continue;
 
     try {
       await db.insert(lessons).values({

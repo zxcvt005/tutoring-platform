@@ -1,11 +1,15 @@
+import {
+  addAppDateKey,
+  appDateKey,
+  fromAppDateOnly,
+  fromAppDateTime,
+} from "@/lib/app-time";
 import type { DemoData } from "@/lib/types";
 
 function atDay(offset: number, hour: number, minute = 0): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + offset);
-  d.setHours(hour, minute, 0, 0);
-  return d.toISOString();
+  const key = addAppDateKey(appDateKey(new Date()), offset);
+  const hm = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  return fromAppDateTime(key, hm).toISOString();
 }
 
 function endAt(startIso: string, durationMin: number): string {
@@ -13,10 +17,7 @@ function endAt(startIso: string, durationMin: number): string {
 }
 
 function daysAgo(n: number): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - n);
-  return d.toISOString();
+  return fromAppDateOnly(addAppDateKey(appDateKey(new Date()), -n)).toISOString();
 }
 
 export function createSeedData(): DemoData {
@@ -513,9 +514,9 @@ export function createSeedData(): DemoData {
     },
   ];
 
-  // Сегодня у Анны: параллельные независимые (16:00) + совместное (18:00) + короткое (19:15)
+  // Сегодня у Анны: параллельные независимые слоты (16:00 и 18:00) + короткое (19:15)
   const l1s = atDay(-2, 18, 0);
-  const l2s = atDay(0, 18, 0); // joint s1+s2
+  const l2s = atDay(0, 18, 0); // s1; параллельно l2b — s2
   const l3s = atDay(0, 16, 0); // parallel A: s2
   const l3bs = atDay(0, 16, 0); // parallel B: s3 (same slot, different student)
   const l3cs = atDay(0, 19, 15); // short 30min
@@ -541,7 +542,16 @@ export function createSeedData(): DemoData {
     {
       id: "l2",
       teacherId: "t1",
-      studentIds: ["s1", "s2"],
+      studentIds: ["s1"],
+      subject: "Математика",
+      startsAt: l2s,
+      endsAt: endAt(l2s, 60),
+      status: "planned" as const,
+    },
+    {
+      id: "l2b",
+      teacherId: "t1",
+      studentIds: ["s2"],
       subject: "Математика",
       startsAt: l2s,
       endsAt: endAt(l2s, 60),
@@ -623,7 +633,16 @@ export function createSeedData(): DemoData {
     {
       id: "l9",
       teacherId: "t3",
-      studentIds: ["s8", "s9"],
+      studentIds: ["s8"],
+      subject: "Английский",
+      startsAt: l9s,
+      endsAt: endAt(l9s, 45),
+      status: "planned" as const,
+    },
+    {
+      id: "l9b",
+      teacherId: "t3",
+      studentIds: ["s9"],
       subject: "Английский",
       startsAt: l9s,
       endsAt: endAt(l9s, 45),
@@ -821,8 +840,9 @@ export function createSeedData(): DemoData {
       name: "Базовый",
       price: 12000,
       currency: "RUB" as const,
-      durationDays: 30,
+      durationDays: 28,
       lessonsLimit: 8,
+      weeklyFrequency: 2,
       includesText: "8 индивидуальных занятий и проверка домашних заданий",
       features: ["individual_lessons", "homework"] as const,
       status: "active" as const,
@@ -832,8 +852,9 @@ export function createSeedData(): DemoData {
       name: "Стандарт",
       price: 20000,
       currency: "RUB" as const,
-      durationDays: 30,
+      durationDays: 42,
       lessonsLimit: 12,
+      weeklyFrequency: 2,
       includesText: "12 занятий, ДЗ и разбор ошибок",
       features: ["individual_lessons", "homework"] as const,
       status: "active" as const,
@@ -843,8 +864,9 @@ export function createSeedData(): DemoData {
       name: "Интенсив",
       price: 35000,
       currency: "RUB" as const,
-      durationDays: 45,
+      durationDays: 47,
       lessonsLimit: 20,
+      weeklyFrequency: 3,
       includesText: "Плотный график подготовки к экзамену",
       features: ["individual_lessons", "homework", "intensives"] as const,
       status: "active" as const,
@@ -862,6 +884,9 @@ export function createSeedData(): DemoData {
       currency: "RUB" as const,
       status: "active" as const,
       paymentStatus: "paid" as const,
+      lessonsLimitSnapshot: 12,
+      weeklyFrequencySnapshot: 2,
+      durationDaysSnapshot: 42,
       tariffName: "Стандарт",
       includesText: tariffs[1]!.includesText,
     },
@@ -875,6 +900,9 @@ export function createSeedData(): DemoData {
       currency: "RUB" as const,
       status: "pending_payment" as const,
       paymentStatus: "unpaid" as const,
+      lessonsLimitSnapshot: 8,
+      weeklyFrequencySnapshot: 2,
+      durationDaysSnapshot: 28,
       tariffName: "Базовый",
       includesText: tariffs[0]!.includesText,
     },
@@ -914,6 +942,8 @@ export function createSeedData(): DemoData {
     topics,
     homeworks,
     homeworkAssignments,
+    theories: [],
+    theoryAssignments: [],
     tariffs: tariffs.map((t) => ({
       ...t,
       features: [...t.features],

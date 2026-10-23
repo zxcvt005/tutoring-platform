@@ -144,8 +144,16 @@ export const students = pgTable("students", {
     onDelete: "set null",
   }),
   fullName: text("full_name").notNull(),
+  /** Класс: 8–11. null — не указан. */
+  grade: text("grade"),
+  /** Устаревшее свободное поле контакта; новые формы используют telegram/phone. */
   contacts: text("contacts"),
+  telegram: text("telegram"),
+  phone: text("phone"),
+  /** Контакты родителей / представителей — только для дирекции. */
+  parentContacts: text("parent_contacts"),
   status: text("status").notNull().default("active"),
+  /** Внутренние заметки администрации — не для ученика. */
   notes: text("notes"),
   ...timestamps,
 }, (t) => [
@@ -155,6 +163,10 @@ export const students = pgTable("students", {
   check(
     "students_status_check",
     sql`${t.status} in ('active', 'paused')`
+  ),
+  check(
+    "students_grade_check",
+    sql`${t.grade} is null or ${t.grade} in ('8', '9', '10', '11')`
   ),
 ]);
 
@@ -209,24 +221,36 @@ export const tests = pgTable("tests", {
   organizationId: text("organization_id")
     .notNull()
     .references(() => organizations.id, { onDelete: "cascade" }),
-  topicId: text("topic_id")
-    .notNull()
-    .references(() => topics.id, { onDelete: "restrict" }),
+  /** Необязательно: тест из каталога тем. Каталог «Тесты» живёт в разделе. */
+  topicId: text("topic_id").references(() => topics.id, {
+    onDelete: "restrict",
+  }),
+  sectionId: text("section_id").references(() => topicSections.id, {
+    onDelete: "set null",
+  }),
   teacherId: text("teacher_id")
     .notNull()
     .references(() => teachers.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   description: text("description"),
   status: text("status").notNull().default("draft"),
+  /** homework — каталог ДЗ; theory — тест, созданный для теории */
+  purpose: text("purpose").notNull().default("homework"),
   maxScore: numeric("max_score", { precision: 10, scale: 2 }),
   questionsPublic: jsonb("questions_public").$type<unknown[]>().notNull().default([]),
+  sortOrder: integer("sort_order").notNull().default(0),
   ...timestamps,
 }, (t) => [
   index("tests_topic_idx").on(t.topicId),
   index("tests_teacher_idx").on(t.teacherId),
+  index("tests_section_idx").on(t.sectionId),
   check(
     "tests_status_check",
     sql`${t.status} in ('draft', 'published', 'archived')`
+  ),
+  check(
+    "tests_purpose_check",
+    sql`${t.purpose} in ('homework', 'theory')`
   ),
 ]);
 
@@ -333,6 +357,25 @@ export const lessons = pgTable("lessons", {
   check("lessons_time_check", sql`${t.endsAt} > ${t.startsAt}`),
 ]);
 
+export const lessonTopics = pgTable("lesson_topics", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id")
+    .notNull()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  lessonId: text("lesson_id")
+    .notNull()
+    .references(() => lessons.id, { onDelete: "cascade" }),
+  topicId: text("topic_id").references(() => topics.id, {
+    onDelete: "set null",
+  }),
+  title: text("title").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  ...timestamps,
+}, (t) => [
+  index("lesson_topics_lesson_idx").on(t.lessonId),
+  index("lesson_topics_org_idx").on(t.organizationId),
+]);
+
 export const lessonStudents = pgTable("lesson_students", {
   lessonId: text("lesson_id")
     .notNull()
@@ -358,10 +401,10 @@ export const attendances = pgTable("attendances", {
     .defaultNow(),
 }, (t) => [
   primaryKey({ columns: [t.lessonId, t.studentId] }),
-  check(
-    "attendances_status_check",
-    sql`${t.status} in ('present', 'absent', 'cancelled', 'rescheduled')`
-  ),
+    check(
+      "attendances_status_check",
+      sql`${t.status} in ('present', 'absent_excused', 'absent_unexcused', 'cancelled', 'rescheduled')`
+    ),
 ]);
 
 export const testAssignments = pgTable("test_assignments", {
@@ -372,9 +415,9 @@ export const testAssignments = pgTable("test_assignments", {
   testId: text("test_id")
     .notNull()
     .references(() => tests.id, { onDelete: "restrict" }),
-  topicId: text("topic_id")
-    .notNull()
-    .references(() => topics.id, { onDelete: "restrict" }),
+  topicId: text("topic_id").references(() => topics.id, {
+    onDelete: "restrict",
+  }),
   teacherId: text("teacher_id")
     .notNull()
     .references(() => teachers.id, { onDelete: "cascade" }),
@@ -385,7 +428,11 @@ export const testAssignments = pgTable("test_assignments", {
     onDelete: "set null",
   }),
   dueAt: timestamp("due_at", { withTimezone: true }),
+  /** homework — ДЗ; theory — попытка теста по теории, не является ДЗ */
+  sourceKind: text("source_kind").notNull().default("homework"),
   status: text("status").notNull().default("assigned"),
+  attempt1Percent: numeric("attempt1_percent", { precision: 6, scale: 2 }),
+  attempt2Percent: numeric("attempt2_percent", { precision: 6, scale: 2 }),
   score: numeric("score", { precision: 10, scale: 2 }),
   maxScore: numeric("max_score", { precision: 10, scale: 2 }),
   feedback: text("feedback"),
@@ -399,7 +446,11 @@ export const testAssignments = pgTable("test_assignments", {
   index("test_assignments_test_idx").on(t.testId),
   check(
     "test_assignments_status_check",
-    sql`${t.status} in ('assigned', 'in_progress', 'completed', 'reviewed', 'overdue')`
+    sql`${t.status} in ('assigned', 'in_progress', 'remaining_questions', 'attempt1_submitted', 'attempt2_in_progress', 'completed', 'reviewed', 'overdue')`
+  ),
+  check(
+    "test_assignments_source_kind_check",
+    sql`${t.sourceKind} in ('homework', 'theory')`
   ),
 ]);
 
@@ -440,6 +491,59 @@ export const assignmentAnswers = pgTable("assignment_answers", {
     t.questionId
   ),
 ]);
+
+/** Попытка прохождения назначенного теста (максимум две). */
+export const testAttempts = pgTable(
+  "test_attempts",
+  {
+    id: text("id").primaryKey(),
+    assignmentId: text("assignment_id")
+      .notNull()
+      .references(() => testAssignments.id, { onDelete: "cascade" }),
+    attemptNumber: integer("attempt_number").notNull(),
+    status: text("status").notNull().default("in_progress"),
+    score: numeric("score", { precision: 10, scale: 2 }),
+    maxScore: numeric("max_score", { precision: 10, scale: 2 }),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("test_attempts_assignment_number_uidx").on(
+      t.assignmentId,
+      t.attemptNumber
+    ),
+    index("test_attempts_assignment_idx").on(t.assignmentId),
+    check("test_attempts_number_check", sql`${t.attemptNumber} in (1, 2)`),
+    check(
+      "test_attempts_status_check",
+      sql`${t.status} in ('in_progress', 'submitted')`
+    ),
+  ]
+);
+
+export const attemptAnswers = pgTable(
+  "attempt_answers",
+  {
+    id: text("id").primaryKey(),
+    attemptId: text("attempt_id")
+      .notNull()
+      .references(() => testAttempts.id, { onDelete: "cascade" }),
+    questionId: text("question_id").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    autoScore: numeric("auto_score", { precision: 10, scale: 2 }),
+    manualScore: numeric("manual_score", { precision: 10, scale: 2 }),
+    needsManualReview: boolean("needs_manual_review").notNull().default(false),
+    isCorrect: boolean("is_correct"),
+    teacherComment: text("teacher_comment"),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("attempt_answers_attempt_question_uidx").on(
+      t.attemptId,
+      t.questionId
+    ),
+  ]
+);
 
 export const gradeEvents = pgTable("grade_events", {
   id: text("id").primaryKey(),
@@ -543,9 +647,12 @@ export const tariffs = pgTable(
     name: text("name").notNull(),
     price: numeric("price", { precision: 12, scale: 2 }).notNull(),
     currency: text("currency").notNull().default("RUB"),
-    /** Срок действия назначения в днях от даты начала */
+    /** Прогнозируемая длительность пакета в днях (не дата сгорания). */
     durationDays: integer("duration_days").notNull(),
+    /** Количество занятий в пакете */
     lessonsLimit: integer("lessons_limit"),
+    /** Частота занятий в неделю (независимо от duration_days) */
+    weeklyFrequency: integer("weekly_frequency").notNull().default(1),
     includesText: text("includes_text"),
     /** Структурированные возможности, напр. ["individual_lessons","homework"] */
     features: jsonb("features").$type<string[]>().notNull().default([]),
@@ -589,6 +696,11 @@ export const studentTariffAssignments = pgTable(
     currency: text("currency").notNull().default("RUB"),
     status: text("status").notNull().default("pending_payment"),
     paymentStatus: text("payment_status").notNull().default("unpaid"),
+    /** Снимок каталога на момент назначения */
+    lessonsLimitSnapshot: integer("lessons_limit_snapshot"),
+    weeklyFrequencySnapshot: integer("weekly_frequency_snapshot"),
+    durationDaysSnapshot: integer("duration_days_snapshot"),
+    tariffNameSnapshot: text("tariff_name_snapshot"),
     ...timestamps,
   },
   (t) => [
@@ -634,6 +746,7 @@ export const payments = pgTable(
   (t) => [
     index("payments_org_student_idx").on(t.organizationId, t.studentId),
     index("payments_assignment_idx").on(t.assignmentId),
+    index("payments_org_paid_at_idx").on(t.organizationId, t.paidAt),
     uniqueIndex("payments_idempotency_uidx").on(
       t.organizationId,
       t.idempotencyKey
@@ -641,6 +754,428 @@ export const payments = pgTable(
     check(
       "payments_status_check",
       sql`${t.status} in ('pending', 'paid', 'cancelled', 'failed')`
+    ),
+  ]
+);
+
+/**
+ * Журнал списаний пакета. Append-only: сторно — новая строка с delta > 0.
+ */
+export const tariffLessonLedger = pgTable(
+  "tariff_lesson_ledger",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    assignmentId: text("assignment_id")
+      .notNull()
+      .references(() => studentTariffAssignments.id, { onDelete: "cascade" }),
+    lessonId: text("lesson_id").references(() => lessons.id, {
+      onDelete: "set null",
+    }),
+    studentId: text("student_id")
+      .notNull()
+      .references(() => students.id, { onDelete: "cascade" }),
+    /** -1 списание, +1 сторно */
+    delta: integer("delta").notNull(),
+    reason: text("reason").notNull(),
+    attendanceStatus: text("attendance_status"),
+    supersedesId: text("supersedes_id"),
+    actorUserId: text("actor_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("tll_assignment_idx").on(t.assignmentId),
+    index("tll_lesson_student_idx").on(t.lessonId, t.studentId),
+    check("tll_delta_check", sql`${t.delta} in (-1, 1)`),
+    check(
+      "tll_reason_check",
+      sql`${t.reason} in ('present', 'absent_unexcused', 'reversal')`
+    ),
+  ]
+);
+
+/**
+ * Текущее открытое списание по (занятие, ученик) — защита от двойного debit.
+ */
+export const tariffLessonDebitState = pgTable(
+  "tariff_lesson_debit_state",
+  {
+    lessonId: text("lesson_id")
+      .notNull()
+      .references(() => lessons.id, { onDelete: "cascade" }),
+    studentId: text("student_id")
+      .notNull()
+      .references(() => students.id, { onDelete: "cascade" }),
+    assignmentId: text("assignment_id")
+      .notNull()
+      .references(() => studentTariffAssignments.id, { onDelete: "cascade" }),
+    ledgerEntryId: text("ledger_entry_id")
+      .notNull()
+      .references(() => tariffLessonLedger.id, { onDelete: "cascade" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.lessonId, t.studentId] }),
+    uniqueIndex("tlds_ledger_uidx").on(t.ledgerEntryId),
+  ]
+);
+
+/** Исключения шаблона: удалённый или перенесённый слот не материализуется снова. */
+export const lessonScheduleExceptions = pgTable(
+  "lesson_schedule_exceptions",
+  {
+    scheduleId: text("schedule_id")
+      .notNull()
+      .references(() => lessonSchedules.id, { onDelete: "cascade" }),
+    occurrenceKey: text("occurrence_key").notNull(),
+    reason: text("reason").notNull(),
+    lessonId: text("lesson_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.scheduleId, t.occurrenceKey] }),
+    check(
+      "lse_reason_check",
+      sql`${t.reason} in ('deleted', 'moved', 'cancelled')`
+    ),
+  ]
+);
+
+/**
+ * Диалог пары «ученик — преподаватель» в организации.
+ * Не привязан к текущему primary_teacher_id: смена преподавателя
+ * сохраняет старый чат и открывает новый.
+ */
+export const chats = pgTable(
+  "chats",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    studentId: text("student_id")
+      .notNull()
+      .references(() => students.id, { onDelete: "cascade" }),
+    teacherId: text("teacher_id")
+      .notNull()
+      .references(() => teachers.id, { onDelete: "cascade" }),
+    lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("chats_org_pair_uidx").on(
+      t.organizationId,
+      t.studentId,
+      t.teacherId
+    ),
+    index("chats_teacher_activity_idx").on(
+      t.organizationId,
+      t.teacherId,
+      t.lastMessageAt
+    ),
+    index("chats_student_activity_idx").on(
+      t.organizationId,
+      t.studentId,
+      t.lastMessageAt
+    ),
+  ]
+);
+
+export const chatMessages = pgTable(
+  "chat_messages",
+  {
+    id: text("id").primaryKey(),
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    authorUserId: text("author_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    body: text("body"),
+    eventType: text("event_type"),
+    eventPayload: jsonb("event_payload").$type<{
+      eventType: string;
+      title: string;
+      lessonId?: string;
+      assignmentId?: string;
+      attendanceStatus?: string;
+      topicTitle?: string;
+      homeworkTitle?: string;
+      hrefStudent?: string | null;
+      hrefTeacher?: string | null;
+      theoryAssignmentId?: string;
+      theoryTitle?: string;
+    } | null>(),
+    eventKey: text("event_key"),
+    clientRequestId: text("client_request_id"),
+    relatedLessonId: text("related_lesson_id"),
+    relatedAssignmentId: text("related_assignment_id"),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    editedAt: timestamp("edited_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("chat_messages_chat_created_idx").on(t.chatId, t.createdAt, t.id),
+    uniqueIndex("chat_messages_request_uidx")
+      .on(t.chatId, t.clientRequestId)
+      .where(sql`${t.clientRequestId} is not null`),
+    uniqueIndex("chat_messages_event_uidx")
+      .on(t.chatId, t.eventKey)
+      .where(sql`${t.eventKey} is not null`),
+    index("chat_messages_org_idx").on(t.organizationId),
+    check(
+      "chat_messages_type_check",
+      sql`${t.type} in ('user_message', 'system_event')`
+    ),
+  ]
+);
+
+export const chatAttachments = pgTable(
+  "chat_attachments",
+  {
+    id: text("id").primaryKey(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => chatMessages.id, { onDelete: "cascade" }),
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    objectKey: text("object_key").notNull(),
+    originalName: text("original_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("chat_attachments_message_idx").on(t.messageId),
+    uniqueIndex("chat_attachments_key_uidx").on(t.objectKey),
+    check(
+      "chat_attachments_size_check",
+      sql`${t.sizeBytes} >= 0 AND ${t.sizeBytes} <= 20971520`
+    ),
+  ]
+);
+
+export const chatReadCursors = pgTable(
+  "chat_read_cursors",
+  {
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    lastReadAt: timestamp("last_read_at", { withTimezone: true }).notNull(),
+    lastReadMessageId: text("last_read_message_id"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.chatId, t.userId] }),
+    index("chat_read_cursors_user_idx").on(t.userId),
+  ]
+);
+
+/** Временные объекты хранилища до привязки к сообщению; чистятся по TTL. */
+export const chatPendingObjects = pgTable(
+  "chat_pending_objects",
+  {
+    objectKey: text("object_key").primaryKey(),
+    organizationId: text("organization_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("chat_pending_created_idx").on(t.createdAt)]
+);
+
+export const userNotes = pgTable(
+  "user_notes",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull().default(""),
+    content: text("content").notNull().default(""),
+    ...timestamps,
+  },
+  (t) => [
+    index("user_notes_owner_created_idx").on(
+      t.organizationId,
+      t.userId,
+      t.createdAt
+    ),
+  ]
+);
+
+export const theoryMaterials = pgTable(
+  "theory_materials",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    teacherId: text("teacher_id")
+      .notNull()
+      .references(() => teachers.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    videoUrl: text("video_url"),
+    videoProvider: text("video_provider"),
+    videoEmbedUrl: text("video_embed_url"),
+    embedAllowed: boolean("embed_allowed").notNull().default(false),
+    videoWarning: text("video_warning"),
+    status: text("status").notNull().default("draft"),
+    testId: text("test_id").references(() => tests.id, {
+      onDelete: "set null",
+    }),
+    currentVersionId: text("current_version_id"),
+    ...timestamps,
+  },
+  (t) => [
+    index("theory_materials_teacher_idx").on(t.teacherId),
+    index("theory_materials_org_idx").on(t.organizationId),
+    check(
+      "theory_materials_status_check",
+      sql`${t.status} in ('draft', 'published', 'archived')`
+    ),
+    check(
+      "theory_materials_provider_check",
+      sql`${t.videoProvider} is null or ${t.videoProvider} in ('vk', 'youtube', 'rutube', 'unknown')`
+    ),
+  ]
+);
+
+export const theoryMaterialVersions = pgTable(
+  "theory_material_versions",
+  {
+    id: text("id").primaryKey(),
+    materialId: text("material_id")
+      .notNull()
+      .references(() => theoryMaterials.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    videoUrl: text("video_url").notNull(),
+    videoProvider: text("video_provider"),
+    videoEmbedUrl: text("video_embed_url"),
+    embedAllowed: boolean("embed_allowed").notNull().default(false),
+    videoWarning: text("video_warning"),
+    testId: text("test_id").references(() => tests.id, {
+      onDelete: "set null",
+    }),
+    publishedAt: timestamp("published_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("theory_versions_material_idx").on(t.materialId),
+  ]
+);
+
+export const theoryFiles = pgTable(
+  "theory_files",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    materialId: text("material_id")
+      .notNull()
+      .references(() => theoryMaterials.id, { onDelete: "cascade" }),
+    /** null — текущие файлы черновика/редактора; иначе снимок версии */
+    versionId: text("version_id").references(() => theoryMaterialVersions.id, {
+      onDelete: "cascade",
+    }),
+    objectKey: text("object_key").notNull(),
+    originalName: text("original_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("theory_files_material_idx").on(t.materialId),
+    index("theory_files_version_idx").on(t.versionId),
+    index("theory_files_key_idx").on(t.objectKey),
+    check(
+      "theory_files_size_check",
+      sql`${t.sizeBytes} >= 0 AND ${t.sizeBytes} <= 20971520`
+    ),
+  ]
+);
+
+export const theoryAssignments = pgTable(
+  "theory_assignments",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    materialId: text("material_id")
+      .notNull()
+      .references(() => theoryMaterials.id, { onDelete: "restrict" }),
+    versionId: text("version_id")
+      .notNull()
+      .references(() => theoryMaterialVersions.id, { onDelete: "restrict" }),
+    teacherId: text("teacher_id")
+      .notNull()
+      .references(() => teachers.id, { onDelete: "cascade" }),
+    studentId: text("student_id")
+      .notNull()
+      .references(() => students.id, { onDelete: "cascade" }),
+    assignedByUserId: text("assigned_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    status: text("status").notNull().default("assigned"),
+    viewedAt: timestamp("viewed_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    testAssignmentId: text("test_assignment_id").references(
+      () => testAssignments.id,
+      { onDelete: "set null" }
+    ),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("theory_assignments_material_student_uidx").on(
+      t.materialId,
+      t.studentId
+    ),
+    index("theory_assignments_student_idx").on(t.studentId, t.status),
+    index("theory_assignments_teacher_idx").on(t.teacherId),
+    index("theory_assignments_test_idx").on(t.testAssignmentId),
+    check(
+      "theory_assignments_status_check",
+      sql`${t.status} in ('assigned', 'viewed', 'in_progress', 'awaiting_review', 'completed')`
     ),
   ]
 );
@@ -659,11 +1194,14 @@ export const schema = {
   lessonSchedules,
   lessonScheduleStudents,
   lessons,
+  lessonTopics,
   lessonStudents,
   attendances,
   testAssignments,
   assignmentSnapshots,
   assignmentAnswers,
+  testAttempts,
+  attemptAnswers,
   gradeEvents,
   auditLog,
   idempotencyKeys,
@@ -671,4 +1209,17 @@ export const schema = {
   tariffs,
   studentTariffAssignments,
   payments,
+  tariffLessonLedger,
+  tariffLessonDebitState,
+  lessonScheduleExceptions,
+  chats,
+  chatMessages,
+  chatAttachments,
+  chatReadCursors,
+  chatPendingObjects,
+  userNotes,
+  theoryMaterials,
+  theoryMaterialVersions,
+  theoryFiles,
+  theoryAssignments,
 };

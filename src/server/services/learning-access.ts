@@ -7,6 +7,7 @@ import {
 } from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
 import type { TariffFeatureKey } from "@/lib/types";
+import { getAssignmentBalance } from "@/server/services/lesson-balance";
 
 export type LearningAccessResult = {
   allowed: boolean;
@@ -15,16 +16,19 @@ export type LearningAccessResult = {
     | "no_assignment"
     | "unpaid"
     | "expired"
+    | "exhausted"
     | "cancelled"
     | "paused"
     | "missing_feature";
   assignmentId: string | null;
   endsAt: string | null;
+  remaining: number | null;
   features: TariffFeatureKey[];
 };
 
 /**
- * Доступ к платному обучению: оплаченное действующее назначение + feature key.
+ * Доступ к платному обучению: оплаченное активное назначение + остаток занятий.
+ * Прогнозируемая дата окончания не блокирует доступ.
  * Вход в кабинет и просмотр статуса тарифа этим не блокируются.
  */
 export async function resolveLearningAccess(
@@ -41,6 +45,7 @@ export async function resolveLearningAccess(
       paymentStatus: studentTariffAssignments.paymentStatus,
       endsAt: studentTariffAssignments.endsAt,
       startsAt: studentTariffAssignments.startsAt,
+      lessonsLimitSnapshot: studentTariffAssignments.lessonsLimitSnapshot,
       features: tariffs.features,
     })
     .from(studentTariffAssignments)
@@ -54,86 +59,64 @@ export async function resolveLearningAccess(
     .orderBy(desc(studentTariffAssignments.startsAt))
     .limit(8);
 
-  if (rows.length === 0) {
-    return {
-      allowed: false,
-      reason: "no_assignment",
-      assignmentId: null,
-      endsAt: null,
-      features: [],
-    };
-  }
+  const empty = (
+    reason: LearningAccessResult["reason"]
+  ): LearningAccessResult => ({
+    allowed: false,
+    reason,
+    assignmentId: null,
+    endsAt: null,
+    remaining: null,
+    features: [],
+  });
 
-  // Берём наиболее релевантное: active+paid, иначе свежее
+  if (rows.length === 0) return empty("no_assignment");
+
   const activePaid = rows.find(
     (r) =>
       r.status === "active" &&
       r.paymentStatus === "paid" &&
-      r.endsAt > now &&
       r.startsAt <= now
   );
   const current = activePaid ?? rows[0]!;
   const features = (current.features as TariffFeatureKey[]) ?? [];
+  const base = {
+    assignmentId: current.id,
+    endsAt: current.endsAt.toISOString(),
+    remaining: null as number | null,
+    features,
+  };
 
   if (current.status === "cancelled") {
-    return {
-      allowed: false,
-      reason: "cancelled",
-      assignmentId: current.id,
-      endsAt: current.endsAt.toISOString(),
-      features,
-    };
+    return { allowed: false, reason: "cancelled", ...base };
   }
   if (current.status === "paused") {
-    return {
-      allowed: false,
-      reason: "paused",
-      assignmentId: current.id,
-      endsAt: current.endsAt.toISOString(),
-      features,
-    };
-  }
-  if (
-    current.status === "expired" ||
-    current.endsAt <= now ||
-    (current.paymentStatus === "paid" && current.endsAt <= now)
-  ) {
-    return {
-      allowed: false,
-      reason: "expired",
-      assignmentId: current.id,
-      endsAt: current.endsAt.toISOString(),
-      features,
-    };
+    return { allowed: false, reason: "paused", ...base };
   }
   if (
     current.paymentStatus !== "paid" ||
     current.status === "pending_payment"
   ) {
-    return {
-      allowed: false,
-      reason: "unpaid",
-      assignmentId: current.id,
-      endsAt: current.endsAt.toISOString(),
-      features,
-    };
+    return { allowed: false, reason: "unpaid", ...base };
+  }
+  if (current.status === "expired" && !activePaid) {
+    return { allowed: false, reason: "expired", ...base };
+  }
+
+  const balance = await getAssignmentBalance(
+    db,
+    current.id,
+    current.lessonsLimitSnapshot
+  );
+  base.remaining = balance.remaining;
+
+  if (balance.remaining != null && balance.remaining <= 0) {
+    return { allowed: false, reason: "exhausted", ...base };
   }
   if (feature && !features.includes(feature)) {
-    return {
-      allowed: false,
-      reason: "missing_feature",
-      assignmentId: current.id,
-      endsAt: current.endsAt.toISOString(),
-      features,
-    };
+    return { allowed: false, reason: "missing_feature", ...base };
   }
-  return {
-    allowed: true,
-    reason: "ok",
-    assignmentId: current.id,
-    endsAt: current.endsAt.toISOString(),
-    features,
-  };
+  return { allowed: true, reason: "ok", ...base };
 }
 
 export async function assertStudentLearningAccess(
@@ -153,11 +136,13 @@ export async function assertStudentLearningAccess(
     throw forbidden(
       access.reason === "unpaid"
         ? "Обучение недоступно: тариф не оплачен"
-        : access.reason === "expired"
-          ? "Обучение недоступно: срок тарифа истёк"
-          : access.reason === "no_assignment"
-            ? "Обучение недоступно: тариф не назначен"
-            : "Обучение недоступно по условиям тарифа"
+        : access.reason === "exhausted"
+          ? "Обучение недоступно: занятия по тарифу закончились"
+          : access.reason === "expired"
+            ? "Обучение недоступно: срок тарифа истёк"
+            : access.reason === "no_assignment"
+              ? "Обучение недоступно: тариф не назначен"
+              : "Обучение недоступно по условиям тарифа"
     );
   }
   return access;

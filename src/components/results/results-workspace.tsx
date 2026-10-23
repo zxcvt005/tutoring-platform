@@ -24,7 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatDueAt } from "@/lib/format";
+import { formatDueAt, homeworkAssignmentStatusLabel } from "@/lib/format";
 import { hasPendingManual } from "@/lib/tests/grading";
 import { getAssignmentTitle } from "@/lib/tests/helpers";
 import { useDemoStore } from "@/lib/store/demo-store";
@@ -138,7 +138,14 @@ export function ResultsWorkspace({
           }
         >
           <SelectTrigger className="w-full border-transparent bg-background sm:w-44">
-            <SelectValue />
+            <SelectValue>
+              {(v) =>
+                v === "all"
+                  ? "Все статусы"
+                  : homeworkAssignmentStatusLabel[v as HomeworkAssignmentStatus] ??
+                    "Статус"
+              }
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Все статусы</SelectItem>

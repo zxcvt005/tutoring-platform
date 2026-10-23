@@ -11,6 +11,7 @@ export const questionTypeLabel: Record<QuestionType, string> = {
   single_choice: "Один вариант",
   multiple_choice: "Несколько вариантов",
   short_answer: "Краткий ответ",
+  numeric: "Числовой ответ",
   essay: "Развёрнутый ответ",
   matching: "Сопоставление",
   ordering: "Порядок",
@@ -63,6 +64,16 @@ export function createEmptyQuestion(type: QuestionType = "single_choice"): TestQ
         maxScore: 1,
         answerKind: "text",
         correctAnswers: [""],
+      };
+    case "numeric":
+      return {
+        id,
+        type,
+        prompt: "",
+        maxScore: 1,
+        answerKind: "number",
+        correctAnswers: [""],
+        numericTolerance: 0,
       };
     case "essay":
       return {

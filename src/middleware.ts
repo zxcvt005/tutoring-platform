@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 import { SESSION_COOKIE } from "@/server/auth/constants";
+import { isDemoLoginAllowed } from "@/server/auth/env";
 
 const CABINET_PREFIXES = ["/direkciya", "/kafedra", "/auditoria"];
 
 /**
- * В production кабинеты требуют cookie сессии.
- * В development демо-вход может создать сессию на клиенте — middleware не блокирует.
+ * Обычный production: кабинеты требуют cookie сессии.
+ * Dev и открытый тест (ALLOW_OPEN_TEST_LOGIN=1): middleware не блокирует —
+ * сессию создаёт существующий демо-вход на клиенте.
  */
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -16,7 +18,7 @@ export function middleware(request: NextRequest) {
   );
   if (!isCabinet) return NextResponse.next();
 
-  if (process.env.NODE_ENV !== "production") {
+  if (isDemoLoginAllowed()) {
     return NextResponse.next();
   }
 

@@ -1,5 +1,5 @@
-import { ResultsWorkspace } from "@/components/results/results-workspace";
+import { redirect } from "next/navigation";
 
-export default function Page() {
-  return <ResultsWorkspace mode="kafedra" />;
+export default function KafedraResultsRedirectPage() {
+  redirect("/kafedra/grades");
 }

@@ -34,9 +34,8 @@ const QUESTION_TYPES: QuestionType[] = [
   "single_choice",
   "multiple_choice",
   "short_answer",
+  "numeric",
   "essay",
-  "matching",
-  "ordering",
 ];
 
 type FormState = {
@@ -70,16 +69,22 @@ function toForm(hw?: Homework): FormState {
 
 export function TestEditorDialog({
   topicId,
+  sectionId,
   teacherId,
   homework,
   open,
   onOpenChange,
+  purpose = "homework",
+  onSaved,
 }: {
-  topicId: string;
+  topicId?: string | null;
+  sectionId?: string | null;
   teacherId: string;
   homework: Homework | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  purpose?: Homework["purpose"];
+  onSaved?: (hw: { id: string }) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -87,10 +92,13 @@ export function TestEditorDialog({
         {open ? (
           <TestEditorForm
             key={homework?.id ?? "new"}
-            topicId={topicId}
+            topicId={topicId ?? homework?.topicId ?? null}
+            sectionId={sectionId ?? homework?.sectionId ?? null}
             teacherId={teacherId}
             homework={homework}
+            purpose={purpose}
             onClose={() => onOpenChange(false)}
+            onSaved={onSaved}
           />
         ) : null}
       </DialogContent>
@@ -98,19 +106,31 @@ export function TestEditorDialog({
   );
 }
 
+const NONE_SECTION = "__none__";
+
 function TestEditorForm({
   topicId,
+  sectionId,
   teacherId,
   homework,
+  purpose = "homework",
   onClose,
+  onSaved,
 }: {
-  topicId: string;
+  topicId?: string | null;
+  sectionId?: string | null;
   teacherId: string;
   homework: Homework | null;
+  purpose?: Homework["purpose"];
   onClose: () => void;
+  onSaved?: (hw: { id: string }) => void;
 }) {
-  const { upsertHomework, publishHomework } = useDemoStore();
+  const { upsertHomework, publishHomework, sectionsForTeacher } = useDemoStore();
+  const sections = sectionsForTeacher(teacherId);
   const [form, setForm] = useState<FormState>(() => toForm(homework ?? undefined));
+  const [selectedSectionId, setSelectedSectionId] = useState<string | null>(
+    sectionId ?? homework?.sectionId ?? null
+  );
   const [preview, setPreview] = useState(false);
   const [addType, setAddType] = useState<QuestionType>("single_choice");
 
@@ -168,7 +188,8 @@ function TestEditorForm({
     }
     const id = upsertHomework({
       id: form.id,
-      topicId,
+      topicId: topicId || null,
+      sectionId: purpose === "theory" ? null : selectedSectionId || null,
       teacherId,
       title: form.title.trim(),
       description: form.description.trim() || undefined,
@@ -177,6 +198,7 @@ function TestEditorForm({
         : form.status === "published"
           ? "published"
           : "draft",
+      purpose,
       questions: form.questions,
       maxScore,
     });
@@ -184,11 +206,13 @@ function TestEditorForm({
       void (async () => {
         const result = await publishHomework(form.id ?? id);
         if (!result.ok) return;
+        onSaved?.({ id: form.id ?? id });
         onClose();
       })();
       return;
     }
     toast.success("Тест сохранён");
+    onSaved?.({ id });
     onClose();
   }
 
@@ -229,6 +253,42 @@ function TestEditorForm({
                   rows={2}
                   placeholder="Кратко, что проверяет тест"
                 />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Раздел</Label>
+                <Select
+                  value={selectedSectionId || NONE_SECTION}
+                  onValueChange={(v) => {
+                    if (!v) return;
+                    setSelectedSectionId(v === NONE_SECTION ? null : v);
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue>
+                      {() =>
+                        selectedSectionId
+                          ? (sections.find((s) => s.id === selectedSectionId)
+                              ?.title ?? "Раздел")
+                          : "Раздел не выбран"
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE_SECTION}>Раздел не выбран</SelectItem>
+                    {sections.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {!selectedSectionId ? (
+                  <p className="text-xs text-muted-foreground">
+                    {sections.length === 0
+                      ? "Разделов пока нет. Тест можно сохранить без раздела, а раздел создать во вкладке «Тесты» и указать позже."
+                      : "Раздел не выбран. Тест можно сохранить так, а раздел указать в любой момент при редактировании."}
+                  </p>
+                ) : null}
               </div>
             </div>
 

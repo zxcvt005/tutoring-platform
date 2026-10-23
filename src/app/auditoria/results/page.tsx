@@ -1,5 +1,5 @@
-import { AuditoriaResultsPanel } from "@/components/auditoria/results-panel";
+import { redirect } from "next/navigation";
 
-export default function AuditoriaResultsPage() {
-  return <AuditoriaResultsPanel />;
+export default function AuditoriaResultsRedirect() {
+  redirect("/auditoria/homework");
 }

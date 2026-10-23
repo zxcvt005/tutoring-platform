@@ -51,9 +51,13 @@ function gradeOne(
         needsManualReview: false,
       };
     }
+    case "numeric":
     case "short_answer": {
       const raw = base.textAnswer ?? "";
-      if (question.answerKind === "number") {
+      if (
+        question.type === "numeric" ||
+        question.answerKind === "number"
+      ) {
         const studentNum = parseNumericAnswer(raw);
         const tolerance = question.numericTolerance ?? 0;
         let ok = false;
@@ -128,6 +132,14 @@ function gradeOne(
         ...base,
         autoScore: ok ? question.maxScore : 0,
         isCorrect: ok,
+        needsManualReview: false,
+      };
+    }
+    default: {
+      return {
+        ...base,
+        autoScore: 0,
+        isCorrect: false,
         needsManualReview: false,
       };
     }

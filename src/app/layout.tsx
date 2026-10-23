@@ -25,10 +25,10 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Умба",
-    template: "%s | Умба",
+    default: "Неодин",
+    template: "%s | Неодин",
   },
-  description: "Умба — платформа управления репетиторским бизнесом",
+  description: "Неодин — платформа управления репетиторским бизнесом",
 };
 
 export default function RootLayout({

@@ -9,7 +9,8 @@
 - CSRF (double-submit `tp_csrf` + `x-csrf-token`) и проверка Origin
 - Ограничение попыток входа (rate limit в БД)
 - bcrypt (12 rounds), политика пароля ≥10 + буквы и цифры
-- Демо-вход **невозможен** при `NODE_ENV=production` (даже с `ALLOW_DEMO_LOGIN=1`)
+- Демо-вход в обычном production **невозможен** (даже с `ALLOW_DEMO_LOGIN=1`)
+- Открытый тестовый сайт: `ALLOW_OPEN_TEST_LOGIN=1` включает существующий демо-вход и переключатель аккаунтов **без** смены `NODE_ENV`
 - Страницы `/login` и `/setup` (первый администратор по `BOOTSTRAP_ADMIN_TOKEN`)
 - Дирекция → «Доступ»: создание/отключение пользователей организации
 - CLI: `npm run auth:bootstrap-admin`
@@ -34,11 +35,33 @@
 | `NODE_ENV` | да | `production` |
 | `APP_BASE_URL` | да | `https://zxcvt005-tutoring-platform-302f.twc1.net` (без path; scheme+host) |
 | `BOOTSTRAP_ADMIN_TOKEN` | при первом запуске | ≥24 символа; **удалить после создания директора** |
-| `ALLOW_DEMO_LOGIN` | нет | не задавать / `0` |
+| `ALLOW_DEMO_LOGIN` | нет | не задавать / `0` в обычном production |
+| `ALLOW_OPEN_TEST_LOGIN` | для открытого теста | `1` на тестовом Timeweb. Задать **до сборки**. Снимает обязательный `/login` и включает `DEV · ТЕСТОВЫЕ АККАУНТЫ`. Не использовать на будущем закрытом production |
 | `ALLOWED_ORIGINS` | нет | только если нужен **доп.** Origin; для текущего домена Timeweb **не нужен** |
 | `NEXT_PUBLIC_DATA_MODE` | нет | `api` |
+| `CHAT_STORAGE_DRIVER` | для чата | `s3` в production. Локальный диск контейнера не хранит вложения после деплоя. |
+| `S3_ENDPOINT` | для чата | Например `https://s3.twcstorage.ru` |
+| `S3_REGION` | для чата | Обычно `ru-1` |
+| `S3_BUCKET` | для чата | Имя бакета Object Storage |
+| `S3_ACCESS_KEY_ID` | для чата | Ключ доступа бакета |
+| `S3_SECRET_ACCESS_KEY` | для чата | Секрет бакета |
+| `S3_FORCE_PATH_STYLE` | нет | `1` (path-style, по умолчанию) |
 
 Секреты только в панели Timeweb. Не коммитить `.env.local` / реальные токены.
+
+## Object Storage (вложения чата и теории)
+
+Диск контейнера App Platform не сохраняет файлы. Локальный драйвер (`uploads/`) для Timeweb не подходит, кроме аварийного `CHAT_STORAGE_ALLOW_LOCAL=1`.
+
+В панели Timeweb Cloud:
+
+1. «Object Storage» → создать бакет (регион `ru-1`).
+2. Создать ключ доступа к бакету (Access Key + Secret).
+3. В env приложения задать переменные из таблицы выше. Секрет ключа в чат и git не копировать.
+4. Перед первым открытым тестом загрузить существующие вложения с ключами как в локальной БД (`chats/org_school_qa/...`).
+5. После редеплоя: открыть чат → скачать старое фото → загрузить новое → перезапустить приложение → оба файла открываются.
+
+Локально `CHAT_STORAGE_DRIVER` не задавать (или `local` / `auto`): без S3-переменных код пишет в `uploads/chat`.
 
 **Не** запускайте `npm run db:seed` на публичном проде (демо-пароли).
 

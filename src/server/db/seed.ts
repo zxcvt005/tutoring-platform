@@ -3,7 +3,7 @@
  * Идемпотентен по фиксированным id: повторный запуск обновляет/дописывает demo-org.
  * Не трогает другие organization id.
  */
-import { eq, or } from "drizzle-orm";
+import { eq, inArray, or } from "drizzle-orm";
 
 import { createSeedData } from "@/lib/demo/seed";
 import type { StudentAnswer, TestQuestion } from "@/lib/types";
@@ -53,6 +53,73 @@ function toDate(iso?: string) {
 
 function num(n?: number | null) {
   return n == null ? null : String(n);
+}
+
+export async function backfillLedgerFromAttendances(
+  db: DbLike,
+  organizationId: string
+) {
+  const lessonRows: {
+    id: string;
+    startsAt: Date;
+    status: string;
+  }[] = await db
+    .select()
+    .from(t.lessons)
+    .where(eq(t.lessons.organizationId, organizationId));
+  if (lessonRows.length === 0) return;
+  const lessonIds = lessonRows.map((l) => l.id);
+  const attendances: {
+    lessonId: string;
+    studentId: string;
+    status: string;
+  }[] = await db
+    .select()
+    .from(t.attendances)
+    .where(inArray(t.attendances.lessonId, lessonIds));
+  const assignments: {
+    id: string;
+    studentId: string;
+    paymentStatus: string;
+    startsAt: Date;
+  }[] = await db
+    .select()
+    .from(t.studentTariffAssignments)
+    .where(eq(t.studentTariffAssignments.organizationId, organizationId));
+
+  const lessonById = new Map(lessonRows.map((l) => [l.id, l]));
+
+  for (const att of attendances) {
+    if (att.status !== "present" && att.status !== "absent_unexcused") continue;
+    const lesson = lessonById.get(att.lessonId);
+    if (!lesson || lesson.status === "cancelled") continue;
+    const sta = assignments
+      .filter(
+        (a) =>
+          a.studentId === att.studentId &&
+          a.paymentStatus === "paid" &&
+          a.startsAt.getTime() <= lesson.startsAt.getTime()
+      )
+      .sort((a, b) => b.startsAt.getTime() - a.startsAt.getTime())[0];
+    if (!sta) continue;
+    const ledId = `led_seed_${att.lessonId}_${att.studentId}`;
+    await db.insert(t.tariffLessonLedger).values({
+      id: ledId,
+      organizationId,
+      assignmentId: sta.id,
+      lessonId: att.lessonId,
+      studentId: att.studentId,
+      delta: -1,
+      reason: att.status === "present" ? "present" : "absent_unexcused",
+      attendanceStatus: att.status,
+    });
+    await db.insert(t.tariffLessonDebitState).values({
+      lessonId: att.lessonId,
+      studentId: att.studentId,
+      assignmentId: sta.id,
+      ledgerEntryId: ledId,
+    });
+  }
 }
 
 function answerPayload(a: StudentAnswer): Record<string, unknown> {
@@ -214,10 +281,12 @@ export async function seedDemoOrganization(
   for (const hw of demo.homeworks) {
     const questions = (hw.questions ?? []) as TestQuestion[];
     const { publicQuestions, answerKeys } = splitQuestions(questions);
+    const topic = demo.topics.find((x) => x.id === hw.topicId);
     await db.insert(t.tests).values({
       id: hw.id,
       organizationId: DEMO_ORG_ID,
-      topicId: hw.topicId,
+      topicId: hw.topicId ?? null,
+      sectionId: hw.sectionId ?? topic?.sectionId ?? null,
       teacherId: hw.teacherId,
       title: hw.title,
       description: hw.description,
@@ -250,6 +319,18 @@ export async function seedDemoOrganization(
       await db.insert(t.lessonStudents).values({
         lessonId: lesson.id,
         studentId,
+      });
+    }
+    if (lesson.topicId || lesson.subject) {
+      const catalogTitle = demo.topics.find((x) => x.id === lesson.topicId)
+        ?.title;
+      await db.insert(t.lessonTopics).values({
+        id: `lt_${lesson.id}`,
+        organizationId: DEMO_ORG_ID,
+        lessonId: lesson.id,
+        topicId: lesson.topicId ?? null,
+        title: catalogTitle || lesson.subject || "Тема",
+        sortOrder: 0,
       });
     }
   }
@@ -293,7 +374,8 @@ export async function seedDemoOrganization(
       answerKeys,
     });
 
-    for (const ans of a.answers ?? []) {
+    const answers = a.answers ?? [];
+    for (const ans of answers) {
       await db.insert(t.assignmentAnswers).values({
         id: `ans_${a.id}_${ans.questionId}`,
         assignmentId: a.id,
@@ -305,6 +387,38 @@ export async function seedDemoOrganization(
         isCorrect: ans.isCorrect ?? null,
         teacherComment: ans.teacherComment,
       });
+    }
+
+    if (
+      answers.length > 0 ||
+      a.status === "in_progress" ||
+      a.status === "completed" ||
+      a.status === "reviewed" ||
+      a.status === "overdue"
+    ) {
+      const submitted = a.status === "completed" || a.status === "reviewed";
+      await db.insert(t.testAttempts).values({
+        id: `att1_${a.id}`,
+        assignmentId: a.id,
+        attemptNumber: 1,
+        status: submitted ? "submitted" : "in_progress",
+        score: num(a.score),
+        maxScore: num(a.maxScore),
+        submittedAt: submitted ? toDate(a.completedAt) : null,
+      });
+      for (const ans of answers) {
+        await db.insert(t.attemptAnswers).values({
+          id: `aa_${a.id}_${ans.questionId}`,
+          attemptId: `att1_${a.id}`,
+          questionId: ans.questionId,
+          payload: answerPayload(ans),
+          autoScore: num(ans.autoScore),
+          manualScore: num(ans.manualScore),
+          needsManualReview: Boolean(ans.needsManualReview),
+          isCorrect: ans.isCorrect ?? null,
+          teacherComment: ans.teacherComment,
+        });
+      }
     }
 
     await db.insert(t.gradeEvents).values({
@@ -346,6 +460,7 @@ export async function seedDemoOrganization(
       currency: "RUB",
       durationDays: tariff.durationDays,
       lessonsLimit: tariff.lessonsLimit ?? null,
+      weeklyFrequency: tariff.weeklyFrequency ?? 1,
       includesText: tariff.includesText ?? null,
       features: tariff.features,
       status: tariff.status,
@@ -365,6 +480,10 @@ export async function seedDemoOrganization(
       currency: "RUB",
       status: a.status,
       paymentStatus: a.paymentStatus,
+      lessonsLimitSnapshot: a.lessonsLimitSnapshot ?? null,
+      weeklyFrequencySnapshot: a.weeklyFrequencySnapshot ?? null,
+      durationDaysSnapshot: a.durationDaysSnapshot ?? null,
+      tariffNameSnapshot: a.tariffName ?? null,
     });
   }
 
@@ -384,6 +503,8 @@ export async function seedDemoOrganization(
       createdAt: new Date(p.createdAt),
     });
   }
+
+  await backfillLedgerFromAttendances(db, DEMO_ORG_ID);
 
   await db.insert(t.auditLog).values({
     id: "audit_seed_demo",

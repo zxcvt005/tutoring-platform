@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import { LessonStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
+import { appZonedParts, formatInAppZone } from "@/lib/app-time";
 import { formatTime, weekdayShort } from "@/lib/format";
 import {
   DAY_END_HOUR,
@@ -11,6 +12,7 @@ import {
   PX_PER_MINUTE,
   addDays,
   layoutLessonColumns,
+  lessonCardSlotLayout,
   lessonParticipantsLabel,
   minutesSinceMidnight,
   sameDay,
@@ -59,14 +61,14 @@ export function WeekCalendar({
   const today = new Date();
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-1.5">
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="rounded-full"
+            className="h-7 rounded-full px-2.5 text-xs"
             onClick={() => onWeekChange(addDays(weekStart, -7))}
           >
             ← Неделя
@@ -75,7 +77,7 @@ export function WeekCalendar({
             type="button"
             size="sm"
             variant="outline"
-            className="rounded-full"
+            className="h-7 rounded-full px-2.5 text-xs"
             onClick={() => onWeekChange(new Date())}
           >
             Сегодня
@@ -84,26 +86,26 @@ export function WeekCalendar({
             type="button"
             size="sm"
             variant="outline"
-            className="rounded-full"
+            className="h-7 rounded-full px-2.5 text-xs"
             onClick={() => onWeekChange(addDays(weekStart, 7))}
           >
             Неделя →
           </Button>
         </div>
         <p className="text-sm text-muted-foreground">
-          {weekStart.toLocaleDateString("ru-RU", {
+          {formatInAppZone(weekStart, {
             day: "numeric",
             month: "long",
           })}{" "}
           —{" "}
-          {addDays(weekStart, 6).toLocaleDateString("ru-RU", {
+          {formatInAppZone(addDays(weekStart, 6), {
             day: "numeric",
             month: "long",
           })}
         </p>
       </div>
 
-      <div className="space-y-3 md:hidden">
+      <div className="space-y-2 md:hidden">
         {days.map((day) => {
           const dayLessons = lessons
             .filter((l) => sameDay(new Date(l.startsAt), day))
@@ -113,10 +115,10 @@ export function WeekCalendar({
             );
           return (
             <div key={day.toISOString()} className="panel overflow-hidden">
-              <div className="flex items-center justify-between border-b border-border/70 px-3 py-2">
+              <div className="flex items-center justify-between border-b border-border/70 px-2.5 py-1.5">
                 <span className="font-medium capitalize">
-                  {weekdayShort[(day.getDay() + 6) % 7]} ·{" "}
-                  {day.toLocaleDateString("ru-RU", {
+                  {weekdayShort[appZonedParts(day).weekday - 1]} ·{" "}
+                  {formatInAppZone(day, {
                     day: "numeric",
                     month: "short",
                   })}
@@ -131,29 +133,25 @@ export function WeekCalendar({
                 </Button>
               </div>
               {dayLessons.length === 0 ? (
-                <p className="px-3 py-4 text-sm text-muted-foreground">Пусто</p>
+                <p className="px-2.5 py-2.5 text-sm text-muted-foreground">Пусто</p>
               ) : (
                 <ul className="divide-y divide-border/70">
                   {dayLessons.map((l) => (
                     <li key={l.id}>
                       <button
                         type="button"
-                        className="flex w-full flex-col gap-1 px-3 py-3 text-left hover:bg-muted/40"
+                        className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left hover:bg-muted/40"
                         onClick={() => onLessonClick(l)}
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-medium">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium tabular-nums">
                             {formatTime(l.startsAt)}–{formatTime(l.endsAt)}
-                          </span>
-                          <LessonStatusBadge status={l.status} />
+                          </div>
+                          <div className="truncate text-sm">
+                            {lessonParticipantsLabel(l, nameOf)}
+                          </div>
                         </div>
-                        <span className="text-sm">
-                          {lessonParticipantsLabel(l, nameOf)}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {l.subject || "Занятие"}
-                          {l.studentIds.length > 1 ? " · совместное" : ""}
-                        </span>
+                        <LessonStatusBadge status={l.status} />
                       </button>
                     </li>
                   ))}
@@ -174,15 +172,15 @@ export function WeekCalendar({
             <div
               key={day.toISOString()}
               className={cn(
-                "border-b border-l border-border/70 px-2 py-2 text-center",
+                "border-b border-l border-border/70 px-1 py-1 text-center",
                 sameDay(day, today) && "surface-sky"
               )}
             >
               <div className="text-[0.65rem] font-semibold tracking-wide text-muted-foreground uppercase">
-                {weekdayShort[(day.getDay() + 6) % 7]}
+                {weekdayShort[appZonedParts(day).weekday - 1]}
               </div>
-              <div className="font-display text-lg font-semibold tabular-nums">
-                {day.getDate()}
+              <div className="font-display text-sm font-semibold tabular-nums">
+                {appZonedParts(day).day}
               </div>
             </div>
           ))}
@@ -199,6 +197,12 @@ export function WeekCalendar({
                 {String(h).padStart(2, "0")}:00
               </div>
             ))}
+            <div
+              className="absolute right-1 text-[0.65rem] text-muted-foreground tabular-nums"
+              style={{ top: gridHeight - 8 }}
+            >
+              24:00
+            </div>
           </div>
 
           {days.map((day) => (
@@ -262,7 +266,7 @@ function DayColumn({
       {hoursGridLines()}
       {hoverY != null ? (
         <div
-          className="pointer-events-none absolute inset-x-1 z-0 h-7 rounded-md bg-muted/50"
+          className="pointer-events-none absolute inset-x-1 z-0 h-5 rounded-md bg-muted/50"
           style={{
             top:
               Math.floor(hoverY / (30 * PX_PER_MINUTE)) * 30 * PX_PER_MINUTE,
@@ -277,17 +281,15 @@ function DayColumn({
         const height = Math.max(
           (Math.min(end, DAY_END_HOUR * 60) - Math.max(start, dayStartMin)) *
             PX_PER_MINUTE,
-          22
-        );
-        const gapPct = 1.5;
-        const widthPct = (100 - gapPct * (columns + 1)) / columns;
-        const leftPct = gapPct + column * (widthPct + gapPct);
+          18
+                );
+        const { leftPct, widthPct } = lessonCardSlotLayout(column, columns);
         return (
           <button
             key={l.id}
             type="button"
             className={cn(
-              "absolute z-10 overflow-hidden rounded-lg border px-1.5 py-1 text-left text-[0.7rem] leading-tight shadow-none transition-opacity hover:opacity-95",
+              "absolute z-10 overflow-hidden rounded-md border px-1 py-0.5 text-left text-[0.65rem] leading-tight shadow-none transition-opacity hover:opacity-95",
               l.status === "cancelled"
                 ? "border-destructive/30 bg-destructive/10 text-destructive line-through"
                 : l.status === "done"
@@ -309,9 +311,6 @@ function DayColumn({
               {formatTime(l.startsAt)}
             </div>
             <div className="truncate">{lessonParticipantsLabel(l, nameOf)}</div>
-            <div className="truncate text-muted-foreground">
-              {l.subject || "Занятие"}
-            </div>
           </button>
         );
       })}

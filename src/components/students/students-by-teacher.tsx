@@ -36,28 +36,41 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 
+import { formatDate, personStatusLabel } from "@/lib/format";
+import {
+  currentAssignmentForStudent,
+  packageStatusLabel,
+} from "@/lib/tariff-package";
+import { averageFinishedAttempt2 } from "@/lib/tests/attempts";
 import { apiPlatform } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
-import type { PersonStatus, Student } from "@/lib/types";
+import { STUDENT_GRADES, gradeLabel } from "@/lib/student-contacts";
+import type { PersonStatus, Student, StudentGrade } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type FormState = {
   id?: string;
   fullName: string;
-  contacts: string;
+  grade: StudentGrade | "";
+  telegram: string;
+  phone: string;
   status: PersonStatus;
   teacherId: string;
-  notes: string;
   tariffId: string;
+  parentContacts: string;
+  notes: string;
 };
 
 const emptyForm = (teacherId: string): FormState => ({
   fullName: "",
-  contacts: "",
+  grade: "",
+  telegram: "",
+  phone: "",
   status: "active",
   teacherId,
-  notes: "",
   tariffId: "",
+  parentContacts: "",
+  notes: "",
 });
 
 export function StudentsByTeacher({
@@ -65,8 +78,14 @@ export function StudentsByTeacher({
 }: {
   mode: "direkciya" | "kafedra";
 }) {
-  const { data, upsertStudent, deleteStudent, studentsForTeacher, unassignedStudents } =
-    useDemoStore();
+  const {
+    data,
+    upsertStudent,
+    deleteStudent,
+    studentsForTeacher,
+    unassignedStudents,
+    reload,
+  } = useDemoStore();
 
   const [teacherFilter, setTeacherFilter] = useState<string>(
     mode === "kafedra" ? data.currentTeacherId : "unassigned"
@@ -76,6 +95,9 @@ export function StudentsByTeacher({
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm(data.teachers[0]?.id ?? ""));
   const [initialTariffId, setInitialTariffId] = useState("");
+  const [assignFor, setAssignFor] = useState<Student | null>(null);
+  const [assignTariffId, setAssignTariffId] = useState("");
+  const [assignBusy, setAssignBusy] = useState(false);
 
   const basePath = mode === "direkciya" ? "/direkciya" : "/kafedra";
 
@@ -96,6 +118,8 @@ export function StudentsByTeacher({
         const q = query.toLowerCase();
         return (
           s.fullName.toLowerCase().includes(q) ||
+          (s.telegram?.toLowerCase().includes(q) ?? false) ||
+          (s.phone?.toLowerCase().includes(q) ?? false) ||
           (s.contacts?.toLowerCase().includes(q) ?? false)
         );
       })
@@ -139,11 +163,14 @@ export function StudentsByTeacher({
     setForm({
       id: student.id,
       fullName: student.fullName,
-      contacts: student.contacts ?? "",
+      grade: student.grade ?? "",
+      telegram: student.telegram ?? "",
+      phone: student.phone ?? "",
       status: student.status,
       teacherId: student.teacherId,
-      notes: student.notes ?? "",
       tariffId,
+      parentContacts: student.parentContacts ?? "",
+      notes: student.notes ?? "",
     });
     setOpen(true);
   }
@@ -152,14 +179,18 @@ export function StudentsByTeacher({
     if (!form.fullName.trim()) return;
     const id =
       form.id ?? `s_${Math.random().toString(36).slice(2, 9)}`;
-    upsertStudent({
+    const saved = await upsertStudent({
       id,
       fullName: form.fullName.trim(),
-      contacts: form.contacts.trim() || undefined,
+      grade: form.grade || null,
+      telegram: form.telegram.trim() || null,
+      phone: form.phone.trim() || null,
       status: form.status,
       teacherId: form.teacherId,
+      parentContacts: form.parentContacts.trim() || null,
       notes: form.notes.trim() || undefined,
     });
+    if (!saved.ok) return;
     if (
       mode === "direkciya" &&
       form.tariffId &&
@@ -171,11 +202,30 @@ export function StudentsByTeacher({
           tariffId: form.tariffId,
         });
         toast.success("Тариф назначен");
+        await reload();
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Не удалось назначить тариф");
       }
     }
     setOpen(false);
+  }
+
+  async function saveAssignOnly() {
+    if (!assignFor || !assignTariffId) return;
+    setAssignBusy(true);
+    try {
+      await apiPlatform("assignTariff", {
+        studentId: assignFor.id,
+        tariffId: assignTariffId,
+      });
+      toast.success("Тариф назначен");
+      setAssignFor(null);
+      await reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Не удалось назначить тариф");
+    } finally {
+      setAssignBusy(false);
+    }
   }
 
   const teacherName = (id: string) =>
@@ -240,14 +290,16 @@ export function StudentsByTeacher({
           <SelectTrigger className="w-full border-transparent bg-background sm:w-40">
             <SelectValue>
               {(v) =>
-                v === "active" ? "Активен" : v === "paused" ? "Пауза" : "Все статусы"
+                v === "active" || v === "paused"
+                  ? personStatusLabel[v as PersonStatus]
+                  : "Все статусы"
               }
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Все статусы</SelectItem>
-            <SelectItem value="active">Активен</SelectItem>
-            <SelectItem value="paused">Пауза</SelectItem>
+            <SelectItem value="active">{personStatusLabel.active}</SelectItem>
+            <SelectItem value="paused">{personStatusLabel.paused}</SelectItem>
           </SelectContent>
         </Select>
       </FilterBar>
@@ -302,8 +354,26 @@ export function StudentsByTeacher({
             <TableRow>
               <TableHead>ФИО</TableHead>
               {mode === "direkciya" ? <TableHead>Преподаватель</TableHead> : null}
+              {mode === "kafedra" ? (
+                <>
+                  <TableHead className="whitespace-nowrap">
+                    Ср. ДЗ, 2-я попытка
+                  </TableHead>
+                  <TableHead>Класс</TableHead>
+                  <TableHead>Тариф</TableHead>
+                </>
+              ) : null}
               <TableHead>Статус</TableHead>
-              {mode === "direkciya" ? <TableHead>Аккаунт</TableHead> : null}
+              {mode === "direkciya" ? (
+                <>
+                  <TableHead>Тариф</TableHead>
+                  <TableHead>Остаток</TableHead>
+                  <TableHead>Использовано</TableHead>
+                  <TableHead>Прогноз</TableHead>
+                  <TableHead>Оплата</TableHead>
+                  <TableHead>Аккаунт</TableHead>
+                </>
+              ) : null}
               <TableHead className="w-48" />
             </TableRow>
           </TableHeader>
@@ -328,9 +398,78 @@ export function StudentsByTeacher({
                     {teacherName(s.teacherId)}
                   </TableCell>
                 ) : null}
+                {mode === "kafedra"
+                  ? (() => {
+                      const avg2 = averageFinishedAttempt2(
+                        data.homeworkAssignments.filter(
+                          (a) => a.studentId === s.id && a.sourceKind !== "theory"
+                        )
+                      );
+                      const asg = currentAssignmentForStudent(
+                        data.tariffAssignments,
+                        s.id
+                      );
+                      return (
+                        <>
+                          <TableCell className="tabular-nums whitespace-nowrap">
+                            {avg2 == null ? "—" : `${avg2}%`}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            —
+                          </TableCell>
+                          <TableCell className="min-w-[8.5rem]">
+                            {asg ? (
+                              <div>
+                                <div className="font-medium leading-tight">
+                                  {asg.tariffName ?? "Тариф"}
+                                </div>
+                                <div className="text-[0.7rem] text-muted-foreground">
+                                  {packageStatusLabel[asg.packageStatus ?? "none"]}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                        </>
+                      );
+                    })()
+                  : null}
                 <TableCell>
                   <PersonStatusBadge status={s.status} />
                 </TableCell>
+                {mode === "direkciya"
+                  ? (() => {
+                      const asg = currentAssignmentForStudent(
+                        data.tariffAssignments,
+                        s.id
+                      );
+                      const pkg = asg?.packageStatus ?? "none";
+                      return (
+                        <>
+                          <TableCell>
+                            {asg?.tariffName ?? (
+                              <span className="text-muted-foreground">Нет тарифа</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="tabular-nums">
+                            {asg?.lessonsRemaining == null
+                              ? "—"
+                              : asg.lessonsRemaining}
+                          </TableCell>
+                          <TableCell className="tabular-nums">
+                            {asg?.lessonsUsed ?? "—"}
+                          </TableCell>
+                          <TableCell className="tabular-nums text-sm">
+                            {asg ? formatDate(asg.endsAt) : "—"}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {packageStatusLabel[pkg]}
+                          </TableCell>
+                        </>
+                      );
+                    })()
+                  : null}
                 {mode === "direkciya" ? (
                   <TableCell className="text-xs text-muted-foreground">
                     {s.accountEmail ? (
@@ -358,13 +497,29 @@ export function StudentsByTeacher({
                       Карточка
                     </Link>
                     {mode === "direkciya" ? (
-                      <button
-                        type="button"
-                        className="text-sm text-muted-foreground underline-offset-2 hover:underline"
-                        onClick={() => openEdit(s)}
-                      >
-                        Изменить
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="text-sm font-medium underline-offset-2 hover:underline"
+                          onClick={() => {
+                            const current = currentAssignmentForStudent(
+                              data.tariffAssignments,
+                              s.id
+                            );
+                            setAssignTariffId(current?.tariffId ?? "");
+                            setAssignFor(s);
+                          }}
+                        >
+                          Тариф
+                        </button>
+                        <button
+                          type="button"
+                          className="text-sm text-muted-foreground underline-offset-2 hover:underline"
+                          onClick={() => openEdit(s)}
+                        >
+                          Изменить
+                        </button>
+                      </>
                     ) : null}
                   </div>
                 </TableCell>
@@ -390,11 +545,55 @@ export function StudentsByTeacher({
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Контакты</Label>
-              <Input
-                value={form.contacts}
-                onChange={(e) => setForm({ ...form, contacts: e.target.value })}
-              />
+              <Label>Класс</Label>
+              <Select
+                value={form.grade || "__none__"}
+                onValueChange={(v) =>
+                  v &&
+                  setForm({
+                    ...form,
+                    grade: v === "__none__" ? "" : (v as StudentGrade),
+                  })
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue>
+                    {(v) =>
+                      !v || v === "__none__"
+                        ? gradeLabel(null)
+                        : gradeLabel(String(v))
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">{gradeLabel(null)}</SelectItem>
+                  {STUDENT_GRADES.map((g) => (
+                    <SelectItem key={g} value={g}>
+                      {gradeLabel(g)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Telegram</Label>
+                <Input
+                  value={form.telegram}
+                  onChange={(e) =>
+                    setForm({ ...form, telegram: e.target.value })
+                  }
+                  placeholder="@username"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Телефон</Label>
+                <Input
+                  value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  placeholder="+7 …"
+                />
+              </div>
             </div>
             <div className="space-y-1.5">
               <Label>Преподаватель</Label>
@@ -433,12 +632,18 @@ export function StudentsByTeacher({
               >
                 <SelectTrigger className="w-full">
                   <SelectValue>
-                    {(v) => (v === "paused" ? "Пауза" : "Активен")}
+                    {(v) =>
+                      personStatusLabel[v as PersonStatus] ?? "Статус"
+                    }
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="active">Активен</SelectItem>
-                  <SelectItem value="paused">Пауза</SelectItem>
+                  <SelectItem value="active">
+                    {personStatusLabel.active}
+                  </SelectItem>
+                  <SelectItem value="paused">
+                    {personStatusLabel.paused}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -476,15 +681,27 @@ export function StudentsByTeacher({
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  При сохранении создаётся новое назначение (история сохраняется).
+                  Новое назначение создаётся только при смене тарифа.
                 </p>
               </div>
             ) : null}
+            <div className="space-y-1.5">
+              <Label>Контакты родителей</Label>
+              <Textarea
+                value={form.parentContacts}
+                onChange={(e) =>
+                  setForm({ ...form, parentContacts: e.target.value })
+                }
+                placeholder="Имя, телефон, Telegram…"
+                rows={3}
+              />
+            </div>
             <div className="space-y-1.5">
               <Label>Заметки</Label>
               <Textarea
                 value={form.notes}
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                placeholder="Внутренние заметки администрации"
               />
             </div>
           </div>
@@ -511,6 +728,71 @@ export function StudentsByTeacher({
                 Сохранить
               </Button>
             </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!assignFor}
+        onOpenChange={(o) => {
+          if (!o) setAssignFor(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              Тариф{assignFor ? ` · ${assignFor.fullName}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label>Назначить тариф</Label>
+            <Select
+              value={assignTariffId || "__none__"}
+              onValueChange={(v) =>
+                v && setAssignTariffId(v === "__none__" ? "" : v)
+              }
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue>
+                  {(v) =>
+                    !v || v === "__none__"
+                      ? "Не выбран"
+                      : (data.tariffs.find((t) => t.id === v)?.name ?? "—")
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">Не выбран</SelectItem>
+                {data.tariffs
+                  .filter((t) => t.status === "active")
+                  .map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name} · {t.lessonsLimit ?? "—"} зан. ·{" "}
+                      {t.price.toLocaleString("ru-RU")} ₽
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Создаётся новое назначение со снимком пакета. Предыдущее
+              сохраняется в истории как истёкшее.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setAssignFor(null)}
+            >
+              Отмена
+            </Button>
+            <Button
+              type="button"
+              disabled={!assignTariffId || assignBusy}
+              onClick={() => void saveAssignOnly()}
+            >
+              Назначить
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

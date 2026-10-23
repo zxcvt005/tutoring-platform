@@ -24,6 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { suggestDurationDays } from "@/lib/tariff-package";
 import { apiPlatform } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { Tariff } from "@/lib/types";
@@ -34,6 +35,7 @@ type FormState = {
   price: string;
   durationDays: string;
   lessonsLimit: string;
+  weeklyFrequency: string;
   includesText: string;
   status: "active" | "archived";
 };
@@ -43,8 +45,9 @@ function toForm(t?: Tariff): FormState {
     return {
       name: "",
       price: "",
-      durationDays: "30",
-      lessonsLimit: "",
+      durationDays: "28",
+      lessonsLimit: "8",
+      weeklyFrequency: "2",
       includesText: "",
       status: "active",
     };
@@ -55,6 +58,7 @@ function toForm(t?: Tariff): FormState {
     price: String(t.price),
     durationDays: String(t.durationDays),
     lessonsLimit: t.lessonsLimit != null ? String(t.lessonsLimit) : "",
+    weeklyFrequency: String(t.weeklyFrequency ?? 1),
     includesText: t.includesText ?? "",
     status: t.status,
   };
@@ -86,6 +90,7 @@ export function TariffsWorkspace() {
         price: Number(form.price),
         durationDays: Number(form.durationDays),
         lessonsLimit: form.lessonsLimit ? Number(form.lessonsLimit) : null,
+        weeklyFrequency: Number(form.weeklyFrequency),
         includesText: form.includesText,
         features: ["individual_lessons", "homework"],
         status: form.status,
@@ -121,7 +126,7 @@ export function TariffsWorkspace() {
     <div>
       <PageHeader
         title="Тарифы"
-        description="Продукты обучения: цена, срок и состав. Назначение ученику — отдельная запись."
+        description="Пакет занятий: цена, количество, частота в неделю и прогноз длительности. Прогноз не сжигает остаток."
         actions={
           <Button
             type="button"
@@ -144,8 +149,9 @@ export function TariffsWorkspace() {
             <TableRow>
               <TableHead>Название</TableHead>
               <TableHead>Цена</TableHead>
-              <TableHead>Срок</TableHead>
+              <TableHead>Прогноз</TableHead>
               <TableHead>Занятий</TableHead>
+              <TableHead>В неделю</TableHead>
               <TableHead>Назначений</TableHead>
               <TableHead>Статус</TableHead>
               <TableHead />
@@ -168,6 +174,9 @@ export function TariffsWorkspace() {
                 <TableCell className="tabular-nums">{t.durationDays} дн.</TableCell>
                 <TableCell className="tabular-nums">
                   {t.lessonsLimit ?? "—"}
+                </TableCell>
+                <TableCell className="tabular-nums">
+                  {t.weeklyFrequency ?? "—"}
                 </TableCell>
                 <TableCell className="tabular-nums">
                   {t.assignedCount ?? 0}
@@ -236,7 +245,7 @@ export function TariffsWorkspace() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Срок, дней</Label>
+                  <Label>Прогноз, дней</Label>
                   <Input
                     required
                     type="number"
@@ -248,18 +257,40 @@ export function TariffsWorkspace() {
                   />
                 </div>
               </div>
-              <div className="space-y-1.5">
-                <Label>Лимит занятий</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={form.lessonsLimit}
-                  onChange={(e) =>
-                    setForm({ ...form, lessonsLimit: e.target.value })
-                  }
-                  placeholder="необязательно"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Занятий в пакете</Label>
+                  <Input
+                    required
+                    type="number"
+                    min={1}
+                    value={form.lessonsLimit}
+                    onChange={(e) =>
+                      setForm({ ...form, lessonsLimit: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Раз в неделю</Label>
+                  <Input
+                    required
+                    type="number"
+                    min={1}
+                    value={form.weeklyFrequency}
+                    onChange={(e) =>
+                      setForm({ ...form, weeklyFrequency: e.target.value })
+                    }
+                  />
+                </div>
               </div>
+              <p className="text-xs text-muted-foreground">
+                Частота и длительность независимы. Ориентир:{" "}
+                {suggestDurationDays(
+                  Number(form.lessonsLimit) || 0,
+                  Number(form.weeklyFrequency) || 1
+                )}{" "}
+                дн. при равномерном графике. Прогноз не сжигает остаток.
+              </p>
               <div className="space-y-1.5">
                 <Label>Что входит</Label>
                 <Textarea

@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev --webpack",
     "dev:local": "next dev --webpack -H 0.0.0.0 -p 43127",
+    "start:local": "tsx scripts/start-local.ts",
+    "start:local:keep": "tsx scripts/start-local.ts --keep",
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",

@@ -1,5 +1,5 @@
 /**
- * Безопасное наполнение локальной БД демонстрационной школой Умба (QA).
+ * Безопасное наполнение локальной БД демонстрационной школой Неодин (QA).
  *
  * Условия запуска:
  * - NODE_ENV !== production
@@ -39,7 +39,10 @@ async function main() {
   try {
     // Быстрая проверка доступности без вывода секретов
     await sql`select 1 as ok`;
-    const stats = await seedSchoolOrganization(db);
+    const encRows = await sql<{ server_encoding: string }[]>`SHOW server_encoding`;
+    const enc = String(encRows[0]?.server_encoding ?? "").toUpperCase();
+    const win1251Safe = enc.includes("WIN125") || enc === "SQL_ASCII";
+    const stats = await seedSchoolOrganization(db, new Date(), { win1251Safe });
     console.log("School QA seed OK.");
     console.log(
       JSON.stringify(

@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 
+import { fromAppWall } from "@/lib/app-time";
 import {
   buildMonthGrid,
   dateKeyLocal,
@@ -25,16 +26,14 @@ describe("tariffs + calendar helpers + unassigned", () => {
   });
 
   it("month grid has 42 cells and local date keys avoid UTC day shift for evening lessons", () => {
-    const anchor = new Date(2026, 2, 1); // March 2026
-    const cells = buildMonthGrid(anchor, new Date(2026, 2, 15));
+    const anchor = fromAppWall(2026, 3, 1, 12, 0);
+    const cells = buildMonthGrid(anchor, fromAppWall(2026, 3, 15, 12, 0));
     expect(cells).toHaveLength(42);
     expect(cells.filter((c) => c.inMonth).length).toBe(31);
 
-    // 20:00 local should stay on the same calendar day key
-    const evening = new Date(2026, 2, 10, 20, 0, 0);
-    expect(parseIsoToLocalDateKey(evening.toISOString())).toBe(
-      dateKeyLocal(evening)
-    );
+    const evening = fromAppWall(2026, 3, 10, 20, 0, 0);
+    expect(parseIsoToLocalDateKey(evening.toISOString())).toBe("2026-03-10");
+    expect(dateKeyLocal(evening)).toBe("2026-03-10");
   });
 
   it("seed has unassigned active students for direkciya alert", async () => {
@@ -95,6 +94,8 @@ describe("tariffs + calendar helpers + unassigned", () => {
       name: "Тест-тариф",
       price: 1000,
       durationDays: 14,
+      lessonsLimit: 8,
+      weeklyFrequency: 2,
       features: ["individual_lessons", "homework"],
     });
     const assigned = await assignTariffToStudent(t.db, dirCtx, {

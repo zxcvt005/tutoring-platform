@@ -20,6 +20,7 @@ const answerSchema = z.object({
 
 const bodySchema = z.object({
   answers: z.array(answerSchema).max(200),
+  attemptNumber: z.union([z.literal(1), z.literal(2)]).optional(),
 });
 
 type Params = { params: Promise<{ id: string }> };
@@ -30,7 +31,13 @@ export async function POST(request: Request, { params }: Params) {
     const { id } = await params;
     const ctx = await requireAuth(request);
     const body = parseBody(bodySchema, await readJsonBody(request));
-    const result = await saveDraft(getDb(), ctx, id, body.answers);
+    const result = await saveDraft(
+      getDb(),
+      ctx,
+      id,
+      body.answers,
+      body.attemptNumber === 2 ? 2 : 1
+    );
     return jsonOk(result);
   } catch (err) {
     return jsonError(err);

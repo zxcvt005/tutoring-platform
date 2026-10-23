@@ -1,16 +1,24 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { randomBytes } from "node:crypto";
 
+import { parseAppInstant } from "@/lib/app-time";
+import { dateKeyLocal } from "@/lib/calendar-month";
 import { newId } from "@/lib/format";
+import {
+  isFinalAttendanceStatus,
+  lessonHasOccurred,
+} from "@/lib/kafedra-today";
+import { LESSON_MARK_CONTENT_ERROR } from "@/lib/lesson-mark-requirements";
 import {
   findStudentScheduleConflict,
   uniqueStudentIds,
 } from "@/lib/schedule";
-import { computeMaxScore, snapshotFromHomework } from "@/lib/tests/helpers";
+import { normalizeGrade } from "@/lib/student-contacts";
+import { computeMaxScore } from "@/lib/tests/helpers";
 import type {
   AttendanceStatus,
   Homework,
   Lesson,
+  LessonTopicLink,
   Student,
   Teacher,
   TestQuestion,
@@ -25,10 +33,9 @@ import {
 } from "@/server/authz/require";
 import { splitQuestions } from "@/server/db/question-split";
 import {
-  assignmentSnapshots,
   attendances,
-  gradeEvents,
   lessonStudents,
+  lessonTopics,
   lessons,
   students,
   teachers,
@@ -39,6 +46,15 @@ import {
   topics,
   users,
 } from "@/server/db/schema";
+import {
+  applyAttendanceBalance,
+  recordScheduleException,
+  reverseLessonDebits,
+} from "@/server/services/lesson-balance";
+import {
+  attendanceEventTitle,
+  recordChatSystemEventSafe,
+} from "@/server/services/chat-events";
 import type { AppDb } from "@/server/db/types";
 import { badRequest, conflict, forbidden, notFound } from "@/server/errors";
 import {
@@ -50,10 +66,6 @@ import type { StudentAnswer } from "@/lib/types";
 
 function num(n?: number | null) {
   return n == null ? null : String(n);
-}
-
-function geId() {
-  return `ge_${randomBytes(8).toString("hex")}`;
 }
 
 async function loadLessonsAsDomain(db: AppDb, orgId: string): Promise<Lesson[]> {
@@ -69,6 +81,7 @@ async function loadLessonsAsDomain(db: AppDb, orgId: string): Promise<Lesson[]> 
     arr.push(x.studentId);
     map.set(x.lessonId, arr);
   }
+  const topicMap = await loadLessonTopicsMap(db, ids);
   return rows.map((l) => ({
     id: l.id,
     teacherId: l.teacherId,
@@ -78,7 +91,136 @@ async function loadLessonsAsDomain(db: AppDb, orgId: string): Promise<Lesson[]> 
     endsAt: l.endsAt.toISOString(),
     status: l.status as Lesson["status"],
     topicId: l.topicId ?? undefined,
+    lessonTopics: topicMap.get(l.id) ?? [],
   }));
+}
+
+export async function loadLessonTopicsMap(
+  db: AppDb,
+  lessonIds: string[]
+): Promise<Map<string, LessonTopicLink[]>> {
+  const map = new Map<string, LessonTopicLink[]>();
+  if (lessonIds.length === 0) return map;
+  const rows = await db
+    .select()
+    .from(lessonTopics)
+    .where(inArray(lessonTopics.lessonId, lessonIds));
+  for (const r of rows) {
+    const list = map.get(r.lessonId) ?? [];
+    list.push({
+      id: r.id,
+      topicId: r.topicId,
+      title: r.title,
+      sortOrder: r.sortOrder,
+    });
+    map.set(r.lessonId, list);
+  }
+  for (const list of map.values()) {
+    list.sort((a, b) => a.sortOrder - b.sortOrder);
+  }
+  return map;
+}
+
+async function writeLessonTopics(
+  db: AppDb,
+  organizationId: string,
+  lessonId: string,
+  items: { topicId?: string | null; title: string }[]
+): Promise<{ saved: LessonTopicLink[]; changed: boolean }> {
+  const previous = await db
+    .select({ title: lessonTopics.title, topicId: lessonTopics.topicId })
+    .from(lessonTopics)
+    .where(eq(lessonTopics.lessonId, lessonId));
+  const prevKey = previous
+    .map((item) => `${item.topicId ?? ""}:${item.title}`)
+    .join("|");
+  const cleaned = items
+    .map((item) => ({
+      topicId: item.topicId?.trim() || null,
+      title: item.title.trim(),
+    }))
+    .filter((item) => item.title.length > 0)
+    .slice(0, 20);
+  await db.delete(lessonTopics).where(eq(lessonTopics.lessonId, lessonId));
+  const saved: LessonTopicLink[] = [];
+  for (let i = 0; i < cleaned.length; i++) {
+    const row = {
+      id: newId("lt"),
+      organizationId,
+      lessonId,
+      topicId: cleaned[i]!.topicId,
+      title: cleaned[i]!.title,
+      sortOrder: i,
+    };
+    await db.insert(lessonTopics).values(row);
+    saved.push({
+      id: row.id,
+      topicId: row.topicId,
+      title: row.title,
+      sortOrder: i,
+    });
+  }
+  const firstCatalog = saved.find((t) => t.topicId)?.topicId ?? null;
+  const firstTitle = saved[0]?.title ?? null;
+  await db
+    .update(lessons)
+    .set({
+      topicId: firstCatalog,
+      subject: firstTitle,
+      updatedAt: new Date(),
+    })
+    .where(eq(lessons.id, lessonId));
+  const nextKey = saved
+    .map((item) => `${item.topicId ?? ""}:${item.title}`)
+    .join("|");
+  return { saved, changed: prevKey !== nextKey };
+}
+
+async function resolveLessonTopicItems(
+  db: AppDb,
+  organizationId: string,
+  teacherId: string,
+  items: { topicId?: string | null; title?: string | null }[]
+): Promise<{ topicId: string | null; title: string }[]> {
+  const out: { topicId: string | null; title: string }[] = [];
+  for (const item of items) {
+    const requestedId = item.topicId?.trim() || "";
+    const title = (item.title ?? "").trim();
+    if (requestedId) {
+      const [topic] = await db
+        .select()
+        .from(topics)
+        .where(eq(topics.id, requestedId))
+        .limit(1);
+      if (
+        !topic ||
+        topic.organizationId !== organizationId ||
+        topic.teacherId !== teacherId
+      ) {
+        throw badRequest("Тема не принадлежит этому преподавателю");
+      }
+      out.push({ topicId: topic.id, title: topic.title });
+    } else if (title) {
+      const [match] = await db
+        .select()
+        .from(topics)
+        .where(
+          and(
+            eq(topics.organizationId, organizationId),
+            eq(topics.teacherId, teacherId),
+            eq(topics.status, "active"),
+            sql`lower(${topics.title}) = ${title.toLowerCase()}`
+          )
+        )
+        .limit(1);
+      if (match) {
+        out.push({ topicId: match.id, title: match.title });
+      } else {
+        out.push({ topicId: null, title });
+      }
+    }
+  }
+  return out;
 }
 
 export async function upsertTeacher(
@@ -197,7 +339,12 @@ export async function upsertStudent(
   ctx: AuthContext,
   student: Omit<Student, "id"> & { id?: string }
 ) {
-  // Ученик — только свои контакты и заметки; имя/преподавателя не меняет
+  const grade = normalizeGrade(student.grade);
+  const telegram =
+    student.telegram != null ? student.telegram.trim() || null : null;
+  const phone = student.phone != null ? student.phone.trim() || null : null;
+
+  // Ученик — только личные контакты; имя/класс/преподавателя/заметки не меняет
   if (ctx.role === "student") {
     const sid = await requireStudentProfile(ctx);
     if (student.id && student.id !== sid) throw forbidden();
@@ -212,8 +359,9 @@ export async function upsertStudent(
     await db
       .update(students)
       .set({
-        contacts: student.contacts ?? null,
-        notes: student.notes ?? null,
+        telegram:
+          student.telegram !== undefined ? telegram : existing.telegram,
+        phone: student.phone !== undefined ? phone : existing.phone,
         updatedAt: new Date(),
       })
       .where(eq(students.id, sid));
@@ -228,11 +376,19 @@ export async function upsertStudent(
     student = { ...student, teacherId: tid };
   }
   const existing = await db.select().from(students).where(eq(students.id, id)).limit(1);
+  const parentContacts =
+    student.parentContacts != null
+      ? student.parentContacts.trim() || null
+      : null;
   const values = {
     id,
     organizationId: ctx.organizationId,
     fullName: student.fullName,
+    grade,
     contacts: student.contacts ?? null,
+    telegram,
+    phone,
+    parentContacts,
     status: student.status,
     primaryTeacherId: student.teacherId || null,
     notes: student.notes ?? null,
@@ -282,7 +438,12 @@ export async function upsertLesson(
     if (lesson.teacherId !== tid) throw forbidden();
   }
   const studentIds = uniqueStudentIds(lesson.studentIds);
-  if (studentIds.length === 0) throw badRequest("Добавьте хотя бы одного ученика");
+  if (studentIds.length === 0) throw badRequest("Выберите ученика");
+  if (studentIds.length > 1) {
+    throw badRequest(
+      "Занятие может быть только с одним учеником. Для параллельных уроков создайте отдельные записи."
+    );
+  }
   if (new Date(lesson.endsAt) <= new Date(lesson.startsAt)) {
     throw badRequest("Конец занятия должен быть позже начала");
   }
@@ -306,7 +467,18 @@ export async function upsertLesson(
     throw conflict("Конфликт расписания у ученика");
   }
 
-  const values = {
+  const values: {
+    id: string;
+    organizationId: string;
+    teacherId: string;
+    topicId: string | null;
+    subject: string | null;
+    startsAt: Date;
+    endsAt: Date;
+    status: Lesson["status"];
+    scheduleOccurrenceKey?: string | null;
+    updatedAt: Date;
+  } = {
     id,
     organizationId: ctx.organizationId,
     teacherId: lesson.teacherId,
@@ -319,8 +491,33 @@ export async function upsertLesson(
   };
   if (existing) {
     if (existing.organizationId !== ctx.organizationId) throw forbidden();
-    // Не переписываем историю: done/cancelled оставляем как есть при смене времени только если явно редактируют
+    if (existing.scheduleId && existing.scheduleOccurrenceKey) {
+      const newKey = dateKeyLocal(new Date(lesson.startsAt));
+      if (newKey !== existing.scheduleOccurrenceKey) {
+        await recordScheduleException(db, {
+          scheduleId: existing.scheduleId,
+          occurrenceKey: existing.scheduleOccurrenceKey,
+          reason: "moved",
+          lessonId: existing.id,
+        });
+        values.scheduleOccurrenceKey = newKey;
+      }
+    }
+    if (lesson.status === "cancelled" && existing.status !== "cancelled") {
+      await reverseLessonDebits(db, ctx, id);
+      if (existing.scheduleId && existing.scheduleOccurrenceKey) {
+        await recordScheduleException(db, {
+          scheduleId: existing.scheduleId,
+          occurrenceKey: existing.scheduleOccurrenceKey,
+          reason: "cancelled",
+          lessonId: existing.id,
+        });
+      }
+    }
     await db.update(lessons).set(values).where(eq(lessons.id, id));
+    if (lesson.status === "cancelled" && existing.status !== "cancelled") {
+      await emitLessonCancelled(db, existing);
+    }
     await db.delete(lessonStudents).where(eq(lessonStudents.lessonId, id));
   } else {
     await db.insert(lessons).values({ ...values, createdAt: new Date() });
@@ -349,6 +546,7 @@ export async function createRecurringScheduleAction(
     durationMin: Number(payload.durationMin ?? 60),
     subject: payload.subject as string | undefined,
     activeFrom: payload.activeFrom as string | undefined,
+    activeUntil: payload.activeUntil as string | undefined,
   });
 }
 
@@ -357,102 +555,78 @@ export async function deleteLesson(db: AppDb, ctx: AuthContext, id: string) {
   const [row] = await db.select().from(lessons).where(eq(lessons.id, id)).limit(1);
   if (!row || row.organizationId !== ctx.organizationId) throw notFound();
   if (ctx.role === "teacher" && row.teacherId !== ctx.teacherId) throw forbidden();
+
+  if (row.scheduleId && row.scheduleOccurrenceKey) {
+    await recordScheduleException(db, {
+      scheduleId: row.scheduleId,
+      occurrenceKey: row.scheduleOccurrenceKey,
+      reason: "deleted",
+      lessonId: row.id,
+    });
+  }
+
+  await reverseLessonDebits(db, ctx, id);
+
+  const [att] = await db
+    .select({ lessonId: attendances.lessonId })
+    .from(attendances)
+    .where(eq(attendances.lessonId, id))
+    .limit(1);
+
+  if (att || row.status === "done") {
+    await db
+      .update(lessons)
+      .set({ status: "cancelled", updatedAt: new Date() })
+      .where(eq(lessons.id, id));
+    await emitLessonCancelled(db, row);
+    return { ok: true, cancelled: true };
+  }
+
   await db.delete(lessons).where(eq(lessons.id, id));
   return { ok: true };
 }
 
-export async function completeLesson(
-  db: AppDb,
-  ctx: AuthContext,
-  input: {
-    lessonId: string;
-    topicId: string;
-    attendances: { studentId: string; status: AttendanceStatus }[];
-    homeworkAssign?: {
-      homeworkId: string;
-      studentIds: string[];
-      dueAt?: string;
-    };
-  }
-) {
-  requireRoles(ctx, ["director", "teacher"]);
-  const [lesson] = await db
-    .select()
-    .from(lessons)
-    .where(eq(lessons.id, input.lessonId))
+const MARKABLE_ATTENDANCE = new Set<AttendanceStatus>([
+  "present",
+  "absent_excused",
+  "absent_unexcused",
+]);
+
+async function lessonHasSavedTopics(db: AppDb, lessonId: string) {
+  const [row] = await db
+    .select({ id: lessonTopics.id })
+    .from(lessonTopics)
+    .where(eq(lessonTopics.lessonId, lessonId))
     .limit(1);
-  if (!lesson || lesson.organizationId !== ctx.organizationId) throw notFound();
-  if (ctx.role === "teacher" && lesson.teacherId !== ctx.teacherId) {
-    throw forbidden();
-  }
-  const [topic] = await db.select().from(topics).where(eq(topics.id, input.topicId)).limit(1);
-  if (!topic || topic.teacherId !== lesson.teacherId) {
-    throw badRequest("Тема не принадлежит этому преподавателю");
-  }
-  const participants = await db
-    .select()
-    .from(lessonStudents)
-    .where(eq(lessonStudents.lessonId, input.lessonId));
-  const participantIds = participants.map((p) => p.studentId);
-  if (participantIds.length === 0) throw badRequest("У занятия нет учеников");
-  const byStudent = new Map(input.attendances.map((a) => [a.studentId, a.status]));
-  for (const sid of participantIds) {
-    if (!byStudent.has(sid)) throw badRequest("Укажите посещаемость для всех участников");
-  }
-
-  await db
-    .update(lessons)
-    .set({
-      status: "done",
-      topicId: input.topicId,
-      updatedAt: new Date(),
-    })
-    .where(eq(lessons.id, input.lessonId));
-
-  await db.delete(attendances).where(eq(attendances.lessonId, input.lessonId));
-  await db.insert(attendances).values(
-    participantIds.map((studentId) => ({
-      lessonId: input.lessonId,
-      studentId,
-      status: byStudent.get(studentId)!,
-    }))
-  );
-
-  let assignedCount = 0;
-  if (input.homeworkAssign?.homeworkId) {
-    const result = await assignHomework(db, ctx, {
-      homeworkId: input.homeworkAssign.homeworkId,
-      topicId: input.topicId,
-      teacherId: lesson.teacherId,
-      studentIds: input.homeworkAssign.studentIds,
-      lessonId: input.lessonId,
-      dueAt: input.homeworkAssign.dueAt,
-    });
-    assignedCount = result.created;
-  }
-  return { ok: true, assignedCount };
+  return Boolean(row);
 }
 
-export async function setAttendance(
+async function assertOccurredLessonMarkContent(
   db: AppDb,
-  ctx: AuthContext,
+  lesson: { id: string; startsAt: Date },
+  previous: AttendanceStatus | null,
+  extras?: { hasTopics?: boolean }
+) {
+  if (isFinalAttendanceStatus(previous)) return;
+  if (!lessonHasOccurred({ startsAt: lesson.startsAt.toISOString() })) return;
+  const hasTopics =
+    extras?.hasTopics || (await lessonHasSavedTopics(db, lesson.id));
+  if (!hasTopics) {
+    throw badRequest(LESSON_MARK_CONTENT_ERROR);
+  }
+}
+
+async function writeAttendanceRow(
+  db: AppDb,
   lessonId: string,
   studentId: string,
   status: AttendanceStatus
-) {
-  requireRoles(ctx, ["director", "teacher"]);
-  const [lesson] = await db.select().from(lessons).where(eq(lessons.id, lessonId)).limit(1);
-  if (!lesson || lesson.organizationId !== ctx.organizationId) throw notFound();
-  if (ctx.role === "teacher" && lesson.teacherId !== ctx.teacherId) throw forbidden();
-
+): Promise<{ previous: AttendanceStatus | null }> {
   const [existing] = await db
     .select()
     .from(attendances)
     .where(
-      and(
-        eq(attendances.lessonId, lessonId),
-        eq(attendances.studentId, studentId)
-      )
+      and(eq(attendances.lessonId, lessonId), eq(attendances.studentId, studentId))
     )
     .limit(1);
   if (existing) {
@@ -465,15 +639,490 @@ export async function setAttendance(
           eq(attendances.studentId, studentId)
         )
       );
-  } else {
-    await db.insert(attendances).values({
-      lessonId,
-      studentId,
-      status,
-      updatedAt: new Date(),
+    return { previous: existing.status as AttendanceStatus };
+  }
+  await db.insert(attendances).values({
+    lessonId,
+    studentId,
+    status,
+    updatedAt: new Date(),
+  });
+  return { previous: null };
+}
+
+async function maybeMarkLessonDone(db: AppDb, lessonId: string): Promise<boolean> {
+  const [lesson] = await db
+    .select()
+    .from(lessons)
+    .where(eq(lessons.id, lessonId))
+    .limit(1);
+  if (!lesson || lesson.status === "cancelled" || lesson.status === "done") {
+    return false;
+  }
+  const participants = await db
+    .select()
+    .from(lessonStudents)
+    .where(eq(lessonStudents.lessonId, lessonId));
+  if (participants.length === 0) return false;
+  const att = await db
+    .select()
+    .from(attendances)
+    .where(eq(attendances.lessonId, lessonId));
+  const marked = new Set(att.map((a) => a.studentId));
+  if (participants.every((p) => marked.has(p.studentId))) {
+    await db
+      .update(lessons)
+      .set({ status: "done", updatedAt: new Date() })
+      .where(eq(lessons.id, lessonId));
+    return true;
+  }
+  return false;
+}
+
+async function emitLessonConducted(
+  db: AppDb,
+  lesson: { id: string; organizationId: string; teacherId: string }
+) {
+  const participants = await db
+    .select({ studentId: lessonStudents.studentId })
+    .from(lessonStudents)
+    .where(eq(lessonStudents.lessonId, lesson.id));
+  for (const p of participants) {
+    await recordChatSystemEventSafe(db, {
+      organizationId: lesson.organizationId,
+      studentId: p.studentId,
+      teacherId: lesson.teacherId,
+      eventType: "lesson_conducted",
+      eventKey: `lesson_conducted:${lesson.id}:${p.studentId}`,
+      title: "Занятие проведено",
+      lessonId: lesson.id,
     });
   }
-  return { ok: true };
+}
+
+async function emitLessonCancelled(
+  db: AppDb,
+  lesson: { id: string; organizationId: string; teacherId: string }
+) {
+  const participants = await db
+    .select({ studentId: lessonStudents.studentId })
+    .from(lessonStudents)
+    .where(eq(lessonStudents.lessonId, lesson.id));
+  for (const p of participants) {
+    await recordChatSystemEventSafe(db, {
+      organizationId: lesson.organizationId,
+      studentId: p.studentId,
+      teacherId: lesson.teacherId,
+      eventType: "lesson_cancelled",
+      eventKey: `lesson_cancelled:${lesson.id}:${p.studentId}`,
+      title: "Занятие отменено преподавателем",
+      lessonId: lesson.id,
+    });
+  }
+}
+
+async function emitAttendanceSaved(
+  db: AppDb,
+  lesson: { id: string; organizationId: string; teacherId: string },
+  studentId: string,
+  status: AttendanceStatus
+) {
+  await recordChatSystemEventSafe(db, {
+    organizationId: lesson.organizationId,
+    studentId,
+    teacherId: lesson.teacherId,
+    eventType: "attendance_saved",
+    eventKey: `attendance:${lesson.id}:${studentId}:${status}`,
+    title: attendanceEventTitle(status),
+    lessonId: lesson.id,
+    attendanceStatus: status,
+  });
+}
+
+async function emitTopicSet(
+  db: AppDb,
+  lesson: { id: string; organizationId: string; teacherId: string },
+  titles: string[]
+) {
+  if (titles.length === 0) return;
+  const title = titles[0]!;
+  const fingerprint = titles.join("|");
+  const participants = await db
+    .select({ studentId: lessonStudents.studentId })
+    .from(lessonStudents)
+    .where(eq(lessonStudents.lessonId, lesson.id));
+  for (const p of participants) {
+    await recordChatSystemEventSafe(db, {
+      organizationId: lesson.organizationId,
+      studentId: p.studentId,
+      teacherId: lesson.teacherId,
+      eventType: "topic_set",
+      eventKey: `topic:${lesson.id}:${p.studentId}:${fingerprint}`,
+      title: `Тема занятия: ${title}`,
+      lessonId: lesson.id,
+      topicTitle: title,
+    });
+  }
+}
+
+export async function completeLesson(
+  db: AppDb,
+  ctx: AuthContext,
+  input: {
+    lessonId: string;
+    topicId?: string;
+    topics?: { topicId?: string | null; title?: string | null }[];
+    attendances?: { studentId: string; status: AttendanceStatus }[];
+    homeworkAssign?: {
+      homeworkId: string;
+      studentIds: string[];
+      dueAt?: string;
+    };
+    homeworkAssigns?: {
+      homeworkId: string;
+      studentIds: string[];
+      dueAt?: string;
+    }[];
+  }
+) {
+  requireRoles(ctx, ["director", "teacher"]);
+  const [lesson] = await db
+    .select()
+    .from(lessons)
+    .where(eq(lessons.id, input.lessonId))
+    .limit(1);
+  if (!lesson || lesson.organizationId !== ctx.organizationId) throw notFound();
+  if (ctx.role === "teacher" && lesson.teacherId !== ctx.teacherId) {
+    throw forbidden();
+  }
+  if (lesson.status === "cancelled") {
+    throw badRequest("Нельзя отметить посещаемость у отменённого занятия");
+  }
+
+  const topicId = input.topicId?.trim() || "";
+  if (topicId) {
+    const [topic] = await db
+      .select()
+      .from(topics)
+      .where(eq(topics.id, topicId))
+      .limit(1);
+    if (!topic || topic.teacherId !== lesson.teacherId) {
+      throw badRequest("Тема не принадлежит этому преподавателю");
+    }
+  }
+
+  const participants = await db
+    .select()
+    .from(lessonStudents)
+    .where(eq(lessonStudents.lessonId, input.lessonId));
+  const participantIds = participants.map((p) => p.studentId);
+  if (participantIds.length === 0) throw badRequest("У занятия нет учеников");
+  const participantSet = new Set(participantIds);
+  const byStudent = new Map(
+    (input.attendances ?? []).map((a) => [a.studentId, a.status])
+  );
+  for (const [sid, status] of byStudent) {
+    if (!participantSet.has(sid)) {
+      throw badRequest("Ученик не участвует в занятии");
+    }
+    if (!MARKABLE_ATTENDANCE.has(status)) {
+      throw badRequest("Некорректный статус посещаемости");
+    }
+  }
+
+  const homeworkAssigns =
+    input.homeworkAssigns ??
+    (input.homeworkAssign?.homeworkId ? [input.homeworkAssign] : []);
+  const willWriteTopics = Boolean(
+    input.topicId?.trim() ||
+      (input.topics ?? []).some(
+        (item) => Boolean(item.topicId?.trim()) || Boolean(item.title?.trim())
+      )
+  );
+
+  for (const studentId of byStudent.keys()) {
+    const [existing] = await db
+      .select()
+      .from(attendances)
+      .where(
+        and(
+          eq(attendances.lessonId, input.lessonId),
+          eq(attendances.studentId, studentId)
+        )
+      )
+      .limit(1);
+    await assertOccurredLessonMarkContent(
+      db,
+      lesson,
+      (existing?.status as AttendanceStatus | undefined) ?? null,
+      { hasTopics: willWriteTopics }
+    );
+  }
+
+  if (input.topics) {
+    const items = await resolveLessonTopicItems(
+      db,
+      ctx.organizationId,
+      lesson.teacherId,
+      input.topics
+    );
+    const written = await writeLessonTopics(
+      db,
+      ctx.organizationId,
+      input.lessonId,
+      items
+    );
+    if (written.changed) {
+      await emitTopicSet(
+        db,
+        lesson,
+        written.saved.map((item) => item.title)
+      );
+    }
+  } else if (topicId) {
+    const [topic] = await db
+      .select()
+      .from(topics)
+      .where(eq(topics.id, topicId))
+      .limit(1);
+    const written = await writeLessonTopics(
+      db,
+      ctx.organizationId,
+      input.lessonId,
+      [{ topicId, title: topic?.title ?? "Тема" }]
+    );
+    if (written.changed) {
+      await emitTopicSet(
+        db,
+        lesson,
+        written.saved.map((item) => item.title)
+      );
+    }
+  }
+
+  for (const [studentId, status] of byStudent) {
+    const { previous } = await writeAttendanceRow(
+      db,
+      input.lessonId,
+      studentId,
+      status
+    );
+    await applyAttendanceBalance(db, ctx, {
+      lessonId: input.lessonId,
+      studentId,
+      attendanceStatus: status,
+      lessonCancelled: false,
+    });
+    if (previous !== status) {
+      await emitAttendanceSaved(db, lesson, studentId, status);
+    }
+  }
+  const becameDone = await maybeMarkLessonDone(db, input.lessonId);
+  if (becameDone) {
+    await emitLessonConducted(db, lesson);
+  }
+
+  let assignedCount = 0;
+  for (const assign of homeworkAssigns) {
+    if (!assign.homeworkId) continue;
+    const result = await assignHomework(db, ctx, {
+      homeworkId: assign.homeworkId,
+      topicId: topicId || undefined,
+      teacherId: lesson.teacherId,
+      studentIds: assign.studentIds,
+      lessonId: input.lessonId,
+      dueAt: assign.dueAt,
+    });
+    assignedCount += result.created;
+  }
+  return { ok: true, assignedCount };
+}
+
+export async function setAttendance(
+  db: AppDb,
+  ctx: AuthContext,
+  lessonId: string,
+  studentId: string,
+  status: AttendanceStatus
+) {
+  requireRoles(ctx, ["director", "teacher"]);
+  if (!MARKABLE_ATTENDANCE.has(status)) {
+    throw badRequest("Некорректный статус посещаемости");
+  }
+  const [lesson] = await db.select().from(lessons).where(eq(lessons.id, lessonId)).limit(1);
+  if (!lesson || lesson.organizationId !== ctx.organizationId) throw notFound();
+  if (ctx.role === "teacher" && lesson.teacherId !== ctx.teacherId) throw forbidden();
+  if (lesson.status === "cancelled") {
+    throw badRequest("Нельзя отметить посещаемость у отменённого занятия");
+  }
+
+  const [participant] = await db
+    .select()
+    .from(lessonStudents)
+    .where(
+      and(
+        eq(lessonStudents.lessonId, lessonId),
+        eq(lessonStudents.studentId, studentId)
+      )
+    )
+    .limit(1);
+  if (!participant) throw badRequest("Ученик не участвует в занятии");
+
+  const [existing] = await db
+    .select()
+    .from(attendances)
+    .where(
+      and(eq(attendances.lessonId, lessonId), eq(attendances.studentId, studentId))
+    )
+    .limit(1);
+  await assertOccurredLessonMarkContent(
+    db,
+    lesson,
+    (existing?.status as AttendanceStatus | undefined) ?? null
+  );
+
+  const { previous } = await writeAttendanceRow(db, lessonId, studentId, status);
+  const balance = await applyAttendanceBalance(db, ctx, {
+    lessonId,
+    studentId,
+    attendanceStatus: status,
+    lessonCancelled: false,
+  });
+  const becameDone = await maybeMarkLessonDone(db, lessonId);
+  if (previous !== status) {
+    await emitAttendanceSaved(db, lesson, studentId, status);
+  }
+  if (becameDone) {
+    await emitLessonConducted(db, lesson);
+  }
+  return {
+    ok: true,
+    remaining: balance?.remaining ?? null,
+    used: balance?.used ?? null,
+  };
+}
+
+export async function setLessonTopic(
+  db: AppDb,
+  ctx: AuthContext,
+  input: {
+    lessonId: string;
+    topicId?: string | null;
+    title?: string | null;
+  }
+) {
+  requireRoles(ctx, ["director", "teacher"]);
+  const [lesson] = await db
+    .select()
+    .from(lessons)
+    .where(eq(lessons.id, input.lessonId))
+    .limit(1);
+  if (!lesson || lesson.organizationId !== ctx.organizationId) throw notFound();
+  if (ctx.role === "teacher" && lesson.teacherId !== ctx.teacherId) {
+    throw forbidden();
+  }
+
+  let topicId: string | null = null;
+  let subject: string | null = lesson.subject;
+
+  const requestedId = input.topicId?.trim() || "";
+  const title = (input.title ?? "").trim();
+
+  if (requestedId) {
+    const [topic] = await db
+      .select()
+      .from(topics)
+      .where(eq(topics.id, requestedId))
+      .limit(1);
+    if (
+      !topic ||
+      topic.organizationId !== ctx.organizationId ||
+      topic.teacherId !== lesson.teacherId
+    ) {
+      throw badRequest("Тема не принадлежит этому преподавателю");
+    }
+    topicId = topic.id;
+    subject = topic.title;
+  } else if (title) {
+    const [match] = await db
+      .select()
+      .from(topics)
+      .where(
+        and(
+          eq(topics.organizationId, ctx.organizationId),
+          eq(topics.teacherId, lesson.teacherId),
+          eq(topics.status, "active"),
+          sql`lower(${topics.title}) = ${title.toLowerCase()}`
+        )
+      )
+      .limit(1);
+    if (match) {
+      topicId = match.id;
+      subject = match.title;
+    } else {
+      topicId = null;
+      subject = title;
+    }
+  } else {
+    topicId = null;
+  }
+
+  const written = await writeLessonTopics(
+    db,
+    ctx.organizationId,
+    lesson.id,
+    topicId || subject
+      ? [{ topicId, title: subject || "Тема" }]
+      : []
+  );
+  if (written.changed) {
+    await emitTopicSet(
+      db,
+      lesson,
+      written.saved.map((item) => item.title)
+    );
+  }
+  return { ok: true, topicId, subject };
+}
+
+export async function setLessonTopics(
+  db: AppDb,
+  ctx: AuthContext,
+  input: {
+    lessonId: string;
+    topics: { topicId?: string | null; title?: string | null }[];
+  }
+) {
+  requireRoles(ctx, ["director", "teacher"]);
+  const [lesson] = await db
+    .select()
+    .from(lessons)
+    .where(eq(lessons.id, input.lessonId))
+    .limit(1);
+  if (!lesson || lesson.organizationId !== ctx.organizationId) throw notFound();
+  if (ctx.role === "teacher" && lesson.teacherId !== ctx.teacherId) {
+    throw forbidden();
+  }
+  const items = await resolveLessonTopicItems(
+    db,
+    ctx.organizationId,
+    lesson.teacherId,
+    input.topics
+  );
+  const written = await writeLessonTopics(
+    db,
+    ctx.organizationId,
+    lesson.id,
+    items
+  );
+  if (written.changed) {
+    await emitTopicSet(
+      db,
+      lesson,
+      written.saved.map((item) => item.title)
+    );
+  }
+  return { ok: true, topics: written.saved };
 }
 
 export async function upsertTopicSection(
@@ -594,6 +1243,11 @@ export async function upsertTopic(
     const tid = await requireTeacherProfile(ctx);
     if (topic.teacherId !== tid) throw forbidden();
   }
+  const title = topic.title.trim();
+  if (!title) throw badRequest("Укажите название темы");
+  const description = (topic.description ?? "").trim();
+  if (!description) throw badRequest("Укажите описание темы");
+  const subject = (topic.subject ?? "").trim() || "Предмет";
   const id = topic.id ?? newId("tp");
   const sectionId = topic.sectionId === undefined ? null : topic.sectionId;
   const siblings = await db
@@ -620,10 +1274,13 @@ export async function upsertTopic(
     organizationId: ctx.organizationId,
     teacherId: topic.teacherId,
     sectionId,
-    title: topic.title,
-    subject: topic.subject,
-    description: topic.description ?? null,
-    programNote: topic.programNote ?? null,
+    title,
+    subject,
+    description,
+    programNote:
+      topic.programNote !== undefined
+        ? topic.programNote ?? null
+        : existing?.programNote ?? null,
     status: topic.status,
     sortOrder,
     updatedAt: new Date(),
@@ -723,14 +1380,17 @@ export async function upsertHomework(
   const maxScore = computeMaxScore(questions) || hw.maxScore;
 
   const [existing] = await db.select().from(tests).where(eq(tests.id, id)).limit(1);
+  const purpose = hw.purpose ?? existing?.purpose ?? "homework";
   const values = {
     id,
     organizationId: ctx.organizationId,
-    topicId: hw.topicId,
+    topicId: hw.topicId || null,
+    sectionId: hw.sectionId ?? null,
     teacherId: hw.teacherId,
     title: hw.title,
     description: hw.description ?? null,
     status: hw.status,
+    purpose,
     maxScore: num(maxScore),
     questionsPublic: publicQuestions,
     updatedAt: new Date(),
@@ -790,7 +1450,7 @@ export async function assignHomework(
   ctx: AuthContext,
   input: {
     homeworkId: string;
-    topicId: string;
+    topicId?: string | null;
     teacherId: string;
     studentIds: string[];
     lessonId?: string;
@@ -810,43 +1470,12 @@ export async function assignHomework(
   if (!hw || hw.organizationId !== ctx.organizationId) throw notFound("Тест не найден");
   if (hw.status !== "published") throw badRequest("Назначить можно только опубликованный тест");
 
-  const keys = await db
-    .select()
-    .from(testAnswerKeys)
-    .where(eq(testAnswerKeys.testId, hw.id));
-  const answerKeys = Object.fromEntries(keys.map((k) => [k.questionId, k.payload]));
-  const questions = (hw.questionsPublic as TestQuestion[]) ?? [];
-  if (!questions.length) throw badRequest("В тесте нет заданий");
-
-  const fullForSnapshot: Homework = {
-    id: hw.id,
-    topicId: hw.topicId,
-    teacherId: hw.teacherId,
-    title: hw.title,
-    description: hw.description ?? undefined,
-    status: hw.status as Homework["status"],
-    questions: questions.map((q) => {
-      const k = answerKeys[q.id] as {
-        correctOptionIds?: string[];
-        correctAnswers?: string[];
-        numericTolerance?: number;
-      } | undefined;
-      return {
-        ...q,
-        correctOptionIds: k?.correctOptionIds,
-        correctAnswers: k?.correctAnswers,
-        numericTolerance: k?.numericTolerance,
-      };
-    }),
-    maxScore: hw.maxScore != null ? Number(hw.maxScore) : undefined,
-  };
-  const snapshot = snapshotFromHomework(fullForSnapshot);
-  const { publicQuestions, answerKeys: snapKeys } = splitQuestions(
-    snapshot.questions
-  );
-
   const studentIds = [...new Set(input.studentIds.filter(Boolean))];
   if (!studentIds.length) throw badRequest("Выберите учеников");
+
+  const { createTestAssignmentWithSnapshot } = await import(
+    "@/server/services/test-assignment-create"
+  );
 
   let created = 0;
   for (const studentId of studentIds) {
@@ -874,46 +1503,44 @@ export async function assignHomework(
             inArray(testAssignments.status, [
               "assigned",
               "in_progress",
+              "remaining_questions",
+              "attempt1_submitted",
+              "attempt2_in_progress",
               "overdue",
             ])
           )
         )
         .limit(1);
-      if (active[0] && !active[0].lessonId) continue;
+      if (active[0] && !active[0].lessonId && active[0].sourceKind !== "theory") {
+        continue;
+      }
     }
 
+    const dueAt = input.dueAt ? parseAppInstant(input.dueAt) : null;
     let status: "assigned" | "overdue" = "assigned";
-    if (input.dueAt && new Date(input.dueAt).getTime() < Date.now()) {
+    if (dueAt && dueAt.getTime() < Date.now()) {
       status = "overdue";
     }
-    const assignmentId = newId("ha");
-    await db.insert(testAssignments).values({
-      id: assignmentId,
-      organizationId: ctx.organizationId,
+    const assignmentId = await createTestAssignmentWithSnapshot(db, ctx, {
       testId: input.homeworkId,
-      topicId: input.topicId,
       teacherId: input.teacherId,
       studentId,
+      sourceKind: "homework",
+      topicId: input.topicId || hw.topicId || null,
       lessonId: input.lessonId ?? null,
-      dueAt: input.dueAt ? new Date(input.dueAt) : null,
+      dueAt,
       status,
-      maxScore: num(snapshot.maxScore),
     });
-    await db.insert(assignmentSnapshots).values({
-      assignmentId,
-      title: snapshot.title,
-      description: snapshot.description ?? null,
-      questions: publicQuestions,
-      maxScore: num(snapshot.maxScore)!,
-      answerKeys: snapKeys,
-    });
-    await db.insert(gradeEvents).values({
-      id: geId(),
+    await recordChatSystemEventSafe(db, {
       organizationId: ctx.organizationId,
+      studentId,
+      teacherId: input.teacherId,
+      eventType: "homework_assigned",
+      eventKey: `homework_assigned:${assignmentId}`,
+      title: `Назначено домашнее задание: ${hw.title}`,
       assignmentId,
-      eventType: "assigned",
-      actorUserId: ctx.userId,
-      payload: { source: "assignHomework" },
+      homeworkTitle: hw.title,
+      lessonId: input.lessonId ?? null,
     });
     created += 1;
   }
@@ -933,36 +1560,60 @@ export async function deleteHomeworkAssignment(
     .limit(1);
   if (!row || row.organizationId !== ctx.organizationId) throw notFound();
   if (ctx.role === "teacher" && row.teacherId !== ctx.teacherId) throw forbidden();
+  if (row.status !== "assigned") {
+    throw conflict(
+      "Нельзя снять задание после начала выполнения — история назначения сохраняется"
+    );
+  }
   await db.delete(testAssignments).where(eq(testAssignments.id, id));
   return { ok: true };
+}
+
+async function assertHomeworkOrTheoryTestAccess(
+  db: AppDb,
+  ctx: AuthContext,
+  assignmentId: string
+) {
+  const sid = await requireStudentProfile(ctx);
+  const assignment = await db
+    .select({
+      sourceKind: testAssignments.sourceKind,
+      studentId: testAssignments.studentId,
+    })
+    .from(testAssignments)
+    .where(eq(testAssignments.id, assignmentId))
+    .limit(1);
+  const row = assignment[0];
+  if (row?.sourceKind === "theory") {
+    if (row.studentId !== sid) throw forbidden();
+    return;
+  }
+  const { assertStudentLearningAccess } = await import(
+    "@/server/services/learning-access"
+  );
+  await assertStudentLearningAccess(db, ctx, sid, "homework");
 }
 
 export async function saveHomeworkDraftAction(
   db: AppDb,
   ctx: AuthContext,
   id: string,
-  answers: StudentAnswer[]
+  answers: StudentAnswer[],
+  attemptNumber: 1 | 2 = 1
 ) {
-  const sid = await requireStudentProfile(ctx);
-  const { assertStudentLearningAccess } = await import(
-    "@/server/services/learning-access"
-  );
-  await assertStudentLearningAccess(db, ctx, sid, "homework");
-  return saveDraft(db, ctx, id, answers);
+  await assertHomeworkOrTheoryTestAccess(db, ctx, id);
+  return saveDraft(db, ctx, id, answers, attemptNumber);
 }
 
 export async function submitHomeworkAction(
   db: AppDb,
   ctx: AuthContext,
   id: string,
-  answers: StudentAnswer[]
+  answers: StudentAnswer[],
+  attemptNumber: 1 | 2 = 1
 ) {
-  const sid = await requireStudentProfile(ctx);
-  const { assertStudentLearningAccess } = await import(
-    "@/server/services/learning-access"
-  );
-  await assertStudentLearningAccess(db, ctx, sid, "homework");
-  return submitAssignment(db, ctx, id, answers);
+  await assertHomeworkOrTheoryTestAccess(db, ctx, id);
+  return submitAssignment(db, ctx, id, answers, attemptNumber);
 }
 
 export async function reviewHomeworkAction(
@@ -993,6 +1644,10 @@ export async function upsertTariffAction(
     durationDays: Number(payload.durationDays),
     lessonsLimit:
       payload.lessonsLimit == null ? null : Number(payload.lessonsLimit),
+    weeklyFrequency:
+      payload.weeklyFrequency == null
+        ? undefined
+        : Number(payload.weeklyFrequency),
     includesText: (payload.includesText as string) ?? null,
     features: payload.features as string[] | undefined,
     status: payload.status as "active" | "archived" | undefined,
@@ -1050,6 +1705,75 @@ export async function studentPayAction(
   return studentRequestPayment(db, ctx, assignmentId);
 }
 
+export async function getIncomeOverviewAction(db: AppDb, ctx: AuthContext) {
+  const { getIncomeOverview } = await import(
+    "@/server/services/income-service"
+  );
+  return getIncomeOverview(db, ctx);
+}
+
+export async function upsertTheoryAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { upsertTheory } = await import("@/server/services/theory-service");
+  return upsertTheory(db, ctx, {
+    id: payload.id ? String(payload.id) : undefined,
+    teacherId: String(payload.teacherId ?? ""),
+    title: String(payload.title ?? ""),
+    description: (payload.description as string | null | undefined) ?? null,
+    videoUrl: (payload.videoUrl as string | null | undefined) ?? null,
+    testId: (payload.testId as string | null | undefined) ?? null,
+    status: payload.status as "draft" | "published" | "archived" | undefined,
+    publish: Boolean(payload.publish),
+  });
+}
+
+export async function deleteTheoryAction(
+  db: AppDb,
+  ctx: AuthContext,
+  id: string
+) {
+  const { deleteTheory } = await import("@/server/services/theory-service");
+  return deleteTheory(db, ctx, id);
+}
+
+export async function assignTheoryAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { assignTheory } = await import("@/server/services/theory-service");
+  return assignTheory(db, ctx, {
+    materialId: String(payload.materialId ?? ""),
+    studentIds: Array.isArray(payload.studentIds)
+      ? payload.studentIds.map((id) => String(id))
+      : [],
+  });
+}
+
+export async function markTheoryViewedAction(
+  db: AppDb,
+  ctx: AuthContext,
+  id: string
+) {
+  const { markTheoryViewed } = await import("@/server/services/theory-service");
+  return markTheoryViewed(db, ctx, id);
+}
+
+export async function removeTheoryFileAction(
+  db: AppDb,
+  ctx: AuthContext,
+  materialId: string,
+  fileId: string
+) {
+  const { removeTheoryDraftFile } = await import(
+    "@/server/services/theory-service"
+  );
+  return removeTheoryDraftFile(db, ctx, materialId, fileId);
+}
+
 /** Dispatch table for /api/platform */
 export const platformActions = {
   upsertTeacher,
@@ -1061,6 +1785,8 @@ export const platformActions = {
   deleteLesson,
   completeLesson,
   setAttendance,
+  setLessonTopic,
+  setLessonTopics,
   upsertTopicSection,
   deleteTopicSection,
   reorderTopicSections,
@@ -1081,6 +1807,12 @@ export const platformActions = {
   assignTariff: assignTariffAction,
   adminMarkPaymentPaid: adminMarkPaidAction,
   studentRequestPayment: studentPayAction,
+  getIncomeOverview: getIncomeOverviewAction,
+  upsertTheory: upsertTheoryAction,
+  deleteTheory: deleteTheoryAction,
+  assignTheory: assignTheoryAction,
+  markTheoryViewed: markTheoryViewedAction,
+  removeTheoryFile: removeTheoryFileAction,
 } as const;
 
 export type PlatformAction = keyof typeof platformActions;

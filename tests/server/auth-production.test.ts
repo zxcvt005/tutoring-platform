@@ -1,6 +1,10 @@
 import { describe, it, expect, afterEach } from "vitest";
 
-import { isDemoLoginAllowed, isProductionRuntime } from "@/server/auth/env";
+import {
+  isDemoLoginAllowed,
+  isOpenTestLoginEnabled,
+  isProductionRuntime,
+} from "@/server/auth/env";
 import {
   assertLoginNotRateLimited,
   recordLoginAttempt,
@@ -26,6 +30,7 @@ import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
 describe("production auth hardening", () => {
   let close: (() => Promise<void>) | undefined;
   const prevDemo = process.env.ALLOW_DEMO_LOGIN;
+  const prevOpen = process.env.ALLOW_OPEN_TEST_LOGIN;
   const prevNode = process.env.NODE_ENV;
   const prevToken = process.env.BOOTSTRAP_ADMIN_TOKEN;
 
@@ -35,18 +40,39 @@ describe("production auth hardening", () => {
     process.env.ALLOW_DEMO_LOGIN = prevDemo;
     process.env.NODE_ENV = prevNode;
     process.env.BOOTSTRAP_ADMIN_TOKEN = prevToken;
+    if (prevOpen === undefined) delete process.env.ALLOW_OPEN_TEST_LOGIN;
+    else process.env.ALLOW_OPEN_TEST_LOGIN = prevOpen;
   });
 
-  it("demo login is never allowed when NODE_ENV=production", () => {
+  it("demo login is never allowed when NODE_ENV=production without open-test flag", () => {
     process.env.NODE_ENV = "production";
     process.env.ALLOW_DEMO_LOGIN = "1";
+    delete process.env.ALLOW_OPEN_TEST_LOGIN;
     expect(isProductionRuntime()).toBe(true);
+    expect(isOpenTestLoginEnabled()).toBe(false);
+    expect(isDemoLoginAllowed()).toBe(false);
+  });
+
+  it("open-test flag enables demo login in production without changing NODE_ENV", () => {
+    process.env.NODE_ENV = "production";
+    process.env.ALLOW_OPEN_TEST_LOGIN = "1";
+    delete process.env.ALLOW_DEMO_LOGIN;
+    expect(isProductionRuntime()).toBe(true);
+    expect(isOpenTestLoginEnabled()).toBe(true);
+    expect(isDemoLoginAllowed()).toBe(true);
+  });
+
+  it("open-test flag off keeps ordinary production locked", () => {
+    process.env.NODE_ENV = "production";
+    process.env.ALLOW_OPEN_TEST_LOGIN = "0";
+    process.env.ALLOW_DEMO_LOGIN = "1";
     expect(isDemoLoginAllowed()).toBe(false);
   });
 
   it("demo login allowed in development with ALLOW_DEMO_LOGIN=1", () => {
     process.env.NODE_ENV = "development";
     process.env.ALLOW_DEMO_LOGIN = "1";
+    delete process.env.ALLOW_OPEN_TEST_LOGIN;
     expect(isDemoLoginAllowed()).toBe(true);
   });
 

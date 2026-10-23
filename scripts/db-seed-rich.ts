@@ -64,7 +64,7 @@ async function main() {
       await db.insert(t.attendances).values({
         lessonId: id,
         studentId: "s1",
-        status: o % 9 === 0 ? "absent" : "present",
+        status: o % 9 === 0 ? "absent_unexcused" : "present",
       });
     }
   }
@@ -80,6 +80,10 @@ async function main() {
     currency: "RUB",
     status: "expired",
     paymentStatus: "paid",
+    lessonsLimitSnapshot: 8,
+    weeklyFrequencySnapshot: 2,
+    durationDaysSnapshot: 28,
+    tariffNameSnapshot: "Базовый",
   });
   await db.insert(t.payments).values({
     id: "pay_s5_old",

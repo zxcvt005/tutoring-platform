@@ -180,28 +180,43 @@ function ReviewForm({
         ) : (
           questions.map((q, index) => {
             const answer = answers.find((a) => a.questionId === q.id);
+            const a1 = assignment.attempt1Answers?.find(
+              (x) => x.questionId === q.id
+            );
+            const a2 = assignment.attempt2Answers?.find(
+              (x) => x.questionId === q.id
+            );
             const isEssay = q.type === "essay";
             return (
-              <QuestionFields
-                key={q.id}
-                question={q}
-                index={index}
-                mode="review"
-                answer={answer}
-                revealKey
-                manualScore={isEssay ? manual[q.id] : undefined}
-                onManualScoreChange={
-                  isEssay
-                    ? (v) => setManual((m) => ({ ...m, [q.id]: v }))
-                    : undefined
-                }
-                teacherComment={isEssay ? comments[q.id] : undefined}
-                onTeacherCommentChange={
-                  isEssay
-                    ? (v) => setComments((c) => ({ ...c, [q.id]: v }))
-                    : undefined
-                }
-              />
+              <div key={q.id} className="space-y-1">
+                {a1 || a2 ? (
+                  <p className="text-xs text-muted-foreground">
+                    1-я попытка: {a1?.textAnswer || a1?.selectedOptionIds?.join(", ") || "—"}
+                    {a2
+                      ? ` · 2-я: ${a2.textAnswer || a2.selectedOptionIds?.join(", ") || "—"}`
+                      : ""}
+                  </p>
+                ) : null}
+                <QuestionFields
+                  question={q}
+                  index={index}
+                  mode="review"
+                  answer={answer}
+                  revealKey
+                  manualScore={isEssay ? manual[q.id] : undefined}
+                  onManualScoreChange={
+                    isEssay
+                      ? (v) => setManual((m) => ({ ...m, [q.id]: v }))
+                      : undefined
+                  }
+                  teacherComment={isEssay ? comments[q.id] : undefined}
+                  onTeacherCommentChange={
+                    isEssay
+                      ? (v) => setComments((c) => ({ ...c, [q.id]: v }))
+                      : undefined
+                  }
+                />
+              </div>
             );
           })
         )}

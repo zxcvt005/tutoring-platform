@@ -116,7 +116,7 @@ export function QuestionFields({
         />
       )}
 
-      {question.type === "short_answer" && (
+      {(question.type === "short_answer" || question.type === "numeric") && (
         <ShortAnswerBlock
           question={question}
           editable={editable}
@@ -377,10 +377,13 @@ function ShortAnswerBlock({
   patchQ: (p: Partial<TestQuestion>) => void;
   patchA: (p: Partial<StudentAnswer>) => void;
 }) {
+  const isNumeric =
+    question.type === "numeric" || question.answerKind === "number";
   return (
     <div className="space-y-2">
       {editable ? (
         <>
+          {question.type !== "numeric" ? (
           <div className="flex flex-wrap gap-3">
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -399,6 +402,7 @@ function ShortAnswerBlock({
               Число
             </label>
           </div>
+          ) : null}
           <div className="space-y-1.5">
             <Label>Правильные ответы (через ; )</Label>
             <Input
@@ -414,7 +418,7 @@ function ShortAnswerBlock({
               placeholder="например: 12; 12.0"
             />
           </div>
-          {question.answerKind === "number" ? (
+          {isNumeric ? (
             <div className="space-y-1.5">
               <Label>Допустимая погрешность</Label>
               <Input
@@ -437,14 +441,14 @@ function ShortAnswerBlock({
               onChange={(e) => patchA({ textAnswer: e.target.value })}
               readOnly={!taking}
               placeholder={
-                question.answerKind === "number" ? "Число" : "Краткий ответ"
+                isNumeric ? "Число" : "Краткий ответ"
               }
             />
           ) : null}
           {showKey ? (
             <p className="text-xs text-muted-foreground">
               Верно: {(question.correctAnswers ?? []).join(" / ") || "—"}
-              {question.answerKind === "number" && question.numericTolerance
+              {isNumeric && question.numericTolerance
                 ? ` (±${question.numericTolerance})`
                 : ""}
             </p>

@@ -11,8 +11,19 @@ export type Db = ReturnType<typeof createDb>;
  * URL с percent-encoded паролем разбирается в опции (без повторной склейки строки).
  */
 export function createDb(connectionString: string) {
-  const options = postgresOptionsFromUrl(connectionString, { max: 10 });
-  const sql = postgres(options);
+  const max =
+    process.env.NODE_ENV === "production"
+      ? 10
+      : Number(process.env.PG_POOL_MAX ?? 4);
+  const options = postgresOptionsFromUrl(connectionString, {
+    max: Number.isFinite(max) && max > 0 ? max : 4,
+  });
+  const sql = postgres({
+    ...options,
+    idle_timeout: 20,
+    max_lifetime: 60 * 30,
+    connect_timeout: 10,
+  });
   const db = drizzle(sql, { schema });
   return { db, sql };
 }

@@ -2,13 +2,14 @@ import type { TestQuestion } from "@/lib/types";
 
 export type PublicQuestion = Omit<
   TestQuestion,
-  "correctOptionIds" | "correctAnswers" | "numericTolerance"
+  "correctOptionIds" | "correctAnswers" | "numericTolerance" | "explanation"
 >;
 
 export type AnswerKeyPayload = {
   correctOptionIds?: string[];
   correctAnswers?: string[];
   numericTolerance?: number;
+  explanation?: string;
   /** Для matching: ожидаемое matching[pairId] === pairId */
   matchingPairIds?: string[];
   /** Для ordering: правильный порядок id */
@@ -24,6 +25,7 @@ export function splitQuestion(question: TestQuestion): {
     correctOptionIds,
     correctAnswers,
     numericTolerance,
+    explanation,
     ...rest
   } = question;
 
@@ -33,6 +35,7 @@ export function splitQuestion(question: TestQuestion): {
   if (correctOptionIds?.length) answerKey.correctOptionIds = correctOptionIds;
   if (correctAnswers?.length) answerKey.correctAnswers = correctAnswers;
   if (numericTolerance != null) answerKey.numericTolerance = numericTolerance;
+  if (explanation?.trim()) answerKey.explanation = explanation;
   if (question.matchingPairs?.length) {
     answerKey.matchingPairIds = question.matchingPairs.map((p) => p.id);
   }
