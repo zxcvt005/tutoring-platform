@@ -38,6 +38,7 @@ import {
 import { getAssignmentTitle } from "@/lib/tests/helpers";
 import { apiLessonRatingsGet } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
+import { useStudentCabinetHref, useStudentTour } from "@/lib/student-tour/paths";
 import { cn } from "@/lib/utils";
 
 export function LessonHistoryPanel({ lessonId }: { lessonId?: string }) {
@@ -46,6 +47,8 @@ export function LessonHistoryPanel({ lessonId }: { lessonId?: string }) {
     lessonsForStudent,
     assignmentsForStudent,
   } = useDemoStore();
+  const href = useStudentCabinetHref();
+  const tour = useStudentTour();
   const studentId = data.currentStudentId;
   const student = data.students.find((s) => s.id === studentId);
 
@@ -56,6 +59,10 @@ export function LessonHistoryPanel({ lessonId }: { lessonId?: string }) {
   const [filter, setFilter] = useState<HistoryFilterId>("all");
 
   const loadRatings = useCallback(async () => {
+    if (tour.active) {
+      setRatings({});
+      return;
+    }
     try {
       const data = await apiLessonRatingsGet<{ ratings: StudentLessonRating[] }>(
         "mine"
@@ -66,7 +73,7 @@ export function LessonHistoryPanel({ lessonId }: { lessonId?: string }) {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Не удалось загрузить оценки");
     }
-  }, []);
+  }, [tour.active]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadRatings(), 0);
@@ -147,7 +154,7 @@ export function LessonHistoryPanel({ lessonId }: { lessonId?: string }) {
               return (
                 <li key={lesson.id}>
                   <Link
-                    href={`/auditoria/history/${lesson.id}`}
+                    href={href(`/history/${lesson.id}`)}
                     className={cn(
                       "block min-w-0 rounded-2xl border border-black/10 border-l-[3px] bg-auditoria-surface px-3 py-3 text-sm",
                       historyStripeClass[historyStripeTone(lesson, att)],
@@ -259,6 +266,8 @@ export function LessonHistoryDetail({
   onRated: (rating: StudentLessonRating) => void;
 }) {
   const { data, assignmentsForStudent } = useDemoStore();
+  const href = useStudentCabinetHref();
+  const tour = useStudentTour();
   const now = useMemo(() => new Date(), []);
   const lesson = data.lessons.find(
     (l) => l.id === lessonId && l.studentIds.includes(studentId)
@@ -298,7 +307,7 @@ export function LessonHistoryDetail({
   return (
     <div className="min-w-0 space-y-4">
       <Link
-        href="/auditoria/history"
+        href={href("/history")}
         className="inline-flex h-11 items-center rounded-full border border-black/10 bg-auditoria-surface px-4 text-sm hover:bg-auditoria-surface xl:hidden"
       >
         ← К списку занятий
@@ -340,15 +349,17 @@ export function LessonHistoryDetail({
         ) : null}
       </section>
 
-      <LessonRatingForm
-        lessonId={lesson.id}
-        lessonStatus={lesson.status}
-        startsAt={lesson.startsAt}
-        attendanceStatus={att?.status}
-        rating={rating}
-        teacherName={teacher?.fullName}
-        onSaved={onRated}
-      />
+      {tour.active ? null : (
+        <LessonRatingForm
+          lessonId={lesson.id}
+          lessonStatus={lesson.status}
+          startsAt={lesson.startsAt}
+          attendanceStatus={att?.status}
+          rating={rating}
+          teacherName={teacher?.fullName}
+          onSaved={onRated}
+        />
+      )}
 
       <section className="auditoria-home-card">
         <h2 className="font-display text-lg font-semibold tracking-tight">
@@ -400,14 +411,14 @@ export function LessonHistoryDetail({
                     />
                     {open ? (
                       <Link
-                        href={`/auditoria/homework/${a.id}`}
+                        href={href(`/homework/${a.id}`)}
                         className="inline-flex h-10 items-center justify-center rounded-full bg-pastel-blue/80 px-4 text-sm"
                       >
                         Открыть
                       </Link>
                     ) : a.revealKeys ? (
                       <Link
-                        href={`/auditoria/homework/${a.id}`}
+                        href={href(`/homework/${a.id}`)}
                         className="inline-flex h-10 items-center justify-center rounded-full border border-black/10 bg-auditoria-surface px-4 text-sm"
                       >
                         Результаты

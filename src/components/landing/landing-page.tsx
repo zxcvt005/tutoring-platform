@@ -16,6 +16,7 @@ import { PlatformSection } from "@/components/landing/platform-section";
 import { PricingSection } from "@/components/landing/pricing-section";
 import { PrinciplesSection } from "@/components/landing/principles-section";
 import { ResultsSection } from "@/components/landing/results-section";
+import { StudentDemoSection } from "@/components/landing/student-demo-section";
 import { TeacherSection } from "@/components/landing/teacher-section";
 import { FORMULA_CATALOG, TRAINER_GROUPS } from "@/lib/formula-trainer/catalog";
 
@@ -40,6 +41,7 @@ export function LandingPage() {
             formulaCount={formulaCount}
             trainerGroups={trainerGroups}
           />
+          <StudentDemoSection />
           <ParentsSection />
           <EnvironmentSection />
           <BonusesSection />

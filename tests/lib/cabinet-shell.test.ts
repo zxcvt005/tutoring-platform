@@ -73,8 +73,9 @@ describe("auditoria sidebar contents", () => {
     expect(src).toContain("bg-pastel-blue");
     expect(src).toContain("<NavLinks");
     const nav = src.indexOf("<NavLinks");
-    const logout = src.indexOf("Выйти", nav);
+    const logout = src.indexOf("logoutLabel", nav);
     expect(logout).toBeGreaterThan(nav);
+    expect(src).toContain('logoutLabel = "Выйти"');
     expect(src).not.toContain("DevAccountSwitcher");
     expect(src).not.toContain("RoleSwitcher");
     expect(src).not.toContain("Локальный режим");

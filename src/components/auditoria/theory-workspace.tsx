@@ -9,6 +9,10 @@ import { formatDate } from "@/lib/format";
 import { studentLearningLock } from "@/lib/learning-lock";
 import { useDemoStore } from "@/lib/store/demo-store";
 import {
+  useStudentCabinetHref,
+  useStudentTour,
+} from "@/lib/student-tour/paths";
+import {
   groupStudentTheories,
   studentTheoryMaterialChips,
   studentTheorySection,
@@ -88,6 +92,12 @@ function TheoryPackageCard({
   questionCount: number | null;
   locked: boolean;
 }) {
+  const href = useStudentCabinetHref();
+  const tour = useStudentTour();
+  const { data } = useDemoStore();
+  const teacherName =
+    data.teachers.find((t) => t.id === item.teacherId)?.fullName ??
+    "Преподаватель";
   const chips = studentTheoryMaterialChips({
     videoUrl: item.videoUrl,
     hasTest: item.hasTest,
@@ -95,9 +105,22 @@ function TheoryPackageCard({
     questionCount,
   });
   const isNew = studentTheorySection(item.status) === "new";
+  const forReview =
+    tour.active &&
+    item.status === "viewed" &&
+    (item.description ?? "").toLowerCase().includes("повтор");
   const mark = isNew ? (
     <span className="rounded-full bg-pastel-mint px-2.5 py-1 text-xs text-[#3f6b52]">
-      Новое
+      {tour.active ? "Новый" : "Новое"}
+    </span>
+  ) : forReview ? (
+    <span className="rounded-full bg-pastel-beige px-2.5 py-1 text-xs">
+      На повторение
+    </span>
+  ) : tour.active &&
+    (item.status === "viewed" || item.status === "in_progress") ? (
+    <span className="rounded-full bg-pastel-blue/80 px-2.5 py-1 text-xs">
+      Просмотрен
     </span>
   ) : (
     <TheoryAssignmentStatusBadge status={item.status} />
@@ -110,6 +133,7 @@ function TheoryPackageCard({
         </h3>
         <p className="mt-2 text-sm text-muted-foreground">
           Назначено {formatDate(item.assignedAt)}
+          {tour.active ? ` · ${teacherName}` : ""}
           {locked ? " · недоступно до продления тарифа" : ""}
         </p>
         {item.description ? (
@@ -153,7 +177,7 @@ function TheoryPackageCard({
   }
 
   return (
-    <Link href={`/auditoria/theory/${item.id}`} className={className}>
+    <Link href={href(`/theory/${item.id}`)} className={className}>
       {body}
     </Link>
   );

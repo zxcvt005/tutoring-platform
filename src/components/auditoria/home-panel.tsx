@@ -22,11 +22,15 @@ import { LearningLockedBanner } from "@/components/tariff-balance-notice";
 import { studentLearningLock } from "@/lib/learning-lock";
 import { apiLessonRatingsGet } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
+import { StudentTourHomeDashboard } from "@/components/student-tour/home-dashboard";
+import { useStudentCabinetHref, useStudentTour } from "@/lib/student-tour/paths";
 import { cn } from "@/lib/utils";
 
 export function AuditoriaHomePanel() {
   const { data, lessonsForStudent, assignmentsForStudent, theoryAssignmentsForStudent } =
     useDemoStore();
+  const tour = useStudentTour();
+  const href = useStudentCabinetHref();
   const studentId = data.currentStudentId;
   const student = data.students.find((s) => s.id === studentId);
   const learning = studentLearningLock(data.tariffAssignments, studentId);
@@ -46,6 +50,10 @@ export function AuditoriaHomePanel() {
   );
 
   useEffect(() => {
+    if (tour.active) {
+      setPendingRatings([]);
+      return;
+    }
     let cancelled = false;
     void apiLessonRatingsGet<{ lessons: PendingLessonRating[] }>("pending")
       .then((data) => {
@@ -57,7 +65,7 @@ export function AuditoriaHomePanel() {
     return () => {
       cancelled = true;
     };
-  }, [studentId]);
+  }, [studentId, tour.active]);
 
   const { missed, incomplete } = useMemo(
     () => sortHomeworkForStudent(assignments, lessons),
@@ -79,7 +87,8 @@ export function AuditoriaHomePanel() {
 
   return (
     <div className="space-y-5">
-      <StudentInviteBanners />
+      {tour.active ? <StudentTourHomeDashboard /> : null}
+      {tour.active ? null : <StudentInviteBanners />}
       {pendingRatings.length > 0 ? (
         <LessonRatingHomePrompt
           lessons={pendingRatings}
@@ -108,7 +117,7 @@ export function AuditoriaHomePanel() {
               </p>
             </div>
             <Link
-              href={`/auditoria/theory/${latestTheory.id}`}
+              href={href(`/theory/${latestTheory.id}`)}
               className="shrink-0 text-sm text-foreground/80 hover:text-foreground hover:underline"
             >
               Открыть →
@@ -122,7 +131,8 @@ export function AuditoriaHomePanel() {
         <MyTariffBlock studentId={studentId} compact featured />
       </div>
 
-      {(data.availableProductSlugs ?? []).includes(FORMULA_TRAINER_PRODUCT_SLUG) ? (
+      {!tour.active &&
+      (data.availableProductSlugs ?? []).includes(FORMULA_TRAINER_PRODUCT_SLUG) ? (
         <FormulaTrainerQuickCard />
       ) : null}
 
@@ -142,7 +152,7 @@ export function AuditoriaHomePanel() {
               Актуальные задания
             </h2>
             <Link
-              href="/auditoria/homework"
+              href={href("/homework")}
               className="shrink-0 text-sm text-muted-foreground hover:text-foreground hover:underline"
             >
               Все домашние задания →
@@ -162,7 +172,7 @@ export function AuditoriaHomePanel() {
                 return (
                   <li key={a.id}>
                     <Link
-                      href={`/auditoria/homework/${a.id}`}
+                      href={href(`/homework/${a.id}`)}
                       className={cn(
                         "block rounded-2xl border border-[#f2d7d9] bg-pastel-rose px-4 py-3 hover:bg-[#f8e0e2]",
                         overdue && "border-destructive/40"

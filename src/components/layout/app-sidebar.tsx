@@ -115,15 +115,23 @@ const accentClass: Record<CabinetRole, string> = {
   pressa: "surface-sky",
 };
 
+function withNavBase(href: string, navBasePath?: string): string {
+  if (!navBasePath || !href.startsWith("/auditoria")) return href;
+  return `${navBasePath}${href.slice("/auditoria".length)}` || navBasePath;
+}
+
 function NavLinks({
   items,
   role,
   alertHrefs,
+  navBasePath,
 }: {
   items: NavItem[];
   role: CabinetRole;
   /** Маршруты с красным индикатором (напр. ученики без преподавателя) */
   alertHrefs?: Set<string>;
+  /** Для публичного демо Аудитории: `/demo/student` вместо `/auditoria`. */
+  navBasePath?: string;
 }) {
   const pathname = usePathname();
   const homeHref =
@@ -133,23 +141,24 @@ function NavLinks({
         ? "/kafedra"
         : role === "pressa"
           ? "/pressa"
-          : "/auditoria";
+          : navBasePath || "/auditoria";
 
   const auditoria = role === "auditoria";
 
   return (
     <nav className={cn("flex flex-col", auditoria ? "gap-2" : "gap-1")}>
       {items.map((item) => {
+        const href = withNavBase(item.href, navBasePath);
         const active =
-          item.href === homeHref
-            ? pathname === item.href
-            : pathname === item.href || pathname.startsWith(`${item.href}/`);
+          href === homeHref
+            ? pathname === href
+            : pathname === href || pathname.startsWith(`${href}/`);
         const Icon = item.icon;
         const showAlert = alertHrefs?.has(item.href);
         return (
           <Link
             key={item.href}
-            href={item.href}
+            href={href}
             className={cn(
               "relative flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[0.9rem] transition-colors",
               auditoria && "py-2.5",
@@ -196,9 +205,13 @@ function NavLinks({
 export function AppSidebar({
   role,
   onNavigate,
+  navBasePath,
+  logoutLabel = "Выйти",
 }: {
   role: CabinetRole;
   onNavigate?: () => void;
+  navBasePath?: string;
+  logoutLabel?: string;
 }) {
   const { data, auth, logout } = useDemoStore();
   const items =
@@ -249,7 +262,12 @@ export function AppSidebar({
         <BrandMark className="px-1 pt-1 pb-2 text-[1.65rem] leading-none" />
       )}
 
-      <NavLinks items={items} role={role} alertHrefs={alertHrefs} />
+      <NavLinks
+        items={items}
+        role={role}
+        alertHrefs={alertHrefs}
+        navBasePath={navBasePath}
+      />
 
       <div className="mt-auto space-y-2 pt-2" onClick={(e) => e.stopPropagation()}>
         <Button
@@ -259,7 +277,7 @@ export function AppSidebar({
           className="w-full rounded-xl"
           onClick={() => void logout()}
         >
-          Выйти
+          {logoutLabel}
         </Button>
       </div>
     </div>

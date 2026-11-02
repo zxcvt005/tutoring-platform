@@ -24,6 +24,7 @@ import {
 import { currentAssignmentForStudent } from "@/lib/tariff-package";
 import { assignmentTariffAlert } from "@/lib/tariff-warnings";
 import { useDemoStore } from "@/lib/store/demo-store";
+import { useStudentCabinetHref } from "@/lib/student-tour/paths";
 import type { StudentTariffAssignment } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -196,6 +197,7 @@ function RenewLink({
   label: string;
   icon?: boolean;
 }) {
+  const href = useStudentCabinetHref();
   if (pending) {
     return (
       <button
@@ -209,7 +211,7 @@ function RenewLink({
   }
   return (
     <Link
-      href={STUDENT_CHECKOUT_PATH}
+      href={href(STUDENT_CHECKOUT_PATH)}
       className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-full bg-[#e7dff6]/90 px-4 text-sm text-foreground"
     >
       {icon ? <Plus className="size-4" /> : null}

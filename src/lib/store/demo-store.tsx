@@ -86,7 +86,7 @@ type OkResult = {
   status?: string;
 };
 
-type DemoStoreValue = {
+export type DemoStoreValue = {
   data: DemoData;
   ready: boolean;
   auth: BootstrapAuth | null;
@@ -281,7 +281,7 @@ type DemoStoreValue = {
   attendancesForLesson: (lessonId: string) => Attendance[];
 };
 
-const DemoStoreContext = createContext<DemoStoreValue | null>(null);
+export const DemoStoreContext = createContext<DemoStoreValue | null>(null);
 
 const EMPTY_DATA: DemoData = {
   version: 6,

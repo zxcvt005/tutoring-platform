@@ -24,6 +24,7 @@ import {
 import { isHomeworkHistoryView, studentLearningLock } from "@/lib/learning-lock";
 import { studentHomeworkRingStats } from "@/lib/tests/attempts";
 import { useDemoStore } from "@/lib/store/demo-store";
+import { useStudentCabinetHref } from "@/lib/student-tour/paths";
 import type { HomeworkAssignment } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -272,6 +273,7 @@ function HomeworkRow({
   sections: { id: string; title: string }[];
   locked: boolean;
 }) {
+  const href = useStudentCabinetHref();
   const hw = homeworks.find((item) => item.id === assignment.homeworkId);
   const title = assignment.testSnapshot?.title || hw?.title || "Тест";
   const section = sections.find((item) => item.id === hw?.sectionId);
@@ -330,7 +332,7 @@ function HomeworkRow({
   return (
     <li>
       {allowOpen ? (
-        <Link href={`/auditoria/homework/${assignment.id}`} className={className}>
+        <Link href={href(`/homework/${assignment.id}`)} className={className}>
           {body}
         </Link>
       ) : (

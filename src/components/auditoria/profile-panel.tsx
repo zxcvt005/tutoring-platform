@@ -37,6 +37,10 @@ import {
 } from "@/lib/tariff-history";
 import { currentAssignmentForStudent } from "@/lib/tariff-package";
 import { useDemoStore } from "@/lib/store/demo-store";
+import {
+  useStudentCabinetHref,
+  useStudentTour,
+} from "@/lib/student-tour/paths";
 import type { Student, StudentTariffAssignment, Teacher } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -280,18 +284,21 @@ function TeacherContacts({
   teacher: Teacher;
   email: string;
 }) {
+  const tour = useStudentTour();
   const mail = email ? `mailto:${email}` : null;
   return (
     <div className="flex shrink-0 gap-2">
-      <button
-        type="button"
-        aria-label={`Открыть чат с ${teacher.fullName}`}
-        title="Чат с преподавателем"
-        className="inline-flex size-11 items-center justify-center rounded-full border border-black/10 bg-pastel-blue/75"
-        onClick={() => requestOpenTeacherChat(teacher.id)}
-      >
-        <MessageCircle className="size-4" />
-      </button>
+      {tour.active ? null : (
+        <button
+          type="button"
+          aria-label={`Открыть чат с ${teacher.fullName}`}
+          title="Чат с преподавателем"
+          className="inline-flex size-11 items-center justify-center rounded-full border border-black/10 bg-pastel-blue/75"
+          onClick={() => requestOpenTeacherChat(teacher.id)}
+        >
+          <MessageCircle className="size-4" />
+        </button>
+      )}
       {mail ? (
         <a
           href={mail}
@@ -352,6 +359,7 @@ function ProfileTariffCard({
   status: TariffHistoryDisplayStatus | null;
   pending: boolean;
 }) {
+  const href = useStudentCabinetHref();
   if (!assignment) {
     return (
       <section className="auditoria-home-card">
@@ -412,7 +420,7 @@ function ProfileTariffCard({
           </button>
         ) : (
           <Link
-            href={STUDENT_CHECKOUT_PATH}
+            href={href(STUDENT_CHECKOUT_PATH)}
             className="inline-flex h-11 items-center justify-center rounded-full bg-[#e7dff6]/90 px-4 text-sm"
           >
             Продлить тариф →
@@ -522,6 +530,7 @@ function TariffDetails({
 }
 
 function TariffHistoryPreview({ items }: { items: TariffHistoryItem[] }) {
+  const href = useStudentCabinetHref();
   const preview = items.slice(0, HISTORY_PREVIEW);
   return (
     <section className="auditoria-home-card min-w-0">
@@ -530,7 +539,7 @@ function TariffHistoryPreview({ items }: { items: TariffHistoryItem[] }) {
           История тарифов
         </h2>
         {items.length > 0 ? (
-          <Link href={STUDENT_PAY_PATH} className="shrink-0 text-sm text-foreground/80">
+          <Link href={href(STUDENT_PAY_PATH)} className="shrink-0 text-sm text-foreground/80">
             Вся история →
           </Link>
         ) : null}

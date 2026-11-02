@@ -20,6 +20,7 @@ import {
 } from "@/lib/tariff-package";
 import { assignmentTariffAlert } from "@/lib/tariff-warnings";
 import { useDemoStore } from "@/lib/store/demo-store";
+import { useStudentCabinetHref } from "@/lib/student-tour/paths";
 import { TariffBalanceNotice } from "@/components/tariff-balance-notice";
 import type { StudentTariffAssignment } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,8 @@ export function MyTariffBlock({
   featured?: boolean;
 }) {
   const { data, ready } = useDemoStore();
+  const href = useStudentCabinetHref();
+  const checkoutHref = href(STUDENT_CHECKOUT_PATH);
 
   const assignment = useMemo(
     () => currentAssignmentForStudent(data.tariffAssignments, studentId),
@@ -103,7 +106,7 @@ export function MyTariffBlock({
           </p>
         )}
         <Link
-          href={STUDENT_CHECKOUT_PATH}
+          href={checkoutHref}
           className={buttonVariants({ className: "mt-3 rounded-xl" })}
         >
           Оплатить
@@ -236,7 +239,7 @@ export function MyTariffBlock({
       ) : alert.showRenewCta || unpaid ? (
         <div className="mt-3">
           <Link
-            href={STUDENT_CHECKOUT_PATH}
+            href={checkoutHref}
             className={buttonVariants({
               size: compact && !featured ? "sm" : "default",
               className: featured
