@@ -39,14 +39,45 @@ import {
   attachRemoteMedia,
   publishedCameraTrack,
 } from "@/lib/video/media-attach";
-import { apiVideoCallGet, apiVideoCallTokens } from "@/lib/video/api";
+import {
+  cabinetStudentTransport,
+  type StudentCallTransport,
+} from "@/lib/video/call-transport";
 import type { VideoCallStudentView } from "@/lib/video/types";
 
 const WAIT_TEXT =
   "Преподаватель дал вам время на самостоятельное решение задачи";
 
-export function StudentCallSession({ callId }: { callId: string }) {
+export function StudentCallSession({
+  callId,
+  transport = cabinetStudentTransport,
+  cabinetHref = "/auditoria/calls",
+  exitHref = "/auditoria/calls",
+  overlayLayout = "cabinet",
+  leaveTitle = "Выйти из звонка?",
+  leaveDescription = "Вы отключитесь, но комната останется. Можно вернуться из кабинета, пока преподаватель не закроет её.",
+  onLeave,
+  pulse = false,
+  onPulse,
+}: {
+  callId: string;
+  transport?: StudentCallTransport;
+  cabinetHref?: string;
+  exitHref?: string;
+  overlayLayout?: "cabinet" | "full";
+  leaveTitle?: string;
+  leaveDescription?: string;
+  onLeave?: () => Promise<unknown>;
+  pulse?: boolean;
+  onPulse?: () => Promise<unknown>;
+}) {
   const router = useRouter();
+  const transportRef = useRef(transport);
+  transportRef.current = transport;
+  const onPulseRef = useRef(onPulse);
+  onPulseRef.current = onPulse;
+  const onLeaveRef = useRef(onLeave);
+  onLeaveRef.current = onLeave;
   const pip = useDocumentPip();
   const [call, setCall] = useState<VideoCallStudentView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -138,7 +169,7 @@ export function StudentCallSession({ callId }: { callId: string }) {
     async (view: VideoCallStudentView) => {
       if (leavingRef.current) return null;
       if (roomRef.current) return roomRef.current;
-      const tokens = await apiVideoCallTokens(callId);
+      const tokens = await transportRef.current.tokens(callId);
       if (leavingRef.current) return null;
       const token = tokens.tokens[0];
       if (!token) throw new Error("Нет доступа к комнате");
@@ -198,7 +229,7 @@ export function StudentCallSession({ callId }: { callId: string }) {
     async function load() {
       try {
         if (leavingRef.current || cancelled) return;
-        const data = await apiVideoCallGet(callId);
+        const data = await transportRef.current.get(callId);
         if (data.call.role !== "student") {
           throw new Error("Нет доступа");
         }
@@ -249,6 +280,21 @@ export function StudentCallSession({ callId }: { callId: string }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attachStage, callId, connectOnce]);
+
+  useEffect(() => {
+    if (!pulse) return;
+    let stopped = false;
+    const run = () => {
+      if (stopped) return;
+      void onPulseRef.current?.().catch(() => undefined);
+    };
+    run();
+    const timer = window.setInterval(run, 10_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [pulse]);
 
   async function toggle(kind: "mic" | "camera") {
     const room = roomRef.current;
@@ -323,7 +369,17 @@ export function StudentCallSession({ callId }: { callId: string }) {
       room.removeAllListeners();
       await room.disconnect();
     }
-    router.push("/auditoria/calls");
+    if (onLeaveRef.current) {
+      try {
+        await onLeaveRef.current();
+      } catch (err) {
+        leavingRef.current = false;
+        setLeaving(false);
+        setError(deviceErrorMessage(err));
+      }
+      return;
+    }
+    router.push(exitHref);
   }
 
   const waitingAlone = Boolean(call?.mode === "parallel" && !call.teacherWithMe);
@@ -353,8 +409,10 @@ export function StudentCallSession({ callId }: { callId: string }) {
 
   return (
     <CallOverlay
-      cabinetHref="/auditoria/calls"
+      cabinetHref={cabinetHref}
       title={call?.teacherName ?? "Звонок"}
+      layout={overlayLayout}
+      showBack={overlayLayout === "cabinet"}
     >
       {!call ? (
         <p className="px-4 py-6 text-sm text-muted-foreground">
@@ -457,8 +515,8 @@ export function StudentCallSession({ callId }: { callId: string }) {
       )}
       <ConfirmDialog
         open={leaveOpen}
-        title="Выйти из звонка?"
-        description="Вы отключитесь, но комната останется. Можно вернуться из кабинета, пока преподаватель не закроет её."
+        title={leaveTitle}
+        description={leaveDescription}
         confirmLabel="Выйти"
         busyLabel="Выход…"
         busy={leaving}

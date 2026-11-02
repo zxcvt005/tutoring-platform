@@ -2125,6 +2125,61 @@ export const videoCallParticipants = pgTable(
   ]
 );
 
+/**
+ * Личный приём звонков вне кабинетов.
+ * Нет связей с организациями, пользователями, преподавателями и учениками.
+ */
+export const privateCallSessions = pgTable(
+  "private_call_sessions",
+  {
+    id: text("id").primaryKey(),
+    code: text("code").notNull(),
+    status: text("status").notNull().default("active"),
+    accepting: boolean("accepting").notNull().default(true),
+    activeRoomId: text("active_room_id"),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("private_call_sessions_code_uidx").on(t.code),
+    index("private_call_sessions_status_idx").on(t.status),
+    check(
+      "private_call_sessions_status_check",
+      sql`${t.status} in ('active', 'ended')`
+    ),
+  ]
+);
+
+export const privateCallRooms = pgTable(
+  "private_call_rooms",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => privateCallSessions.id, { onDelete: "cascade" }),
+    displayName: text("display_name").notNull(),
+    livekitRoomName: text("livekit_room_name").notNull(),
+    status: text("status").notNull().default("open"),
+    connectedAt: timestamp("connected_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("private_call_rooms_livekit_uidx").on(t.livekitRoomName),
+    index("private_call_rooms_session_idx").on(t.sessionId),
+    index("private_call_rooms_open_seen_idx").on(t.status, t.lastSeenAt),
+    check(
+      "private_call_rooms_status_check",
+      sql`${t.status} in ('open', 'closed')`
+    ),
+  ]
+);
+
 /** Пробник ЕГЭ, который ведёт конкретный преподаватель. */
 export const mockExams = pgTable(
   "mock_exams",
@@ -2439,6 +2494,8 @@ export const schema = {
   trialInteractionNotes,
   videoCalls,
   videoCallParticipants,
+  privateCallSessions,
+  privateCallRooms,
   mockExams,
   mockExamResults,
   intensives,

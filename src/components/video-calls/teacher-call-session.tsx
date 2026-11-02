@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   ConnectionState,
@@ -77,13 +77,9 @@ import {
 } from "@/lib/video/publish-switch";
 import { roomRowClass } from "@/lib/video/room-row-class";
 import {
-  apiVideoCallActivate,
-  apiVideoCallCloseParticipant,
-  apiVideoCallEnd,
-  apiVideoCallGet,
-  apiVideoCallHold,
-  apiVideoCallTokens,
-} from "@/lib/video/api";
+  cabinetTeacherTransport,
+  type TeacherCallTransport,
+} from "@/lib/video/call-transport";
 import type { VideoCallTeacherView, VideoLivekitToken } from "@/lib/video/types";
 import { cn } from "@/lib/utils";
 
@@ -106,8 +102,37 @@ function publisherList(rooms: Map<string, Room>): PublishControls[] {
   return [...rooms.entries()].map(([id, item]) => controlsFor(id, item));
 }
 
-export function TeacherCallSession({ callId }: { callId: string }) {
+function connectedClock(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function TeacherCallSession({
+  callId,
+  transport = cabinetTeacherTransport,
+  cabinetHref = "/kafedra/calls",
+  allowInvite = true,
+  overlayLayout = "cabinet",
+  header = null,
+  emptyRoomsLabel = "Нет приглашённых учеников",
+  onEnded,
+}: {
+  callId: string;
+  transport?: TeacherCallTransport;
+  cabinetHref?: string;
+  allowInvite?: boolean;
+  overlayLayout?: "cabinet" | "full";
+  header?: ReactNode;
+  emptyRoomsLabel?: string;
+  onEnded?: () => void;
+}) {
   const router = useRouter();
+  const transportRef = useRef(transport);
+  transportRef.current = transport;
   const pip = useDocumentPip();
   const [call, setCall] = useState<VideoCallTeacherView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -373,7 +398,7 @@ export function TeacherCallSession({ callId }: { callId: string }) {
   const load = useCallback(async () => {
     if (switchingRef.current) return callRef.current;
     const gen = opGenRef.current;
-    const data = await apiVideoCallGet(callId);
+    const data = await transportRef.current.get(callId);
     if (!isCurrentCallOp(gen, opGenRef.current, switchingRef.current)) {
       return callRef.current;
     }
@@ -384,7 +409,7 @@ export function TeacherCallSession({ callId }: { callId: string }) {
     callRef.current = data.call;
     if (data.call.status === "active") {
       try {
-        const tokens = await apiVideoCallTokens(callId);
+        const tokens = await transportRef.current.tokens(callId);
         if (!isCurrentCallOp(gen, opGenRef.current, switchingRef.current)) {
           return callRef.current;
         }
@@ -430,7 +455,7 @@ export function TeacherCallSession({ callId }: { callId: string }) {
   async function ensureConnectedRoom(participantId: string) {
     let room = roomsRef.current.get(participantId);
     if (room?.state === ConnectionState.Connected) return room;
-    const tokens = await apiVideoCallTokens(callId);
+    const tokens = await transportRef.current.tokens(callId);
     const token = tokens.tokens.find((item) => item.participantId === participantId);
     if (!token) {
       throw new Error("Комната закрыта или недоступна");
@@ -473,7 +498,7 @@ export function TeacherCallSession({ callId }: { callId: string }) {
         }))
       );
       if (leak) throw new Error(leak);
-      const data = await apiVideoCallActivate(callId, participantId);
+      const data = await transportRef.current.activate(callId, participantId);
       if (!isCurrentCallOp(gen, opGenRef.current, false)) return;
       if (data.call.role === "teacher") {
         setCall(data.call);
@@ -510,7 +535,7 @@ export function TeacherCallSession({ callId }: { callId: string }) {
       );
       if (leak) throw new Error(leak);
       await waitUntilCameraUnpublished(roomsRef.current.values());
-      const data = await apiVideoCallHold(callId);
+      const data = await transportRef.current.hold(callId);
       if (!isCurrentCallOp(gen, opGenRef.current, false)) return;
       if (data.call.role === "teacher") {
         setCall(data.call);
@@ -597,10 +622,10 @@ export function TeacherCallSession({ callId }: { callId: string }) {
     if (!closeId) return;
     setBusy(true);
     try {
-      const data = await apiVideoCallCloseParticipant(callId, closeId);
+      const data = await transportRef.current.closeParticipant(callId, closeId);
       if (data.call.role === "teacher") {
         setCall(data.call);
-        await syncRooms(data.call, (await apiVideoCallTokens(callId)).tokens);
+        await syncRooms(data.call, (await transportRef.current.tokens(callId)).tokens);
       }
       setCloseId(null);
     } catch (err) {
@@ -613,7 +638,7 @@ export function TeacherCallSession({ callId }: { callId: string }) {
   async function confirmEnd() {
     setBusy(true);
     try {
-      await apiVideoCallEnd(callId);
+      await transportRef.current.end(callId);
       pip.close();
       await bgRef.current?.dispose();
       await stopPreview();
@@ -622,7 +647,8 @@ export function TeacherCallSession({ callId }: { callId: string }) {
         await room.disconnect();
       }
       roomsRef.current.clear();
-      router.push("/kafedra/calls");
+      if (onEnded) onEnded();
+      else router.push(cabinetHref);
     } catch (err) {
       setError(deviceErrorMessage(err));
       setBusy(false);
@@ -704,7 +730,13 @@ export function TeacherCallSession({ callId }: { callId: string }) {
 
   if (!call) {
     return (
-      <CallOverlay cabinetHref="/kafedra/calls" title="Звонок">
+      <CallOverlay
+        cabinetHref={cabinetHref}
+        title="Звонок"
+        layout={overlayLayout}
+        showBack={overlayLayout === "cabinet"}
+      >
+        {header}
         <p className="px-4 py-6 text-sm text-muted-foreground">
           {error ?? "Подключение…"}
         </p>
@@ -734,7 +766,13 @@ export function TeacherCallSession({ callId }: { callId: string }) {
   }
 
   return (
-    <CallOverlay cabinetHref="/kafedra/calls" title="Звонок">
+    <CallOverlay
+      cabinetHref={cabinetHref}
+      title="Звонок"
+      layout={overlayLayout}
+      showBack={overlayLayout === "cabinet"}
+    >
+      {header}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:flex-row">
       <aside className="hidden w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:flex">
         <div className="border-b border-border px-3 py-2.5">
@@ -758,7 +796,7 @@ export function TeacherCallSession({ callId }: { callId: string }) {
           ) : null}
           {openRooms.length === 0 && closedRooms.length === 0 ? (
             <p className="px-2 py-3 text-xs text-muted-foreground">
-              Нет приглашённых учеников
+              {emptyRoomsLabel}
             </p>
           ) : null}
           <ul className="flex flex-col gap-1">
@@ -798,7 +836,9 @@ export function TeacherCallSession({ callId }: { callId: string }) {
                     ) : null}
                   </div>
                   <p className="px-3 pb-1 text-[11px] text-muted-foreground">
-                    {row.isActive ? "эфир" : connected ? "в сети" : "не в сети"}
+                    {row.presenceLabel ??
+                      (row.isActive ? "эфир" : connected ? "в сети" : "не в сети")}
+                    {row.connectedAt ? ` · ${connectedClock(row.connectedAt)}` : ""}
                   </p>
                 </li>
               );
@@ -807,21 +847,28 @@ export function TeacherCallSession({ callId }: { callId: string }) {
               <li key={row.id} className="px-2 py-1 text-sm text-muted-foreground">
                 <span className="truncate">{row.studentName}</span>
                 <span className="ml-2 text-[11px]">закрыта</span>
+                {row.connectedAt ? (
+                  <span className="ml-2 text-[11px]">
+                    {connectedClock(row.connectedAt)}
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>
         </nav>
-        <div className="border-t border-border p-2">
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full"
-            disabled={call.status !== "active"}
-            onClick={() => setInviteOpen(true)}
-          >
-            Пригласить ученика
-          </Button>
-        </div>
+        {allowInvite ? (
+          <div className="border-t border-border p-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              disabled={call.status !== "active"}
+              onClick={() => setInviteOpen(true)}
+            >
+              Пригласить ученика
+            </Button>
+          </div>
+        ) : null}
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -853,16 +900,18 @@ export function TeacherCallSession({ callId }: { callId: string }) {
               Групповой звонок
             </span>
           )}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="ml-auto shrink-0"
-            disabled={call.status !== "active"}
-            onClick={() => setInviteOpen(true)}
-          >
-            Пригласить
-          </Button>
+          {allowInvite ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="ml-auto shrink-0"
+              disabled={call.status !== "active"}
+              onClick={() => setInviteOpen(true)}
+            >
+              Пригласить
+            </Button>
+          ) : null}
         </nav>
         {error ? (
           <p className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
@@ -963,12 +1012,14 @@ export function TeacherCallSession({ callId }: { callId: string }) {
         </div>
       </div>
 
-      <InviteStudentsDialog
-        callId={callId}
-        open={inviteOpen}
-        onOpenChange={setInviteOpen}
-        onInvited={() => void load()}
-      />
+      {allowInvite ? (
+        <InviteStudentsDialog
+          callId={callId}
+          open={inviteOpen}
+          onOpenChange={setInviteOpen}
+          onInvited={() => void load()}
+        />
+      ) : null}
       <ConfirmDialog
         open={closeId !== null}
         title="Закрыть комнату?"

@@ -15,10 +15,16 @@ export function CallOverlay({
   cabinetHref,
   title,
   children,
+  layout = "cabinet",
+  backLabel = "В кабинет",
+  showBack = true,
 }: {
   cabinetHref: string;
   title: string;
   children: ReactNode;
+  layout?: "cabinet" | "full";
+  backLabel?: string;
+  showBack?: boolean;
 }) {
   const router = useRouter();
 
@@ -44,19 +50,23 @@ export function CallOverlay({
       className={cn(
         "fixed inset-0 z-40 flex min-w-0 flex-col overflow-hidden overflow-x-hidden overscroll-none bg-background",
         "max-md:w-full max-md:pt-[env(safe-area-inset-top)] max-md:pr-[env(safe-area-inset-right)] max-md:pb-[env(safe-area-inset-bottom)] max-md:pl-[env(safe-area-inset-left)]",
-        "md:inset-y-0 md:right-0 md:left-56 md:w-auto lg:left-[15rem]"
+        layout === "cabinet"
+          ? "md:inset-y-0 md:right-0 md:left-56 md:w-auto lg:left-[15rem]"
+          : undefined
       )}
     >
       <header className="flex shrink-0 items-center gap-1 border-b border-border bg-background px-2 py-1.5 md:hidden">
-        <Button
-          type="button"
-          variant="ghost"
-          className="h-11 min-w-11 px-2 text-sm"
-          onClick={() => router.push(cabinetHref)}
-        >
-          <ChevronLeft className="size-5" />
-          В кабинет
-        </Button>
+        {showBack ? (
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-11 min-w-11 px-2 text-sm"
+            onClick={() => router.push(cabinetHref)}
+          >
+            <ChevronLeft className="size-5" />
+            {backLabel}
+          </Button>
+        ) : null}
         <p className="min-w-0 flex-1 truncate pr-2 text-sm font-medium">{title}</p>
       </header>
       {children}

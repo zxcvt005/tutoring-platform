@@ -25,6 +25,13 @@ export type VideoCallParticipantView = {
   studentName: string;
   status: VideoParticipantStatus;
   isActive: boolean;
+  /**
+   * Личный приём: «ожидает», «в эфире», «переподключение».
+   * В кабинете поля нет, подпись считается по эфиру и LiveKit.
+   */
+  presenceLabel?: string;
+  /** Личный приём: момент входа гостя. */
+  connectedAt?: string;
 };
 
 export type VideoGroupMemberView = {

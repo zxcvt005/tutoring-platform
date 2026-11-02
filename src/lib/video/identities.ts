@@ -32,6 +32,24 @@ export function parallelLivekitRoomName(
   return name;
 }
 
+export function privateLivekitRoomName(roomId: string): string {
+  const name = `pc-${slug(roomId)}`.slice(0, 64);
+  if (!ROOM_RE.test(name)) {
+    throw new Error("Некорректное имя комнаты");
+  }
+  return name;
+}
+
+export function privateGuestLivekitIdentity(roomId: string): string {
+  const identity = `g-${slug(roomId)}`.slice(0, 64);
+  if (!IDENTITY_RE.test(identity)) {
+    throw new Error("Некорректный идентификатор участника");
+  }
+  return identity;
+}
+
+export const PRIVATE_HOST_LIVEKIT_IDENTITY = "private-host";
+
 export function groupLivekitRoomName(callId: string): string {
   const name = `vcg-${slug(callId)}`.slice(0, 64);
   if (!ROOM_RE.test(name)) {

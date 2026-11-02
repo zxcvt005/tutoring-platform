@@ -3,7 +3,11 @@ import { RoomServiceClient } from "livekit-server-sdk";
 import { getLivekitConfig } from "@/server/video/livekit-config";
 
 export type VideoLivekitSync = {
-  ensureRoom: (roomName: string, maxParticipants: number) => Promise<void>;
+  ensureRoom: (
+    roomName: string,
+    maxParticipants: number,
+    emptyTimeoutSeconds?: number
+  ) => Promise<void>;
   deleteRoom: (roomName: string) => Promise<void>;
   removeParticipant: (roomName: string, identity: string) => Promise<void>;
 };
@@ -24,11 +28,11 @@ function roomService(): RoomServiceClient {
 }
 
 const realSync: VideoLivekitSync = {
-  async ensureRoom(roomName, maxParticipants) {
+  async ensureRoom(roomName, maxParticipants, emptyTimeoutSeconds = 6 * 60 * 60) {
     try {
       await roomService().createRoom({
         name: roomName,
-        emptyTimeout: 6 * 60 * 60,
+        emptyTimeout: emptyTimeoutSeconds,
         maxParticipants,
       });
     } catch {
