@@ -22,7 +22,7 @@
 
 **Важно:** `@tailwindcss/postcss`, `tailwindcss` и `typescript` находятся в `dependencies`, чтобы сборка работала при `npm ci --omit=dev` / `NODE_ENV=production` во время install. Не удаляйте их из dependencies.
 
-**Миграции:** `npm run db:migrate` вызывает `node scripts/db-migrate.mjs` и зависит только от `drizzle-orm` + `postgres` (уже в `dependencies`). Пакет `tsx` в production-контейнере отсутствует — это ожидаемо.
+**Миграции и первый директор:** `npm run db:migrate` и `npm run auth:bootstrap-admin` запускают `node scripts/*.mjs`. Им нужны только пакеты из `dependencies` (`drizzle-orm`, `postgres`, `bcryptjs`). Пакет `tsx` — devDependency и в production-контейнере отсутствует. Это ожидаемо: ставить его в работающий контейнер не нужно.
 
 **DATABASE_URL:** логин и пароль в URL должны быть **percent-encoded** (`encodeURIComponent`). Символы `@ # / : ? %` и пробел в пароле без кодирования ломают разбор (Invalid URL). Пример пароля `p@ss#1` → `p%40ss%231` в строке URL. Скрипт миграции передаёт в postgres.js объект опций, не склеивая URL заново; секреты в логах не печатаются.
 
@@ -91,10 +91,11 @@ ALLOW_TIMEWEB_TEST_SEED=1 TIMEWEB_TEST_SEED_ORG=org_school_qa npm run db:seed:sc
 
 Успех: строка `Timeweb school seed OK`. Пересоздаётся только `org_school_qa`. Вход: `/login` (демо-вход в production выключен).
 
-4. Открыть `https://…/setup` **или** CLI:
+4. Открыть `https://…/setup` **или** CLI в `/app` (после деплоя, где есть `scripts/auth-bootstrap-admin.mjs`):
    ```bash
    npm run auth:bootstrap-admin -- --email you@school.example --password '…' --name 'Директор' --org 'Школа'
    ```
+   Скрипт читает `BOOTSTRAP_ADMIN_TOKEN` из окружения приложения, создаёт одну организацию и одного директора и не запускает seed.
 5. Удалить / сменить `BOOTSTRAP_ADMIN_TOKEN` в env и перезапустить app.
 6. Войти на `/login`, в Дирекции → «Доступ» создать преподавателей и учеников.
 7. Проверить: чужой assignment id → 403; демо `/api/auth/demo` → 403; кабинеты без cookie → редирект на login.
