@@ -12,6 +12,7 @@ import {
   TopicStatusBadge,
 } from "@/components/status-badge";
 import { AssignmentReviewDialog } from "@/components/tests/assignment-review-dialog";
+import { TestArchiveButton } from "@/components/tests/test-archive-button";
 import { TestEditorDialog } from "@/components/tests/test-editor-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -57,6 +58,7 @@ export function TopicDetail({ topicId }: { topicId: string }) {
     homeworksForTopic,
     studentsForTeacher,
     deleteHomework,
+    restoreHomework,
     publishHomework,
     assignHomework,
   } = useDemoStore();
@@ -68,12 +70,16 @@ export function TopicDetail({ topicId }: { topicId: string }) {
     [data.lessons, topicId]
   );
   const assignments = data.homeworkAssignments.filter(
-    (a) => a.topicId === topicId && a.sourceKind !== "theory"
+    (a) =>
+      a.topicId === topicId &&
+      a.sourceKind !== "theory" &&
+      a.sourceKind !== "intensive"
   );
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingHw, setEditingHw] = useState<Homework | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState<HomeworkAssignment | null>(null);
   const [assignForm, setAssignForm] = useState({
     homeworkId: "",
@@ -96,7 +102,7 @@ export function TopicDetail({ topicId }: { topicId: string }) {
   }
 
   const students = studentsForTeacher(data.currentTeacherId);
-  const visibleTests = homeworks.filter((h) => h.status !== "archived");
+  const visibleTests = homeworks;
 
   function openEditor(h?: Homework) {
     setEditingHw(h ?? null);
@@ -250,14 +256,20 @@ export function TopicDetail({ topicId }: { topicId: string }) {
                             Опубликовать
                           </Button>
                         ) : null}
-                        <Button
-                          type="button"
+                        <TestArchiveButton
+                          status={h.status}
                           size="sm"
-                          variant="ghost"
-                          onClick={() => deleteHomework(h.id)}
-                        >
-                          В архив
-                        </Button>
+                          busy={archiveBusyId === h.id}
+                          onToggle={() => {
+                            if (archiveBusyId) return;
+                            setArchiveBusyId(h.id);
+                            const action =
+                              h.status === "archived"
+                                ? restoreHomework(h.id)
+                                : deleteHomework(h.id);
+                            void action.finally(() => setArchiveBusyId(null));
+                          }}
+                        />
                       </div>
                     </TableCell>
                   </TableRow>

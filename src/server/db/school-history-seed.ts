@@ -367,9 +367,9 @@ export async function seedSchoolCatalogAndHistory(
   db: DbLike,
   orgId: string,
   now: Date,
-  schedules: SchoolScheduleLike[],
-  options: { win1251Safe?: boolean } = {}
+  schedules: SchoolScheduleLike[]
 ): Promise<SchoolHistoryStats> {
+  // Always normalize catalog glyphs so the same seed is idempotent on UTF-8 and WIN1251.
   const sectionDefs = deepWin1251Safe(PHYSICS_SECTION_DEFS);
   const teacherIds = ["sch_t1", "sch_t2", "sch_t3"];
   let sections = 0;

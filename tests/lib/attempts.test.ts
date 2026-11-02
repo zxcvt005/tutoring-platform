@@ -9,6 +9,7 @@ import {
   DONT_KNOW_TEXT,
   questionOutcome,
   retryQuestionIds,
+  studentHomeworkRingStats,
   studentHomeworkStats,
   summarizeAttempts,
   unansweredQuestionIds,
@@ -155,6 +156,161 @@ describe("attempts scoring", () => {
     expect(stats.avgAttempt1).toBe(60);
     expect(stats.avgAttempt2).toBe(100);
     expect(studentHomeworkStats([]).avgAttempt1).toBeNull();
+  });
+
+  it("homework rings: empty list has no percents", () => {
+    const stats = studentHomeworkRingStats([]);
+    expect(stats.completedCount).toBe(0);
+    expect(stats.firstAttemptPercent).toBeNull();
+    expect(stats.finalPercent).toBeNull();
+    expect(stats.countable).toBe(0);
+  });
+
+  it("homework rings: in-progress work is not counted", () => {
+    const stats = studentHomeworkRingStats([
+      {
+        status: "attempt1_submitted",
+        attempt2Submitted: false,
+        questionOutcomes: [
+          { questionId: "q1", status: "correct_first" },
+          { questionId: "q2", status: "incorrect" },
+        ],
+      },
+    ]);
+    expect(stats.completedCount).toBe(0);
+    expect(stats.firstAttemptPercent).toBeNull();
+    expect(stats.finalPercent).toBeNull();
+  });
+
+  it("homework rings: no second attempt keeps both percents equal", () => {
+    const stats = studentHomeworkRingStats([
+      {
+        status: "reviewed",
+        attempt2Submitted: false,
+        questionOutcomes: [
+          { questionId: "q1", status: "correct_first" },
+          { questionId: "q2", status: "incorrect" },
+        ],
+      },
+    ]);
+    expect(stats.firstAttemptPercent).toBe(50);
+    expect(stats.finalPercent).toBe(50);
+    expect(stats.firstCorrect).toBe(1);
+    expect(stats.eventuallyCorrect).toBe(1);
+  });
+
+  it("homework rings: second attempt improvement fills the outer ring more", () => {
+    const stats = studentHomeworkRingStats([
+      {
+        status: "reviewed",
+        attempt2Submitted: true,
+        questionOutcomes: [
+          { questionId: "q1", status: "correct_first" },
+          { questionId: "q2", status: "corrected_second" },
+          { questionId: "q3", status: "incorrect" },
+          { questionId: "q4", status: "incorrect" },
+        ],
+      },
+    ]);
+    expect(stats.firstAttemptPercent).toBe(25);
+    expect(stats.finalPercent).toBe(50);
+  });
+
+  it("homework rings: unused second attempt does not invent improvement", () => {
+    const stats = studentHomeworkRingStats([
+      {
+        status: "reviewed",
+        attempt2Submitted: false,
+        questionOutcomes: [
+          { questionId: "q1", status: "correct_first" },
+          { questionId: "q2", status: "corrected_second" },
+        ],
+      },
+    ]);
+    expect(stats.firstAttemptPercent).toBe(50);
+    expect(stats.finalPercent).toBe(50);
+  });
+
+  it("homework rings: second attempt that did not improve stays equal", () => {
+    const stats = studentHomeworkRingStats([
+      {
+        status: "reviewed",
+        attempt2Submitted: true,
+        questionOutcomes: [
+          { questionId: "q1", status: "correct_first" },
+          { questionId: "q2", status: "incorrect" },
+        ],
+      },
+    ]);
+    expect(stats.firstAttemptPercent).toBe(50);
+    expect(stats.finalPercent).toBe(50);
+  });
+
+  it("homework rings: all correct and all incorrect", () => {
+    expect(
+      studentHomeworkRingStats([
+        {
+          status: "reviewed",
+          attempt2Submitted: false,
+          questionOutcomes: [
+            { questionId: "q1", status: "correct_first" },
+            { questionId: "q2", status: "correct_first" },
+          ],
+        },
+      ])
+    ).toMatchObject({ firstAttemptPercent: 100, finalPercent: 100 });
+    expect(
+      studentHomeworkRingStats([
+        {
+          status: "completed",
+          attempt2Submitted: true,
+          questionOutcomes: [
+            { questionId: "q1", status: "incorrect" },
+            { questionId: "q2", status: "incorrect" },
+          ],
+        },
+      ])
+    ).toMatchObject({ firstAttemptPercent: 0, finalPercent: 0 });
+  });
+
+  it("homework rings: pending and unanswered are excluded from the denominator", () => {
+    const stats = studentHomeworkRingStats([
+      {
+        status: "completed",
+        attempt2Submitted: true,
+        questionOutcomes: [
+          { questionId: "q1", status: "correct_first" },
+          { questionId: "q2", status: "pending_review" },
+          { questionId: "q3", status: "unanswered" },
+        ],
+      },
+    ]);
+    expect(stats.countable).toBe(1);
+    expect(stats.firstAttemptPercent).toBe(100);
+    expect(stats.finalPercent).toBe(100);
+  });
+
+  it("homework rings: no countable questions do not produce 0% by division", () => {
+    const stats = studentHomeworkRingStats([
+      {
+        status: "completed",
+        attempt1Percent: 80,
+        attempt2Submitted: false,
+        questionOutcomes: [{ questionId: "q1", status: "pending_review" }],
+      },
+    ]);
+    expect(stats.countable).toBe(0);
+    expect(stats.firstAttemptPercent).toBeNull();
+    expect(stats.finalPercent).toBeNull();
+  });
+
+  it("homework rings: without outcomes fall back to first-attempt percent only", () => {
+    const stats = studentHomeworkRingStats([
+      { status: "reviewed", attempt1Percent: 40 },
+      { status: "completed", attempt1Percent: 80, attempt2Submitted: true },
+    ]);
+    expect(stats.firstAttemptPercent).toBe(60);
+    expect(stats.finalPercent).toBe(60);
   });
 
   it("table average of attempt 2 ignores missing and pending results", () => {

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/empty-state";
+import { TestGradesPanel } from "@/components/grades/test-grades-panel";
 import { PageHeader } from "@/components/layout/page-header";
 import { AssignmentReviewDialog } from "@/components/tests/assignment-review-dialog";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ function pct(n: number | null | undefined) {
 export function GradesWorkspace() {
   const { data, studentsForTeacher, lessonsForTeacher } = useDemoStore();
   const teacherId = data.currentTeacherId;
+  const [section, setSection] = useState<"students" | "tests">("students");
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [review, setReview] = useState<HomeworkAssignment | null>(null);
@@ -67,6 +69,27 @@ export function GradesWorkspace() {
           <span className="font-medium text-foreground">{pendingReview}</span>
         </p>
       ) : null}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={section === "students" ? "default" : "outline"}
+          onClick={() => setSection("students")}
+        >
+          По ученикам
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={section === "tests" ? "default" : "outline"}
+          onClick={() => setSection("tests")}
+        >
+          Оценки по тестам
+        </Button>
+      </div>
+      {section === "tests" ? <TestGradesPanel /> : null}
+      {section === "students" ? (
+        <>
       <Input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
@@ -168,6 +191,8 @@ export function GradesWorkspace() {
         open={!!review}
         onOpenChange={(o) => !o && setReview(null)}
       />
+        </>
+      ) : null}
     </div>
   );
 }

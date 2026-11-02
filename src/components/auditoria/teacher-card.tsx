@@ -2,6 +2,7 @@
 
 import { initialsFromName } from "@/lib/format";
 import type { Teacher } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 export function AuditoriaTeacherCard({
   teacher,
@@ -10,85 +11,80 @@ export function AuditoriaTeacherCard({
   teacher: Teacher | null;
   compact?: boolean;
 }) {
+  const home = compact;
+
   if (!teacher) {
     return (
       <section
         className={
-          compact
-            ? "rounded-2xl border border-border/70 bg-muted/20 p-3.5"
-            : "rounded-2xl border border-border/70 bg-muted/20 p-5"
+          home
+            ? "auditoria-home-card"
+            : "rounded-2xl border border-border/70 bg-auditoria-surface p-5"
         }
       >
-        <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
-          Преподаватель
-        </p>
-        <p className="mt-2 font-display text-xl font-semibold tracking-tight">
+        <p className="text-sm text-muted-foreground">Преподаватель</p>
+        <p className="mt-2 font-display text-2xl font-semibold tracking-tight">
           Пока не назначен
         </p>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
           Школа назначит преподавателя — после этого здесь появится его профиль.
         </p>
       </section>
     );
   }
 
+  const initials = teacher.avatarInitials || initialsFromName(teacher.fullName);
+
   return (
     <section
       className={
-        compact
-          ? "rounded-2xl border border-border/70 p-3.5"
-          : "rounded-2xl border border-border/70 p-5"
+        home
+          ? "auditoria-home-card"
+          : "rounded-2xl border border-border/70 bg-auditoria-surface p-5"
       }
     >
-      <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
-        Преподаватель
-      </p>
-      <div className={compact ? "mt-2 flex gap-3" : "mt-3 flex gap-4"}>
+      <p className="text-sm text-muted-foreground">Преподаватель</p>
+      <div className={cn("mt-4 flex gap-4", !home && "mt-3")}>
         {teacher.photoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={teacher.photoUrl}
             alt=""
             className={
-              compact
-                ? "size-12 shrink-0 rounded-xl object-cover"
+              home
+                ? "size-16 shrink-0 rounded-2xl object-cover sm:size-[4.5rem]"
                 : "size-20 shrink-0 rounded-2xl object-cover sm:size-24"
             }
           />
         ) : (
           <div
             className={
-              compact
-                ? "flex size-12 shrink-0 items-center justify-center rounded-xl text-sm font-semibold text-white"
-                : "flex size-20 shrink-0 items-center justify-center rounded-2xl text-lg font-semibold text-white sm:size-24"
+              home
+                ? "flex size-16 shrink-0 items-center justify-center rounded-2xl bg-pastel-blue font-display text-lg font-semibold text-foreground sm:size-[4.5rem]"
+                : "flex size-20 shrink-0 items-center justify-center rounded-2xl bg-pastel-blue font-display text-lg font-semibold text-foreground sm:size-24"
             }
-            style={{ background: "#3166F0" }}
             aria-hidden
           >
-            {teacher.avatarInitials || initialsFromName(teacher.fullName)}
+            {initials}
           </div>
         )}
         <div className="min-w-0">
-          <h2
-            className={
-              compact
-                ? "font-display text-lg font-semibold tracking-tight"
-                : "font-display text-2xl font-semibold tracking-tight"
-            }
-          >
+          <h2 className="font-display text-xl leading-tight font-semibold tracking-tight sm:text-2xl">
             {teacher.fullName}
           </h2>
           {teacher.subjects.length ? (
-            <p className="mt-0.5 text-sm text-muted-foreground">
+            <p className="mt-1 text-sm text-muted-foreground">
               {teacher.subjects.join(" · ")}
             </p>
           ) : null}
-          {teacher.bio && !compact ? (
-            <p className="mt-3 text-sm leading-relaxed text-foreground/90">
-              {teacher.bio}
-            </p>
-          ) : teacher.bio ? (
-            <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+          {teacher.bio ? (
+            <p
+              className={
+                home
+                  ? "mt-3 line-clamp-3 text-sm leading-relaxed text-foreground/80"
+                  : "mt-3 text-sm leading-relaxed text-foreground/90"
+              }
+            >
               {teacher.bio}
             </p>
           ) : null}

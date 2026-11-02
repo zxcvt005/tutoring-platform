@@ -66,9 +66,9 @@ describe("demo accounts (school seed)", () => {
     expect(isDemoLoginAllowed()).toBe(false);
   });
 
-  it("open-test flag allows demo login helper in production", () => {
+  it("open-test flag does not allow demo login", () => {
     process.env.NODE_ENV = "production";
     process.env.ALLOW_OPEN_TEST_LOGIN = "1";
-    expect(isDemoLoginAllowed()).toBe(true);
+    expect(isDemoLoginAllowed()).toBe(false);
   });
 });

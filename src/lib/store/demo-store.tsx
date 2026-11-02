@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -14,26 +15,30 @@ import { toast } from "sonner";
 
 import {
   apiBootstrap,
-  apiDemoLogin,
   apiFeatures,
   apiLogout,
   apiMe,
   apiPlatform,
+  apiIntensiveUploadFile,
   apiTheoryUploadFile,
   cabinetHomeForRole,
   type AuthFeatures,
   type BootstrapAuth,
 } from "@/lib/store/api-client";
 import {
-  shouldDefaultDemoLogin,
-  shouldSwitchDemoCabinet,
+  createSerialAsyncQueue,
+  demoSessionBootKey,
+  rememberDemoExplicitLogout,
 } from "@/lib/store/demo-session";
+import { isCatalogHomeworkPurpose } from "@/lib/homework/source-kind";
 import type {
   Attendance,
   AttendanceStatus,
   DemoData,
   Homework,
   HomeworkAssignment,
+  Intensive,
+  IntensiveAssignment,
   Lesson,
   Student,
   StudentAnswer,
@@ -99,6 +104,12 @@ type DemoStoreValue = {
     student: Omit<Student, "id"> & { id?: string }
   ) => Promise<OkResult>;
   deleteStudent: (id: string) => void;
+  archiveStudent: (input: {
+    id: string;
+    reason: "trial_not_continued" | "stopped" | "other";
+    comment?: string | null;
+  }) => Promise<OkResult>;
+  restoreStudent: (id: string) => Promise<OkResult>;
   upsertLesson: (
     lesson: Omit<Lesson, "id"> & { id?: string }
   ) => Promise<OkResult>;
@@ -119,6 +130,7 @@ type DemoStoreValue = {
     studentId: string,
     status: AttendanceStatus
   ) => Promise<OkResult>;
+  resetLessonConduct: (lessonId: string) => Promise<OkResult>;
   setLessonTopic: (
     lessonId: string,
     title: string,
@@ -164,8 +176,11 @@ type DemoStoreValue = {
     sectionId: string | null,
     orderedIds: string[]
   ) => void;
-  upsertHomework: (hw: Omit<Homework, "id"> & { id?: string }) => string;
-  deleteHomework: (id: string) => void;
+  upsertHomework: (
+    hw: Omit<Homework, "id"> & { id?: string }
+  ) => Promise<OkResult & { id?: string }>;
+  deleteHomework: (id: string) => Promise<OkResult>;
+  restoreHomework: (id: string) => Promise<OkResult>;
   publishHomework: (id: string) => Promise<OkResult>;
   assignHomework: (input: AssignHomeworkInput) => Promise<OkResult>;
   upsertHomeworkAssignment: (
@@ -174,7 +189,8 @@ type DemoStoreValue = {
   saveHomeworkDraft: (
     id: string,
     answers: StudentAnswer[],
-    attemptNumber?: 1 | 2
+    attemptNumber?: 1 | 2,
+    options?: { silent?: boolean }
   ) => Promise<OkResult>;
   submitHomeworkAssignment: (
     id: string,
@@ -194,6 +210,7 @@ type DemoStoreValue = {
   upsertTheory: (input: {
     id?: string;
     teacherId: string;
+    libraryScope?: "school" | "teacher";
     title: string;
     description?: string | null;
     videoUrl?: string | null;
@@ -208,6 +225,41 @@ type DemoStoreValue = {
   markTheoryViewed: (id: string) => Promise<OkResult>;
   uploadTheoryFile: (materialId: string, file: File) => Promise<OkResult>;
   removeTheoryFile: (materialId: string, fileId: string) => Promise<OkResult>;
+  upsertIntensive: (input: {
+    id?: string;
+    teacherId: string;
+    libraryScope?: "school" | "teacher";
+    title: string;
+    description?: string | null;
+    videoUrl?: string | null;
+    testIds: string[];
+    publish?: boolean;
+  }) => Promise<OkResult & { id?: string }>;
+  deleteIntensive: (id: string) => Promise<OkResult>;
+  assignIntensive: (input: {
+    intensiveId: string;
+    studentId: string;
+    deadlines: { testId: string; dueAt: string }[];
+  }) => Promise<OkResult>;
+  uploadIntensiveFile: (intensiveId: string, file: File) => Promise<OkResult>;
+  removeIntensiveFile: (intensiveId: string, fileId: string) => Promise<OkResult>;
+  createMockExam: (input: {
+    title: string;
+    date: string;
+    description?: string | null;
+  }) => Promise<OkResult>;
+  updateMockExam: (input: {
+    id: string;
+    title: string;
+    date: string;
+    description?: string | null;
+  }) => Promise<OkResult>;
+  deleteMockExam: (id: string) => Promise<OkResult>;
+  setMockExamResult: (input: {
+    mockExamId: string;
+    studentId: string;
+    testScore: number | null;
+  }) => Promise<OkResult>;
   studentsForTeacher: (teacherId: string) => Student[];
   unassignedStudents: () => Student[];
   lessonsForTeacher: (teacherId: string) => Lesson[];
@@ -223,6 +275,9 @@ type DemoStoreValue = {
   theoriesForTeacher: (teacherId: string) => TheoryMaterial[];
   theoryAssignmentsForTeacher: (teacherId: string) => TheoryAssignment[];
   theoryAssignmentsForStudent: (studentId: string) => TheoryAssignment[];
+  intensivesForTeacher: (teacherId: string) => Intensive[];
+  intensiveAssignmentsForTeacher: (teacherId: string) => IntensiveAssignment[];
+  intensiveAssignmentsForStudent: (studentId: string) => IntensiveAssignment[];
   attendancesForLesson: (lessonId: string) => Attendance[];
 };
 
@@ -233,46 +288,35 @@ const EMPTY_DATA: DemoData = {
   teachers: [],
   students: [],
   lessons: [],
+  trialLessons: [],
   attendances: [],
   topicSections: [],
   topics: [],
   homeworks: [],
   homeworkAssignments: [],
   theories: [],
-  theoryAssignments: [],
+    theoryAssignments: [],
+    intensives: [],
+    intensiveAssignments: [],
+    mockExams: [],
+  mockExamResults: [],
   tariffs: [],
   tariffAssignments: [],
   payments: [],
+  products: [],
+  availableProductSlugs: [],
   currentTeacherId: "",
   direkciyaTeacherId: "",
   currentStudentId: "",
 };
 
-function roleFromPath(
-  pathname: string | null
-): "director" | "teacher" | "student" {
-  if (pathname?.startsWith("/kafedra")) return "teacher";
-  if (pathname?.startsWith("/auditoria")) return "student";
-  return "director";
-}
-
 function newClientId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function isPublicAuthPath(pathname: string | null) {
-  return (
-    pathname === "/login" ||
-    pathname === "/setup" ||
-    pathname === "/" ||
-    pathname?.startsWith("/login") ||
-    pathname?.startsWith("/setup") ||
-    pathname?.startsWith("/register")
-  );
-}
-
 export function DemoStoreProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const bootKey = demoSessionBootKey(pathname);
   const router = useRouter();
   const [data, setData] = useState<DemoData>(EMPTY_DATA);
   const [auth, setAuth] = useState<BootstrapAuth | null>(null);
@@ -280,6 +324,9 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [filterTeacherId, setFilterTeacherId] = useState("sch_t1");
   const [filterStudentId, setFilterStudentId] = useState("sch_s01");
+  const enqueueBoot = useMemo(() => createSerialAsyncQueue(), []);
+  const prevBootKeyRef = useRef(bootKey);
+  const pathnameRef = useRef(pathname);
 
   const reload = useCallback(async () => {
     const boot = await apiBootstrap();
@@ -289,6 +336,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    rememberDemoExplicitLogout();
     await apiLogout();
     setAuth(null);
     setData(EMPTY_DATA);
@@ -296,203 +344,70 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
   }, [router]);
 
   useEffect(() => {
+    pathnameRef.current = pathname;
+  }, [pathname]);
+
+  useEffect(() => {
     let cancelled = false;
-    const runId = `boot_${Math.random().toString(36).slice(2, 8)}`;
-    const demoBoot = (step: string, extra?: Record<string, unknown>) => {
-      console.log("[DEMO-BOOT]", runId, step, extra ?? {});
-    };
-    const timed = async <T,>(
-      label: string,
-      fn: () => Promise<T>,
-      summarize?: (value: T) => Record<string, unknown>
-    ): Promise<T> => {
-      demoBoot(`${label}:start`);
-      const started = performance.now();
+    if (prevBootKeyRef.current !== bootKey && bootKey !== "public") {
+      setReady(false);
+    }
+    prevBootKeyRef.current = bootKey;
+    void enqueueBoot(async () => {
+      if (cancelled) return;
       try {
-        const value = await fn();
-        demoBoot(`${label}:done`, {
-          ms: Math.round(performance.now() - started),
-          ...(summarize ? summarize(value) : { ok: true }),
-        });
-        return value;
-      } catch (err) {
-        console.error("[DEMO-BOOT]", runId, `${label}:error`, {
-          ms: Math.round(performance.now() - started),
-        }, err);
-        throw err;
-      }
-    };
-    demoBoot("effect:start", {
-      pathname,
-      filterTeacherId,
-      filterStudentId,
-      readyAtEffectStart: ready,
-    });
-    (async () => {
-      try {
-        const feats = await timed("apiFeatures", () => apiFeatures(), (value) => ({
-          demoLogin: value.demoLogin,
-          needsBootstrap: value.needsBootstrap,
-          demoAccountCount: value.demoAccounts?.length ?? 0,
-        }));
-        if (cancelled) {
-          demoBoot("abort-after-apiFeatures", { cancelled: true });
-          return;
-        }
-        setFeatures(feats);
+        const feats = await apiFeatures();
+        if (cancelled) return;
+        setFeatures({ ...feats, demoLogin: false, demoAccounts: [] });
 
-        if (isPublicAuthPath(pathname)) {
-          if (!cancelled) {
-            setReady(true);
-            demoBoot("setReady(true)", { reason: "public-auth-path" });
-          }
+        if (bootKey === "public") {
+          if (!cancelled) setReady(true);
           return;
         }
 
-        const role = roleFromPath(pathname);
-        demoBoot("role-from-path", { pathRole: role });
-        let me = await timed("apiMe", () => apiMe(), (value) => ({
-          hasMe: Boolean(value),
-          role: (value as { role?: string } | null)?.role ?? null,
-          studentId: (value as { studentId?: string | null } | null)?.studentId ?? null,
-          teacherId: (value as { teacherId?: string | null } | null)?.teacherId ?? null,
-        }));
+        const role = bootKey;
+        const me = await apiMe();
+        if (cancelled) return;
 
         if (!me) {
           if (feats.needsBootstrap) {
-            demoBoot("redirect", { to: "/setup", reason: "needsBootstrap" });
             router.replace("/setup");
             return;
           }
-          if (
-            shouldDefaultDemoLogin({
-              demoLoginEnabled: feats.demoLogin,
-              hasSession: false,
-            })
-          ) {
-            await timed(
-              "apiDemoLogin:no-session",
-              () =>
-                apiDemoLogin({
-                  role,
-                  teacherId: filterTeacherId,
-                  studentId: filterStudentId,
-                }),
-              (value) => ({
-                role: value.role,
-                studentId: value.studentId ?? null,
-                teacherId: value.teacherId ?? null,
-              })
-            );
-            me = await timed("apiMe:after-demo-login", () => apiMe(), (value) => ({
-              hasMe: Boolean(value),
-              role: (value as { role?: string } | null)?.role ?? null,
-              studentId:
-                (value as { studentId?: string | null } | null)?.studentId ??
-                null,
-              teacherId:
-                (value as { teacherId?: string | null } | null)?.teacherId ??
-                null,
-            }));
-          } else {
-            const next = encodeURIComponent(pathname || "/");
-            demoBoot("redirect", { to: "/login", reason: "demoLogin-disabled" });
-            router.replace(`/login?next=${next}`);
-            return;
-          }
+          const next = encodeURIComponent(pathnameRef.current || "/");
+          router.replace(`/login?next=${next}`);
+          return;
         }
 
         const meRole = (me as { role?: string } | null)?.role;
-        const meTeacherId = (me as { teacherId?: string | null } | null)
-          ?.teacherId;
-        const meStudentId = (me as { studentId?: string | null } | null)
-          ?.studentId;
-        const needCabinetSwitch = shouldSwitchDemoCabinet({
-          demoLoginEnabled: feats.demoLogin,
-          hasSession: Boolean(me),
-          pathRole: role,
-          sessionRole: meRole,
-        });
-        demoBoot("identity-check", {
-          pathRole: role,
-          meRole: meRole ?? null,
-          meStudentId: meStudentId ?? null,
-          meTeacherId: meTeacherId ?? null,
-          filterStudentId,
-          filterTeacherId,
-          needCabinetSwitch,
-          sessionIsSourceOfTruth: Boolean(me) && !needCabinetSwitch,
-        });
-        if (needCabinetSwitch) {
-          await timed(
-            "apiDemoLogin:cabinet-switch",
-            () =>
-              apiDemoLogin({
-                role,
-                teacherId: filterTeacherId,
-                studentId: filterStudentId,
-              }),
-            (value) => ({
-              role: value.role,
-              studentId: value.studentId ?? null,
-              teacherId: value.teacherId ?? null,
-            })
-          );
-        } else if (!feats.demoLogin && meRole && meRole !== role) {
-          demoBoot("redirect", {
-            reason: "role-mismatch",
-            meRole,
-            pathRole: role,
-          });
+        if (meRole && meRole !== role) {
           router.replace(
             cabinetHomeForRole(
-              meRole as "director" | "teacher" | "student"
+              meRole as "director" | "teacher" | "student" | "press"
             )
           );
           return;
         }
 
-        if (!cancelled) {
-          await timed("reload/apiBootstrap", () => reload(), (boot) => ({
-            authRole: boot.auth?.role ?? null,
-            authStudentId: boot.auth?.studentId ?? null,
-            authTeacherId: boot.auth?.teacherId ?? null,
-          }));
-        } else {
-          demoBoot("skip-reload", { cancelled: true });
-        }
+        if (!cancelled) await reload();
       } catch (e) {
-        console.error("[DEMO-BOOT]", runId, "effect:error", e);
         console.error(e);
         if (!cancelled) {
           toast.error(
             e instanceof Error
               ? e.message
-              : "Нет связи с API/PostgreSQL. См. docs/local-run.md"
+              : "Нет связи с сервером. Обновите страницу или войдите снова."
           );
         }
       } finally {
-        demoBoot("finally", {
-          cancelled,
-          willSetReady: !cancelled,
-          readyAtEffectStart: ready,
-        });
-        if (!cancelled) {
-          setReady(true);
-          demoBoot("setReady(true)", { reason: "effect-finally" });
-        }
+        if (!cancelled) setReady(true);
       }
-    })();
+    });
     return () => {
       cancelled = true;
-      demoBoot("cleanup", {
-        reason: "effect-deps-or-unmount",
-        pathname,
-        filterTeacherId,
-        filterStudentId,
-      });
     };
-  }, [pathname, filterTeacherId, filterStudentId, reload, router]);
+    // bootKey, not pathname: переход внутри кабинета не должен заново проверять сессию.
+  }, [bootKey, enqueueBoot, reload, router]);
 
   const run = useCallback(
     async (action: string, payload?: unknown, idem?: string): Promise<OkResult> => {
@@ -538,8 +453,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
     setData((d) => ({ ...d, currentStudentId: id }));
   }, []);
 
-  const value = useMemo<DemoStoreValue>(
-    () => ({
+  const value: DemoStoreValue = {
       data: {
         ...data,
         currentTeacherId:
@@ -555,17 +469,13 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       ready,
       auth,
       features,
-      demoLoginEnabled: features?.demoLogin ?? false,
+      demoLoginEnabled: false,
       reload,
       logout,
       setCurrentTeacherId,
       setDirekciyaTeacherId,
       setCurrentStudentId,
-      resetDemo: () => {
-        toast.message(
-          "Обновить тестовую школу: в PowerShell выполните npm run db:seed:school (при ALLOW_TEST_SEED=1), затем обновите страницу. Или перезапустите start-local.bat без UMBA_SKIP_SEED."
-        );
-      },
+      resetDemo: () => undefined,
       upsertTeacher: (teacher) => {
         void run("upsertTeacher", teacher);
       },
@@ -576,6 +486,8 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       deleteStudent: (id) => {
         void run("deleteStudent", { id });
       },
+      archiveStudent: (input) => run("archiveStudent", input),
+      restoreStudent: (id) => run("restoreStudent", { id }),
       upsertLesson: (lesson) => run("upsertLesson", lesson),
       createRecurringSchedule: async (input) => {
         const r = await run("createRecurringSchedule", input);
@@ -598,6 +510,8 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       },
       setAttendance: (lessonId, studentId, status) =>
         run("setAttendance", { lessonId, studentId, status }),
+      resetLessonConduct: (lessonId) =>
+        run("resetLessonConduct", { lessonId }),
       setLessonTopic: (lessonId, title, topicId) =>
         run("setLessonTopic", { lessonId, title, topicId: topicId ?? null }),
       setLessonTopics: (lessonId, topics) =>
@@ -630,13 +544,20 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       reorderTopics: (teacherId, sectionId, orderedIds) => {
         void run("reorderTopics", { teacherId, sectionId, orderedIds });
       },
-      upsertHomework: (hw) => {
+      upsertHomework: async (hw) => {
         const id = hw.id ?? newClientId("hw");
-        void run("upsertHomework", { ...hw, id });
-        return id;
+        const r = await run("upsertHomework", { ...hw, id });
+        return { ...r, id: r.ok ? (r.id ?? id) : undefined };
       },
-      deleteHomework: (id) => {
-        void run("deleteHomework", { id });
+      deleteHomework: async (id) => {
+        const r = await run("deleteHomework", { id });
+        if (r.ok) toast.success("Тест в архиве");
+        return r;
+      },
+      restoreHomework: async (id) => {
+        const r = await run("restoreHomework", { id });
+        if (r.ok) toast.success("Тест возвращён из архива");
+        return r;
       },
       publishHomework: async (id) => {
         const r = await run("publishHomework", { id });
@@ -653,13 +574,13 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       upsertHomeworkAssignment: () => {
         toast.message("Используйте сдачу или проверку задания");
       },
-      saveHomeworkDraft: async (id, answers, attemptNumber = 1) => {
+      saveHomeworkDraft: async (id, answers, attemptNumber = 1, options) => {
         const r = await run("saveHomeworkDraft", {
           id,
           answers,
           attemptNumber,
         });
-        if (r.ok) toast.success("Черновик сохранён");
+        if (r.ok && !options?.silent) toast.success("Черновик сохранён");
         return r;
       },
       submitHomeworkAssignment: async (id, answers, attemptNumber = 1) => {
@@ -734,9 +655,70 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         if (r.ok) toast.success("Файл откреплён");
         return r;
       },
+      upsertIntensive: async (input) => {
+        const r = await run("upsertIntensive", input);
+        if (r.ok) {
+          toast.success(
+            input.publish ? "Интенсив опубликован" : "Интенсив сохранён"
+          );
+        }
+        return r;
+      },
+      deleteIntensive: async (id) => {
+        const r = await run("deleteIntensive", { id });
+        if (r.ok) {
+          toast.success(r.archived ? "Интенсив архивирован" : "Интенсив удалён");
+        }
+        return r;
+      },
+      assignIntensive: async (input) => {
+        const r = await run(
+          "assignIntensive",
+          input,
+          `assign-intensive-${input.intensiveId}-${input.studentId}`
+        );
+        if (r.ok) toast.success("Интенсив отправлен");
+        return r;
+      },
+      uploadIntensiveFile: async (intensiveId, file) => {
+        try {
+          await apiIntensiveUploadFile(intensiveId, file);
+          await reload();
+          toast.success("Конспект прикреплён");
+          return { ok: true };
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Ошибка загрузки";
+          toast.error(message);
+          return { ok: false, error: message };
+        }
+      },
+      removeIntensiveFile: async (intensiveId, fileId) => {
+        const r = await run("removeIntensiveFile", { intensiveId, fileId });
+        if (r.ok) toast.success("Конспект откреплён");
+        return r;
+      },
+      createMockExam: async (input) => {
+        const r = await run("createMockExam", input);
+        if (r.ok) toast.success("Пробник создан");
+        return r;
+      },
+      updateMockExam: async (input) => {
+        const r = await run("updateMockExam", input);
+        if (r.ok) toast.success("Пробник обновлён");
+        return r;
+      },
+      deleteMockExam: async (id) => {
+        const r = await run("deleteMockExam", { id });
+        if (r.ok) toast.success("Пробник удалён");
+        return r;
+      },
+      setMockExamResult: (input) => run("setMockExamResult", input),
       studentsForTeacher: (teacherId) =>
-        data.students.filter((s) => s.teacherId === teacherId),
-      unassignedStudents: () => data.students.filter((s) => !s.teacherId),
+        data.students.filter(
+          (s) => s.teacherId === teacherId && s.status !== "archived"
+        ),
+      unassignedStudents: () =>
+        data.students.filter((s) => !s.teacherId && s.status !== "archived"),
       lessonsForTeacher: (teacherId) =>
         data.lessons.filter((l) => l.teacherId === teacherId),
       lessonsForStudent: (studentId) =>
@@ -754,33 +736,37 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
           ),
       homeworksForTopic: (topicId) =>
         data.homeworks.filter(
-          (h) => h.topicId === topicId && h.purpose !== "theory"
+          (h) => h.topicId === topicId && isCatalogHomeworkPurpose(h.purpose)
         ),
       homeworksForTeacher: (teacherId) =>
         data.homeworks.filter(
-          (h) => h.teacherId === teacherId && h.purpose !== "theory"
+          (h) => h.teacherId === teacherId && isCatalogHomeworkPurpose(h.purpose)
         ),
       publishedHomeworksForTopic: (topicId) =>
         data.homeworks.filter(
           (h) =>
             h.topicId === topicId &&
             h.status === "published" &&
-            h.purpose !== "theory"
+            isCatalogHomeworkPurpose(h.purpose)
         ),
       publishedHomeworksForTeacher: (teacherId) =>
         data.homeworks.filter(
           (h) =>
             h.teacherId === teacherId &&
             h.status === "published" &&
-            h.purpose !== "theory"
+            isCatalogHomeworkPurpose(h.purpose)
         ),
       assignmentsForTeacher: (teacherId) =>
         data.homeworkAssignments.filter(
-          (a) => a.teacherId === teacherId && a.sourceKind !== "theory"
+          (a) => a.teacherId === teacherId && a.sourceKind !== "theory" && a.sourceKind !== "intensive"
         ),
       assignmentsForStudent: (studentId) =>
         data.homeworkAssignments.filter(
-          (a) => a.studentId === studentId && a.sourceKind !== "theory"
+          (a) =>
+            a.studentId === studentId &&
+            a.sourceKind !== "theory" &&
+            a.sourceKind !== "intensive" &&
+            a.status !== "withdrawn"
         ),
       theoriesForTeacher: (teacherId) =>
         data.theories.filter((t) => t.teacherId === teacherId),
@@ -788,24 +774,19 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         data.theoryAssignments.filter((a) => a.teacherId === teacherId),
       theoryAssignmentsForStudent: (studentId) =>
         data.theoryAssignments.filter((a) => a.studentId === studentId),
+      intensivesForTeacher: (teacherId) =>
+        data.intensives.filter(
+          (item) =>
+            item.teacherId === teacherId ||
+            (item.libraryScope === "school" && item.status === "published")
+        ),
+      intensiveAssignmentsForTeacher: (teacherId) =>
+        data.intensiveAssignments.filter((item) => item.teacherId === teacherId),
+      intensiveAssignmentsForStudent: (studentId) =>
+        data.intensiveAssignments.filter((item) => item.studentId === studentId),
       attendancesForLesson: (lessonId) =>
         data.attendances.filter((a) => a.lessonId === lessonId),
-    }),
-    [
-      data,
-      ready,
-      auth,
-      features,
-      reload,
-      logout,
-      filterTeacherId,
-      filterStudentId,
-      setCurrentTeacherId,
-      setDirekciyaTeacherId,
-      setCurrentStudentId,
-      run,
-    ]
-  );
+  };
 
   return (
     <DemoStoreContext.Provider value={value}>{children}</DemoStoreContext.Provider>

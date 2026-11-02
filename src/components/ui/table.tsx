@@ -11,7 +11,10 @@ function Table({ className, ...props }: React.ComponentProps<"table">) {
     >
       <table
         data-slot="table"
-        className={cn("w-full caption-bottom text-[0.8125rem]", className)}
+        className={cn(
+          "w-full min-w-max caption-bottom text-[0.8125rem]",
+          className
+        )}
         {...props}
       />
     </div>

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm";
 
 import {
   CHAT_EDIT_WINDOW_MS,
@@ -16,6 +16,7 @@ import {
   sniffChatFile,
 } from "@/lib/chat/file-sniff";
 import { chatMessagePreview } from "@/lib/chat/preview";
+import { resolveStudentTeacherChat } from "@/lib/chat/student-teacher-chat";
 import type {
   ChatAttachmentView,
   ChatListItem,
@@ -185,6 +186,7 @@ async function unreadCountsFor(
     .where(
       and(
         inArray(chatMessages.chatId, chatIds),
+        ne(chatMessages.type, "system_event"),
         sql`${chatMessages.authorUserId} is distinct from ${userId}`,
         sql`(
           ${chatReadCursors.lastReadAt} is null
@@ -212,7 +214,12 @@ async function lastPreviewsFor(
       eventPayload: chatMessages.eventPayload,
     })
     .from(chatMessages)
-    .where(inArray(chatMessages.chatId, chatIds))
+    .where(
+      and(
+        inArray(chatMessages.chatId, chatIds),
+        ne(chatMessages.type, "system_event")
+      )
+    )
     .orderBy(chatMessages.chatId, desc(chatMessages.createdAt));
   for (const row of rows) {
     map.set(
@@ -475,6 +482,7 @@ export async function getChatSummary(
       and(
         eq(chats.organizationId, ctx.organizationId),
         participant,
+        ne(chatMessages.type, "system_event"),
         sql`${chatMessages.authorUserId} is distinct from ${ctx.userId}`,
         sql`(
           ${chatReadCursors.lastReadAt} is null
@@ -966,18 +974,33 @@ export async function ensureChatForViewer(
 ) {
   requireRoles(ctx, ["student", "teacher"]);
   if (ctx.role === "student") {
-    await ensureStudentCurrentChat(db, ctx);
-    const teacherId = input.teacherId;
-    if (teacherId) {
-      const chat = await getOrCreateChatPair(db, {
-        organizationId: ctx.organizationId,
-        studentId: ctx.studentId!,
-        teacherId,
-      });
-      assertParticipant(ctx, chat);
-      return loadPeerMeta(db, ctx, chat);
+    const [student] = await db
+      .select({ primaryTeacherId: students.primaryTeacherId })
+      .from(students)
+      .where(
+        and(
+          eq(students.id, ctx.studentId!),
+          eq(students.organizationId, ctx.organizationId)
+        )
+      )
+      .limit(1);
+    const target = resolveStudentTeacherChat({
+      primaryTeacherId: student?.primaryTeacherId,
+      requestedTeacherId: input.teacherId,
+    });
+    if (!target.ok) {
+      if (target.code === "foreign-teacher") {
+        throw forbidden("Можно открыть только чат со своим преподавателем");
+      }
+      throw badRequest("Преподаватель не назначен");
     }
-    throw badRequest("Укажите преподавателя");
+    const chat = await getOrCreateChatPair(db, {
+      organizationId: ctx.organizationId,
+      studentId: ctx.studentId!,
+      teacherId: target.teacherId,
+    });
+    assertParticipant(ctx, chat);
+    return loadPeerMeta(db, ctx, chat);
   }
   const studentId = input.studentId;
   if (!studentId) throw badRequest("Укажите ученика");

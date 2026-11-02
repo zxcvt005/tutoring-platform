@@ -110,7 +110,7 @@ export async function resolveLearningAccess(
   );
   base.remaining = balance.remaining;
 
-  if (balance.remaining != null && balance.remaining <= 0) {
+  if (balance.remaining != null && balance.remaining < 0) {
     return { allowed: false, reason: "exhausted", ...base };
   }
   if (feature && !features.includes(feature)) {
@@ -137,7 +137,7 @@ export async function assertStudentLearningAccess(
       access.reason === "unpaid"
         ? "Обучение недоступно: тариф не оплачен"
         : access.reason === "exhausted"
-          ? "Обучение недоступно: занятия по тарифу закончились"
+          ? "Обучение недоступно: занятие в долг использовано, продлите тариф"
           : access.reason === "expired"
             ? "Обучение недоступно: срок тарифа истёк"
             : access.reason === "no_assignment"

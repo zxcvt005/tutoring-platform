@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
+import { TariffRenewalMark } from "@/components/tariff-balance-notice";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -63,6 +64,7 @@ function MonthBlock({
   query,
   statusFilter,
   onMarkPaid,
+  onReject,
   busyId,
 }: {
   month: MonthSummary;
@@ -70,6 +72,7 @@ function MonthBlock({
   query: string;
   statusFilter: PaymentRecordStatus | "all";
   onMarkPaid: (id: string) => void;
+  onReject: (id: string) => void;
   busyId: string | null;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -141,6 +144,7 @@ function MonthBlock({
                   payment={p}
                   busy={busyId === p.id}
                   onMarkPaid={() => onMarkPaid(p.id)}
+                  onReject={() => onReject(p.id)}
                 />
               ))}
             </ul>
@@ -155,14 +159,17 @@ function PaymentLine({
   payment,
   busy,
   onMarkPaid,
+  onReject,
 }: {
   payment: IncomePaymentRow;
   busy: boolean;
   onMarkPaid: () => void;
+  onReject: () => void;
 }) {
   const statusLabel: Record<PaymentRecordStatus, string> = {
     paid: "Оплачен",
-    pending: "Ожидает",
+    pending: "Оплата на проверке",
+    rejected: "Оплата отклонена",
     cancelled: "Отменён",
     failed: "Ошибка",
   };
@@ -181,21 +188,39 @@ function PaymentLine({
         </p>
         <p className="text-xs text-muted-foreground tabular-nums">
           {formatDateTime(payment.at)} · {statusLabel[payment.status]}
+          {payment.lessonsLimit != null ? ` · ${payment.lessonsLimit} зан.` : ""}
+          {payment.currentTariffName
+            ? ` · сейчас: ${payment.currentTariffName}`
+            : ""}
         </p>
+        {payment.status === "rejected" && payment.failureReason ? (
+          <p className="text-xs text-muted-foreground">{payment.failureReason}</p>
+        ) : null}
       </div>
       <div className="flex items-center gap-2">
         <span className="tabular-nums font-medium">{money(payment.amount)}</span>
         {payment.status === "pending" ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-7 rounded-lg px-2 text-xs"
-            disabled={busy}
-            onClick={onMarkPaid}
-          >
-            Оплачен
-          </Button>
+          <>
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 rounded-lg px-2 text-xs"
+              disabled={busy}
+              onClick={onMarkPaid}
+            >
+              Подтвердить
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 rounded-lg px-2 text-xs"
+              disabled={busy}
+              onClick={onReject}
+            >
+              Отклонить
+            </Button>
+          </>
         ) : null}
       </div>
     </li>
@@ -235,9 +260,22 @@ function AttentionList({
             )}
           >
             <div className="min-w-0">
-              <p className="truncate font-medium">{r.studentName}</p>
+              <p className="flex items-center gap-1.5 truncate font-medium">
+                <TariffRenewalMark
+                  remaining={r.lessonsRemaining}
+                  packageStatus={
+                    r.needsRenewal
+                      ? r.lessonsRemaining != null && r.lessonsRemaining <= -1
+                        ? "debt"
+                        : "exhausted"
+                      : "active"
+                  }
+                />
+                <span className="truncate">{r.studentName}</span>
+              </p>
               <p className="truncate text-xs text-muted-foreground">
                 {r.tariffName} · до {formatDate(r.endsAt)}
+                {r.renewalHint ? ` · ${r.renewalHint}` : ""}
               </p>
             </div>
             <span
@@ -314,7 +352,20 @@ function TariffGroups({
                       href={`/direkciya/students/${s.studentId}`}
                       className="flex items-baseline justify-between gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-muted/40"
                     >
-                      <span className="truncate">{s.studentName}</span>
+                      <span className="flex min-w-0 items-center gap-1.5 truncate">
+                        <TariffRenewalMark
+                          remaining={s.lessonsRemaining}
+                          packageStatus={
+                            s.needsRenewal
+                              ? s.lessonsRemaining != null &&
+                                s.lessonsRemaining <= -1
+                                ? "debt"
+                                : "exhausted"
+                              : "active"
+                          }
+                        />
+                        <span className="truncate">{s.studentName}</span>
+                      </span>
                       <span
                         className={cn(
                           "shrink-0 text-xs tabular-nums",
@@ -367,7 +418,11 @@ export function IncomeWorkspace() {
       })),
       assignments: data.tariffAssignments.map((a) => ({
         id: a.id,
+        studentId: a.studentId,
         tariffName: a.tariffName,
+        lessonsLimitSnapshot: a.lessonsLimitSnapshot ?? null,
+        status: a.status,
+        paymentStatus: a.paymentStatus,
       })),
     });
   }, [data.payments, data.students, data.tariffAssignments]);
@@ -378,6 +433,7 @@ export function IncomeWorkspace() {
         students: data.students.map((s) => ({
           id: s.id,
           fullName: s.fullName,
+          status: s.status,
         })),
         assignments: data.tariffAssignments,
       }),
@@ -409,22 +465,41 @@ export function IncomeWorkspace() {
   const current = serverCurrent ?? localCurrent;
   const currentMonthKey = monthKeyFromInstant(new Date());
 
+  async function refreshOverview() {
+    const res = await apiPlatform<{
+      months: MonthSummary[];
+      current: CurrentTariffOverview;
+    }>("getIncomeOverview", {});
+    setServerMonths(res.months);
+    setServerCurrent(res.current);
+    window.location.reload();
+  }
+
   async function markPaid(paymentId: string) {
     const reason = window.prompt(
-      "Причина ручной фиксации оплаты (обязательно):"
+      "Подтвердите поступление денег. Кратко укажите основание (обязательно):"
     );
     if (!reason || reason.trim().length < 3) return;
     setBusyId(paymentId);
     try {
       await apiPlatform("adminMarkPaymentPaid", { paymentId, reason });
-      toast.success("Оплата зафиксирована");
-      const res = await apiPlatform<{
-        months: MonthSummary[];
-        current: CurrentTariffOverview;
-      }>("getIncomeOverview", {});
-      setServerMonths(res.months);
-      setServerCurrent(res.current);
-      window.location.reload();
+      toast.success("Оплата подтверждена вручную");
+      await refreshOverview();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function rejectPayment(paymentId: string) {
+    const reason =
+      window.prompt("Причина отклонения (можно оставить пустой):") ?? "";
+    setBusyId(paymentId);
+    try {
+      await apiPlatform("adminRejectPayment", { paymentId, reason });
+      toast.success("Заявка отклонена");
+      await refreshOverview();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Ошибка");
     } finally {
@@ -462,19 +537,22 @@ export function IncomeWorkspace() {
                 v === "paid"
                   ? "Оплачен"
                   : v === "pending"
-                    ? "Ожидает"
-                    : v === "cancelled"
-                      ? "Отменён"
-                      : v === "failed"
-                        ? "Ошибка"
-                        : "Все статусы"
+                    ? "На проверке"
+                    : v === "rejected"
+                      ? "Отклонена"
+                      : v === "cancelled"
+                        ? "Отменён"
+                        : v === "failed"
+                          ? "Ошибка"
+                          : "Все статусы"
               }
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Все статусы</SelectItem>
             <SelectItem value="paid">Оплачен</SelectItem>
-            <SelectItem value="pending">Ожидает</SelectItem>
+            <SelectItem value="pending">На проверке</SelectItem>
+            <SelectItem value="rejected">Отклонена</SelectItem>
             <SelectItem value="cancelled">Отменён</SelectItem>
             <SelectItem value="failed">Ошибка</SelectItem>
           </SelectContent>
@@ -501,6 +579,7 @@ export function IncomeWorkspace() {
                   query={query}
                   statusFilter={statusFilter}
                   onMarkPaid={(id) => void markPaid(id)}
+                  onReject={(id) => void rejectPayment(id)}
                   busyId={busyId}
                 />
               ))}

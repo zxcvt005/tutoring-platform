@@ -17,6 +17,8 @@ export function ConfirmDialog({
   confirmLabel = "Удалить",
   cancelLabel = "Отмена",
   busy = false,
+  busyLabel = "Удаление…",
+  confirmVariant = "destructive",
   onOpenChange,
   onConfirm,
 }: {
@@ -26,6 +28,8 @@ export function ConfirmDialog({
   confirmLabel?: string;
   cancelLabel?: string;
   busy?: boolean;
+  busyLabel?: string;
+  confirmVariant?: "default" | "destructive";
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }) {
@@ -55,11 +59,11 @@ export function ConfirmDialog({
           </Button>
           <Button
             type="button"
-            variant="destructive"
+            variant={confirmVariant}
             disabled={busy}
             onClick={onConfirm}
           >
-            {busy ? "Удаление…" : confirmLabel}
+            {busy ? busyLabel : confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -12,6 +12,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/format";
+import { theoryComponentLabels } from "@/lib/theory/components";
 import { filterTheoriesByTitle, teacherTheoryStats } from "@/lib/theory/list";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { TheoryMaterial } from "@/lib/types";
@@ -40,7 +41,7 @@ export function TheoryWorkspace() {
     <div className="space-y-4">
       <PageHeader
         title="Теория"
-        description="Видео, конспекты и необязательный тест. Назначается ученику отдельно от домашних заданий."
+        description="Видео, конспект и тест можно комбинировать как угодно — нужен хотя бы один компонент."
         actions={
           <Link href="/kafedra/theory/new" className={buttonVariants()}>
             Новая теория
@@ -58,7 +59,7 @@ export function TheoryWorkspace() {
           title={items.length === 0 ? "Теорий пока нет" : "Ничего не найдено"}
           description={
             items.length === 0
-              ? "Создайте материал со ссылкой на видео — его можно отправить ученикам."
+              ? "Создайте материал с видео, конспектом или тестом — его можно отправить ученикам."
               : "Измените запрос или сбросьте поиск."
           }
         />
@@ -72,10 +73,12 @@ export function TheoryWorkspace() {
                   <div className="min-w-0">
                     <p className="font-medium">{item.title}</p>
                     <p className="text-xs text-muted-foreground">
-                      {formatDate(item.updatedAt)} ·{" "}
-                      {item.hasVideo ? "есть видео" : "без видео"} ·{" "}
-                      {item.hasTest ? "есть тест" : "без теста"} · файлов:{" "}
-                      {item.fileCount}
+                      {formatDate(item.updatedAt)}
+                      {theoryComponentLabels({
+                        hasVideo: item.hasVideo,
+                        hasTest: item.hasTest,
+                        fileCount: item.fileCount,
+                      }).map((label) => ` · ${label}`)}
                     </p>
                   </div>
                   <TheoryStatusBadge status={item.status} />

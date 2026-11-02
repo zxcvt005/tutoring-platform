@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 
+import { DEV_LAN_HTTPS_ORIGIN } from "@/lib/dev-lan-https";
 import {
   assertSameOrigin,
   getAllowedOrigins,
@@ -19,7 +20,8 @@ describe("Origin allowlist / CSRF companion checks", () => {
   };
 
   afterEach(() => {
-    process.env.APP_BASE_URL = prev.APP_BASE_URL;
+    if (prev.APP_BASE_URL === undefined) delete process.env.APP_BASE_URL;
+    else process.env.APP_BASE_URL = prev.APP_BASE_URL;
     process.env.ALLOWED_ORIGINS = prev.ALLOWED_ORIGINS;
     process.env.NODE_ENV = prev.NODE_ENV;
   });
@@ -92,6 +94,42 @@ describe("Origin allowlist / CSRF companion checks", () => {
     delete env.APP_BASE_URL;
     expect(getAllowedOrigins(env)).toContain("http://127.0.0.1:43127");
     expect(isOriginAllowed("http://localhost:3000", env)).toBe(true);
+  });
+
+  it("allows the exact LAN HTTPS lab origin only in development", () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.APP_BASE_URL;
+    const env = {
+      NODE_ENV: "development",
+    } as NodeJS.ProcessEnv;
+    expect(isOriginAllowed(DEV_LAN_HTTPS_ORIGIN, env)).toBe(true);
+    expect(() =>
+      assertSameOrigin(
+        new Request(`${DEV_LAN_HTTPS_ORIGIN}/api/video/lab-token`, {
+          method: "POST",
+          headers: { origin: DEV_LAN_HTTPS_ORIGIN },
+        })
+      )
+    ).not.toThrow();
+  });
+
+  it("rejects other HTTPS origins and LAN HTTP in development", () => {
+    const env = {
+      NODE_ENV: "development",
+    } as NodeJS.ProcessEnv;
+    expect(isOriginAllowed("https://evil.example", env)).toBe(false);
+    expect(isOriginAllowed("https://192.168.1.117:43128", env)).toBe(false);
+    expect(isOriginAllowed("http://192.168.1.116:43128", env)).toBe(false);
+    expect(isOriginAllowed("http://192.168.1.116:43127", env)).toBe(false);
+  });
+
+  it("does not allow the LAN HTTPS lab origin in production", () => {
+    const env = {
+      NODE_ENV: "production",
+      APP_BASE_URL: PROD_ORIGIN,
+    } as NodeJS.ProcessEnv;
+    expect(getAllowedOrigins(env)).toEqual([PROD_ORIGIN]);
+    expect(isOriginAllowed(DEV_LAN_HTTPS_ORIGIN, env)).toBe(false);
   });
 
   it("assertSameOrigin accepts Timeweb Origin when APP_BASE_URL is set", () => {

@@ -120,6 +120,7 @@ function CompleteForm({
       .filter(
         (a) =>
           a.sourceKind !== "theory" &&
+          a.sourceKind !== "intensive" &&
           a.lessonId === lesson.id &&
           participantIds.includes(a.studentId)
       )

@@ -47,6 +47,11 @@
   --color-surface-sky: var(--surface-sky);
   --color-surface-sand: var(--surface-sand);
   --color-surface-rose: var(--surface-rose);
+  --color-pastel-blue: var(--pastel-blue);
+  --color-pastel-beige: var(--pastel-beige);
+  --color-pastel-mint: var(--pastel-mint);
+  --color-pastel-rose: var(--pastel-rose);
+  --color-auditoria-surface: var(--auditoria-surface);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -82,6 +87,14 @@
   --surface-sky: oklch(0.96 0.02 240);
   --surface-sand: oklch(0.97 0.018 85);
   --surface-rose: oklch(0.965 0.02 20);
+  --pastel-blue: #e5f2fb;
+  --pastel-beige: #f9f0e4;
+  --pastel-mint: #e5f3ea;
+  --pastel-rose: #fcebec;
+  /* Та же белизна, что у панели сайдбара Аудитории: rgb(255 255 255 / 0.8). */
+  --auditoria-surface: rgb(255 255 255 / 0.8);
+  --neodin-overlay: rgb(15 23 42 / 0.28);
+  --neodin-overlay-blur: 12px;
   --chart-1: oklch(0.55 0.08 250);
   --chart-2: oklch(0.5 0.1 155);
   --chart-3: oklch(0.55 0.12 25);
@@ -123,6 +136,10 @@
   --surface-sky: oklch(0.28 0.03 240);
   --surface-sand: oklch(0.28 0.025 85);
   --surface-rose: oklch(0.28 0.03 20);
+  --pastel-blue: oklch(0.32 0.04 240);
+  --pastel-beige: oklch(0.32 0.03 85);
+  --pastel-mint: oklch(0.32 0.04 160);
+  --pastel-rose: oklch(0.32 0.04 20);
   --sidebar: oklch(0.18 0.012 265);
   --sidebar-foreground: oklch(0.98 0.005 250);
   --sidebar-primary: oklch(0.92 0.01 250);
@@ -155,6 +172,22 @@
   }
 }
 
+@layer components {
+  /* KaTeX кладёт скрытый MathML рядом с HTML; он не должен создавать scrollport. */
+  .formula-math .katex-mathml {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+  }
+
+  button:has(> .formula-math) {
+    overflow: visible;
+  }
+}
+
 @layer utilities {
   .font-display {
     font-family: var(--font-literata), ui-serif, Georgia, serif;
@@ -177,4 +210,28 @@
   .panel-soft {
     @apply rounded-xl border border-transparent;
   }
+  .auditoria-home-card {
+    @apply rounded-3xl border border-black/10 bg-auditoria-surface p-5;
+  }
+  .neodin-overlay {
+    background-color: var(--neodin-overlay);
+    -webkit-backdrop-filter: blur(var(--neodin-overlay-blur));
+    backdrop-filter: blur(var(--neodin-overlay-blur));
+  }
+}
+
+[data-auditoria-workspace] [data-slot="input"],
+[data-auditoria-workspace] [data-slot="textarea"] {
+  background-color: var(--auditoria-surface);
+}
+
+/* Якорные переходы лендинга учитывают sticky-шапку. Токены те же, что у кабинетов. */
+html:has([data-landing]) {
+  scroll-padding-top: 5.5rem;
+}
+
+/* Звонок перекрывает кабинет без второго LiveKit-подключения и без переноса video в другой document. */
+body:has([data-call-overlay]) [data-cabinet-header],
+body:has([data-call-overlay]) [data-cabinet-float] {
+  display: none !important;
 }

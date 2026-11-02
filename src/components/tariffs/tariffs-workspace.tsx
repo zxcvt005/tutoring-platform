@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -38,6 +39,7 @@ type FormState = {
   weeklyFrequency: string;
   includesText: string;
   status: "active" | "archived";
+  productIds: string[];
 };
 
 function toForm(t?: Tariff): FormState {
@@ -50,6 +52,7 @@ function toForm(t?: Tariff): FormState {
       weeklyFrequency: "2",
       includesText: "",
       status: "active",
+      productIds: [],
     };
   }
   return {
@@ -61,6 +64,7 @@ function toForm(t?: Tariff): FormState {
     weeklyFrequency: String(t.weeklyFrequency ?? 1),
     includesText: t.includesText ?? "",
     status: t.status,
+    productIds: [...(t.productIds ?? [])],
   };
 }
 
@@ -74,6 +78,13 @@ export function TariffsWorkspace() {
     () =>
       [...data.tariffs].sort((a, b) => a.name.localeCompare(b.name, "ru")),
     [data.tariffs]
+  );
+  const catalogProducts = useMemo(
+    () =>
+      [...(data.products ?? [])].sort((a, b) =>
+        a.name.localeCompare(b.name, "ru")
+      ),
+    [data.products]
   );
 
   async function reload() {
@@ -94,6 +105,7 @@ export function TariffsWorkspace() {
         includesText: form.includesText,
         features: ["individual_lessons", "homework"],
         status: form.status,
+        productIds: form.productIds,
       });
       toast.success("Тариф сохранён");
       setOpen(false);
@@ -217,7 +229,7 @@ export function TariffsWorkspace() {
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg">
           <form onSubmit={save}>
             <DialogHeader>
               <DialogTitle>
@@ -300,6 +312,57 @@ export function TariffsWorkspace() {
                     setForm({ ...form, includesText: e.target.value })
                   }
                 />
+              </div>
+              <div className="space-y-2 rounded-xl border border-border/70 p-3">
+                <Label>Дополнительные продукты</Label>
+                {catalogProducts.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    В каталоге пока нет продуктов.
+                  </p>
+                ) : (
+                  <div className="grid max-h-48 gap-2 overflow-y-auto">
+                    {catalogProducts.map((product) => {
+                      const checked = form.productIds.includes(product.id);
+                      return (
+                        <label
+                          key={product.id}
+                          className="flex items-start gap-2 rounded-lg px-1 py-1 text-sm"
+                        >
+                          <Checkbox
+                            className="mt-0.5"
+                            checked={checked}
+                            onCheckedChange={(value) => {
+                              const on = value === true;
+                              setForm((current) => ({
+                                ...current,
+                                productIds: on
+                                  ? [...new Set([...current.productIds, product.id])]
+                                  : current.productIds.filter(
+                                      (id) => id !== product.id
+                                    ),
+                              }));
+                            }}
+                          />
+                          <span className="min-w-0">
+                            <span className="block font-medium">
+                              {product.name}
+                            </span>
+                            {product.description ? (
+                              <span className="block text-xs text-muted-foreground">
+                                {product.description}
+                              </span>
+                            ) : null}
+                            {!product.isActive ? (
+                              <span className="block text-xs text-muted-foreground">
+                                Отключён глобально — ученикам не выдаётся
+                              </span>
+                            ) : null}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
             <DialogFooter>

@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   assignmentsForLesson,
+  groupHistoryByMonth,
   historyLessonsNewestFirst,
+  historyStatusPresentation,
   historyStripeTone,
   lessonHistoryStatusLabel,
+  lessonMatchesHistoryFilter,
   topicTextForLesson,
 } from "@/lib/lesson-history";
 import type { HomeworkAssignment, Lesson, Topic } from "@/lib/types";
@@ -163,5 +166,64 @@ describe("lesson history helpers", () => {
       "h1",
       "h2",
     ]);
+  });
+
+  it("groups past lessons into calendar months without empty groups", () => {
+    const list = historyLessonsNewestFirst(lessons, "s1", now);
+    const groups = groupHistoryByMonth(list);
+    expect(groups.map((group) => group.key)).toEqual(["2026-10", "2026-09"]);
+    expect(groups[0]?.title).toBe("Октябрь 2026");
+    expect(groups[0]?.items.map((item) => item.id)).toEqual([
+      "new",
+      "cancelled-past",
+    ]);
+    expect(groups[1]?.items.map((item) => item.id)).toEqual(["old"]);
+    expect(
+      groupHistoryByMonth([
+        {
+          id: "edge",
+          startsAt: "2026-09-30T22:00:00.000Z",
+        },
+      ])[0]?.key
+    ).toBe("2026-10");
+  });
+
+  it("filters by the existing attendance tones and keeps skip reasons apart", () => {
+    const base = lessons[0]!;
+    expect(historyStatusPresentation(base, { status: "present" })).toEqual({
+      filter: "present",
+      title: "Был на занятии",
+      detail: null,
+    });
+    expect(
+      historyStatusPresentation(base, { status: "absent_excused" }).detail
+    ).toBe("уважительная причина");
+    expect(
+      historyStatusPresentation(base, { status: "absent_unexcused" }).title
+    ).toBe("Не был");
+    expect(
+      historyStatusPresentation({ ...base, status: "cancelled" }, {
+        status: "absent_unexcused",
+      })
+    ).toEqual({
+      filter: "cancelled",
+      title: "Отменено",
+      detail: "преподавателем",
+    });
+    expect(
+      historyStatusPresentation(base, { status: "rescheduled" })
+    ).toEqual({
+      filter: "cancelled",
+      title: "Перенесено",
+      detail: null,
+    });
+    expect(historyStatusPresentation(base, null).filter).toBe("pending");
+    expect(lessonMatchesHistoryFilter("missed", base, { status: "present" })).toBe(
+      false
+    );
+    expect(
+      lessonMatchesHistoryFilter("missed", base, { status: "absent_excused" })
+    ).toBe(true);
+    expect(lessonMatchesHistoryFilter("all", base, null)).toBe(true);
   });
 });

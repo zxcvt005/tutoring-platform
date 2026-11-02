@@ -44,7 +44,7 @@ describe("production auth hardening", () => {
     else process.env.ALLOW_OPEN_TEST_LOGIN = prevOpen;
   });
 
-  it("demo login is never allowed when NODE_ENV=production without open-test flag", () => {
+  it("demo login stays closed in production even with ALLOW_DEMO_LOGIN", () => {
     process.env.NODE_ENV = "production";
     process.env.ALLOW_DEMO_LOGIN = "1";
     delete process.env.ALLOW_OPEN_TEST_LOGIN;
@@ -53,13 +53,13 @@ describe("production auth hardening", () => {
     expect(isDemoLoginAllowed()).toBe(false);
   });
 
-  it("open-test flag enables demo login in production without changing NODE_ENV", () => {
+  it("open-test flag does not enable demo login", () => {
     process.env.NODE_ENV = "production";
     process.env.ALLOW_OPEN_TEST_LOGIN = "1";
     delete process.env.ALLOW_DEMO_LOGIN;
     expect(isProductionRuntime()).toBe(true);
     expect(isOpenTestLoginEnabled()).toBe(true);
-    expect(isDemoLoginAllowed()).toBe(true);
+    expect(isDemoLoginAllowed()).toBe(false);
   });
 
   it("open-test flag off keeps ordinary production locked", () => {
@@ -69,11 +69,11 @@ describe("production auth hardening", () => {
     expect(isDemoLoginAllowed()).toBe(false);
   });
 
-  it("demo login allowed in development with ALLOW_DEMO_LOGIN=1", () => {
+  it("demo login stays closed in development", () => {
     process.env.NODE_ENV = "development";
     process.env.ALLOW_DEMO_LOGIN = "1";
     delete process.env.ALLOW_OPEN_TEST_LOGIN;
-    expect(isDemoLoginAllowed()).toBe(true);
+    expect(isDemoLoginAllowed()).toBe(false);
   });
 
   it("password policy rejects weak passwords", () => {

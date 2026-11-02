@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 
 import { AuditoriaMonthCalendar } from "@/components/auditoria/month-calendar";
 import { EmptyState } from "@/components/empty-state";
-import { PageHeader } from "@/components/layout/page-header";
 import { LessonStatusBadge } from "@/components/status-badge";
 import {
   Table,
@@ -108,12 +107,7 @@ export function AuditoriaSchedulePanel() {
 
   return (
     <div>
-      <PageHeader
-        title="Расписание"
-        description={`Занятия ${student.fullName}: только ваши слоты, без чужих учеников.`}
-      />
-
-      <section className="mb-10 space-y-3">
+      <section className="mb-10 space-y-3 rounded-2xl border border-border/70 bg-auditoria-surface p-4">
         <h2 className="font-display text-lg font-semibold tracking-tight">
           Календарь месяца
         </h2>

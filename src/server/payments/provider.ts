@@ -34,7 +34,8 @@ export const stubPaymentProvider: PaymentProvider = {
       checkoutUrl: null,
       externalId: null,
       provider: "stub",
-      message: "Оплата скоро появится",
+      message:
+        "Банк не подтверждает оплату автоматически. Заявку проверяет директор.",
     };
   },
 };

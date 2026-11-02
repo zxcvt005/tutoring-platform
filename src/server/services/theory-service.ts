@@ -1,11 +1,16 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 
+import {
+  hasTheoryComponent,
+  THEORY_NEED_COMPONENT_MESSAGE,
+} from "@/lib/theory/components";
 import { THEORY_MAX_FILES } from "@/lib/theory/constants";
 import { sniffTheoryFile } from "@/lib/theory/file-sniff";
 import { parseVideoLink, type TheoryVideoProvider } from "@/lib/theory/video";
 import type {
   HomeworkAssignmentStatus,
+  LibraryScope,
   TheoryAssignment,
   TheoryAssignmentStatus,
   TheoryFile,
@@ -14,6 +19,7 @@ import type {
 } from "@/lib/types";
 import type { AuthContext } from "@/server/authz/context";
 import {
+  assertDirectorSeesTeacher,
   assertTeacherOwnsStudent,
   requireRoles,
   requireStudentProfile,
@@ -37,6 +43,7 @@ import {
   theoryObjectKey,
 } from "@/server/media/theory-storage";
 import { recordChatSystemEventSafe } from "@/server/services/chat-events";
+import { loadOriginMap, originKey } from "@/server/services/material-origins";
 import { createTestAssignmentWithSnapshot } from "@/server/services/test-assignment-create";
 
 function newId(prefix: string) {
@@ -92,14 +99,21 @@ async function loadMaterialInOrg(
   return row;
 }
 
-async function assertTeacherOwnsMaterial(
+async function assertCanManageTheory(
   db: AppDb,
   ctx: AuthContext,
-  material: { teacherId: string }
+  material: { teacherId: string | null; libraryScope: string }
 ) {
+  if (material.libraryScope === "school" || material.teacherId == null) {
+    requireRoles(ctx, ["director"]);
+    return;
+  }
+  if (ctx.role === "director") {
+    await assertDirectorSeesTeacher(db, ctx, material.teacherId);
+    return;
+  }
   const teacherId = await requireTeacherProfile(ctx);
   if (material.teacherId !== teacherId) throw forbidden();
-  return teacherId;
 }
 
 async function loadVersion(db: AppDb, versionId: string) {
@@ -177,9 +191,6 @@ async function createPublishedVersion(
   db: AppDb,
   material: { id: string; title: string } & VideoFields & { testId: string | null; description: string | null }
 ) {
-  if (!material.videoUrl) {
-    throw badRequest("Для публикации укажите ссылку на видео");
-  }
   const versionId = newId("thv");
   await db.insert(theoryMaterialVersions).values({
     id: versionId,
@@ -225,7 +236,7 @@ function contentFingerprint(input: {
 async function ensureTestOwned(
   db: AppDb,
   ctx: AuthContext,
-  teacherId: string,
+  owner: { teacherId: string | null; libraryScope: LibraryScope },
   testId: string | null | undefined
 ) {
   if (!testId) return null;
@@ -237,7 +248,11 @@ async function ensureTestOwned(
     )
     .limit(1);
   if (!row) throw notFound("Тест не найден");
-  if (row.teacherId !== teacherId) throw forbidden();
+  if (owner.libraryScope === "school") {
+    if (row.libraryScope !== "school" || row.teacherId != null) throw forbidden();
+    return row;
+  }
+  if (row.teacherId !== owner.teacherId) throw forbidden();
   return row;
 }
 
@@ -253,34 +268,74 @@ export async function upsertTheory(
     testId?: string | null;
     status?: TheoryStatus;
     publish?: boolean;
+    libraryScope?: LibraryScope;
   }
 ) {
-  requireRoles(ctx, ["teacher"]);
-  const teacherId = await requireTeacherProfile(ctx);
-  if (input.teacherId !== teacherId) throw forbidden();
-
-  const title = input.title.trim();
-  if (!title) throw badRequest("Укажите название теории");
-  const video = videoFieldsFromLink(input.videoUrl);
-  const testId = input.testId?.trim() || null;
-  await ensureTestOwned(db, ctx, teacherId, testId);
-  if (testId) {
-    const [test] = await db
-      .select({ status: tests.status })
-      .from(tests)
-      .where(eq(tests.id, testId))
-      .limit(1);
-    if (test && test.status !== "published" && input.publish) {
-      throw badRequest("Сначала опубликуйте тест, затем прикрепите его к теории");
-    }
-  }
-
+  requireRoles(ctx, ["teacher", "director"]);
   const id = input.id ?? newId("thm");
   const [existing] = await db
     .select()
     .from(theoryMaterials)
     .where(eq(theoryMaterials.id, id))
     .limit(1);
+  if (existing && existing.organizationId !== ctx.organizationId) throw forbidden();
+  if (existing?.libraryScope === "school" && ctx.role !== "director") throw forbidden();
+
+  const requestedScope: LibraryScope =
+    input.libraryScope === "school" ? "school" : "teacher";
+  const scope: LibraryScope = existing
+    ? (existing.libraryScope as LibraryScope)
+    : requestedScope;
+  if (existing && requestedScope !== scope) {
+    throw badRequest("Нельзя сменить владельца материала");
+  }
+
+  let teacherId: string | null = null;
+  if (scope === "school") {
+    if (ctx.role !== "director") throw forbidden();
+    teacherId = null;
+  } else if (ctx.role === "teacher") {
+    teacherId = await requireTeacherProfile(ctx);
+    if ((input.teacherId ?? "") !== teacherId) throw forbidden();
+    if (existing && existing.teacherId !== teacherId) throw forbidden();
+  } else {
+    const requestedTeacher = existing?.teacherId ?? input.teacherId ?? "";
+    if (!requestedTeacher) throw badRequest("Укажите преподавателя");
+    await assertDirectorSeesTeacher(db, ctx, requestedTeacher);
+    if (existing && existing.teacherId !== requestedTeacher) throw forbidden();
+    teacherId = requestedTeacher;
+  }
+
+  const title = input.title.trim();
+  if (!title) throw badRequest("Укажите название теории");
+  const video = videoFieldsFromLink(input.videoUrl);
+  const testId = input.testId?.trim() || null;
+  const ownedTest = await ensureTestOwned(
+    db,
+    ctx,
+    { teacherId, libraryScope: scope },
+    testId
+  );
+  if (ownedTest && ownedTest.status !== "published" && input.publish) {
+    // Тест, созданный для теории, публикуем вместе с материалом.
+    // Каталожный ДЗ по-прежнему нужно опубликовать отдельно.
+    if (ownedTest.purpose !== "theory") {
+      throw badRequest(
+        "Сначала опубликуйте тест, затем прикрепите его к теории"
+      );
+    }
+    const questions = (ownedTest.questionsPublic as { prompt?: string }[]) ?? [];
+    if (!questions.length) {
+      throw badRequest("В тесте теории должно быть хотя бы одно задание");
+    }
+    if (questions.some((q) => !q.prompt?.trim())) {
+      throw badRequest("У всех заданий теста должен быть текст вопроса");
+    }
+    await db
+      .update(tests)
+      .set({ status: "published", updatedAt: new Date() })
+      .where(eq(tests.id, ownedTest.id));
+  }
 
   const publish = Boolean(input.publish);
   const nextStatus: TheoryStatus = publish
@@ -291,8 +346,18 @@ export async function upsertTheory(
         ? "archived"
         : "draft";
 
-  if (publish && !video.videoUrl) {
-    throw badRequest("Для публикации укажите ссылку на видео");
+  const draftFilesForPublish = existing
+    ? await currentDraftFiles(db, id)
+    : [];
+  if (
+    nextStatus === "published" &&
+    !hasTheoryComponent({
+      videoUrl: video.videoUrl,
+      testId,
+      fileCount: draftFilesForPublish.length,
+    })
+  ) {
+    throw badRequest(THEORY_NEED_COMPONENT_MESSAGE);
   }
 
   const values = {
@@ -309,6 +374,7 @@ export async function upsertTheory(
       id,
       organizationId: ctx.organizationId,
       teacherId,
+      libraryScope: scope,
       ...values,
     });
   } else {
@@ -327,7 +393,15 @@ export async function upsertTheory(
     .limit(1);
   if (!material) throw notFound("Теория не найдена");
 
-  if (publish || (material.status === "published" && video.videoUrl)) {
+  const shouldPublishVersion =
+    publish ||
+    (material.status === "published" &&
+      hasTheoryComponent({
+        videoUrl: material.videoUrl,
+        testId: material.testId,
+        fileCount: (await currentDraftFiles(db, id)).length,
+      }));
+  if (shouldPublishVersion) {
     const draftFiles = await currentDraftFiles(db, id);
     const currentVersion = material.currentVersionId
       ? await loadVersion(db, material.currentVersionId)
@@ -369,9 +443,9 @@ export async function upsertTheory(
 }
 
 export async function deleteTheory(db: AppDb, ctx: AuthContext, id: string) {
-  requireRoles(ctx, ["teacher"]);
+  requireRoles(ctx, ["teacher", "director"]);
   const material = await loadMaterialInOrg(db, ctx, id);
-  await assertTeacherOwnsMaterial(db, ctx, material);
+  await assertCanManageTheory(db, ctx, material);
   const [assigned] = await db
     .select({ id: theoryAssignments.id })
     .from(theoryAssignments)
@@ -404,13 +478,22 @@ export async function assignTheory(
   requireRoles(ctx, ["teacher"]);
   const teacherId = await requireTeacherProfile(ctx);
   const material = await loadMaterialInOrg(db, ctx, input.materialId);
-  if (material.teacherId !== teacherId) throw forbidden();
+  if (material.libraryScope !== "teacher" || material.teacherId !== teacherId) {
+    throw forbidden();
+  }
   if (material.status !== "published" || !material.currentVersionId) {
     throw badRequest("Назначить можно только опубликованную теорию");
   }
   const version = await loadVersion(db, material.currentVersionId);
-  if (!version.videoUrl) {
-    throw badRequest("У опубликованной теории должно быть видео");
+  const versionFiles = await filesForVersion(db, version.id);
+  if (
+    !hasTheoryComponent({
+      videoUrl: version.videoUrl,
+      testId: version.testId,
+      fileCount: versionFiles.length,
+    })
+  ) {
+    throw badRequest(THEORY_NEED_COMPONENT_MESSAGE);
   }
 
   const studentIds = [...new Set(input.studentIds.filter(Boolean))];
@@ -499,6 +582,10 @@ export async function markTheoryViewed(
     .limit(1);
   if (!assignment) throw notFound("Назначение не найдено");
   if (assignment.studentId !== studentId) throw forbidden();
+  const { assertStudentLearningAccess } = await import(
+    "@/server/services/learning-access"
+  );
+  await assertStudentLearningAccess(db, ctx, studentId, "homework");
 
   const version = await loadVersion(db, assignment.versionId);
   const now = new Date();
@@ -625,9 +712,9 @@ export async function uploadTheoryFile(
   materialId: string,
   file: { bytes: Buffer; filename: string }
 ) {
-  requireRoles(ctx, ["teacher"]);
+  requireRoles(ctx, ["teacher", "director"]);
   const material = await loadMaterialInOrg(db, ctx, materialId);
-  await assertTeacherOwnsMaterial(db, ctx, material);
+  await assertCanManageTheory(db, ctx, material);
   const mime = sniffTheoryFile(file.bytes, file.filename);
   const draft = await currentDraftFiles(db, materialId);
   if (draft.length >= THEORY_MAX_FILES) {
@@ -660,9 +747,9 @@ export async function removeTheoryDraftFile(
   materialId: string,
   fileId: string
 ) {
-  requireRoles(ctx, ["teacher"]);
+  requireRoles(ctx, ["teacher", "director"]);
   const material = await loadMaterialInOrg(db, ctx, materialId);
-  await assertTeacherOwnsMaterial(db, ctx, material);
+  await assertCanManageTheory(db, ctx, material);
   const [file] = await db
     .select()
     .from(theoryFiles)
@@ -698,8 +785,8 @@ export async function getTheoryFileForViewer(
     throw notFound("Файл не найден");
   }
   const material = await loadMaterialInOrg(db, ctx, file.materialId);
-  if (ctx.role === "teacher") {
-    if (ctx.teacherId !== material.teacherId) throw forbidden();
+  if (ctx.role === "teacher" || ctx.role === "director") {
+    await assertCanManageTheory(db, ctx, material);
   } else if (ctx.role === "student") {
     if (!ctx.studentId) throw forbidden();
     const [assignment] = await db
@@ -717,6 +804,10 @@ export async function getTheoryFileForViewer(
       throw forbidden();
     }
     if (!file.versionId) throw forbidden();
+    const { assertStudentLearningAccess } = await import(
+      "@/server/services/learning-access"
+    );
+    await assertStudentLearningAccess(db, ctx, ctx.studentId, "homework");
   } else {
     throw forbidden();
   }
@@ -740,7 +831,8 @@ function mapMaterial(
 ): TheoryMaterial {
   return {
     id: row.id,
-    teacherId: row.teacherId,
+    teacherId: row.teacherId ?? "",
+    libraryScope: row.libraryScope as LibraryScope,
     title: row.title,
     description: row.description ?? undefined,
     videoUrl: row.videoUrl,
@@ -770,13 +862,13 @@ export async function listTheoryMaterialsForBootstrap(
   theories: TheoryMaterial[];
   theoryAssignments: TheoryAssignment[];
 }> {
-  let materialRows =
-    ctx.role === "director"
-      ? []
-      : await db
-          .select()
-          .from(theoryMaterials)
-          .where(eq(theoryMaterials.organizationId, ctx.organizationId));
+  let materialRows = await db
+    .select()
+    .from(theoryMaterials)
+    .where(eq(theoryMaterials.organizationId, ctx.organizationId));
+  if (ctx.role !== "director") {
+    materialRows = materialRows.filter((m) => m.libraryScope !== "school");
+  }
 
   let assignmentRows = await db
     .select()
@@ -893,7 +985,7 @@ export async function listTheoryMaterialsForBootstrap(
       testAssignmentId: a.testAssignmentId,
       title: version?.title ?? "Теория",
       description: version?.description ?? null,
-      videoUrl: version?.videoUrl ?? "",
+      videoUrl: version?.videoUrl ?? null,
       videoProvider: (version?.videoProvider ?? null) as TheoryAssignment["videoProvider"],
       videoEmbedUrl: version?.videoEmbedUrl ?? null,
       embedAllowed: version?.embedAllowed ?? false,
@@ -904,6 +996,13 @@ export async function listTheoryMaterialsForBootstrap(
       testStatus: (test?.status as HomeworkAssignmentStatus | undefined) ?? null,
     };
   });
+
+  if (ctx.role !== "student") {
+    const origins = await loadOriginMap(db, ctx.organizationId);
+    for (const theory of theories) {
+      theory.origin = origins.get(originKey("theory", theory.id)) ?? null;
+    }
+  }
 
   return { theories, theoryAssignments: theoryAssignmentsMapped };
 }

@@ -9,8 +9,7 @@
 - CSRF (double-submit `tp_csrf` + `x-csrf-token`) и проверка Origin
 - Ограничение попыток входа (rate limit в БД)
 - bcrypt (12 rounds), политика пароля ≥10 + буквы и цифры
-- Демо-вход в обычном production **невозможен** (даже с `ALLOW_DEMO_LOGIN=1`)
-- Открытый тестовый сайт: `ALLOW_OPEN_TEST_LOGIN=1` включает существующий демо-вход и переключатель аккаунтов **без** смены `NODE_ENV`
+- Демо-вход и переключатель тестовых аккаунтов **выключены** и локально, и в production. `ALLOW_DEMO_LOGIN` и `ALLOW_OPEN_TEST_LOGIN` их не включают.
 - Страницы `/login` и `/setup` (первый администратор по `BOOTSTRAP_ADMIN_TOKEN`)
 - Дирекция → «Доступ»: создание/отключение пользователей организации
 - CLI: `npm run auth:bootstrap-admin`
@@ -35,8 +34,8 @@
 | `NODE_ENV` | да | `production` |
 | `APP_BASE_URL` | да | `https://zxcvt005-tutoring-platform-302f.twc1.net` (без path; scheme+host) |
 | `BOOTSTRAP_ADMIN_TOKEN` | при первом запуске | ≥24 символа; **удалить после создания директора** |
-| `ALLOW_DEMO_LOGIN` | нет | не задавать / `0` в обычном production |
-| `ALLOW_OPEN_TEST_LOGIN` | для открытого теста | `1` на тестовом Timeweb. Задать **до сборки**. Снимает обязательный `/login` и включает `DEV · ТЕСТОВЫЕ АККАУНТЫ`. Не использовать на будущем закрытом production |
+| `ALLOW_DEMO_LOGIN` | нет | не включает вход. Можно не задавать |
+| `ALLOW_OPEN_TEST_LOGIN` | нет | не снимает `/login` и не включает демо-аккаунты |
 | `ALLOWED_ORIGINS` | нет | только если нужен **доп.** Origin; для текущего домена Timeweb **не нужен** |
 | `NEXT_PUBLIC_DATA_MODE` | нет | `api` |
 | `CHAT_STORAGE_DRIVER` | для чата | `s3` в production. Локальный диск контейнера не хранит вложения после деплоя. |
@@ -51,7 +50,7 @@
 
 ## Object Storage (вложения чата и теории)
 
-Диск контейнера App Platform не сохраняет файлы. Локальный драйвер (`uploads/`) для Timeweb не подходит, кроме аварийного `CHAT_STORAGE_ALLOW_LOCAL=1`.
+Диск контейнера App Platform не сохраняет файлы. В production код всегда требует S3 и не пишет на локальный диск, даже если заданы `CHAT_STORAGE_DRIVER=local` или `CHAT_STORAGE_ALLOW_LOCAL=1`.
 
 В панели Timeweb Cloud:
 

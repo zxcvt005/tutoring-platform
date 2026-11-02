@@ -284,7 +284,7 @@ describe("tariff balance + attendance", () => {
     expect(access.allowed).toBe(true);
   });
 
-  it("keeps remaining after predicted end date; blocks at zero remaining", async () => {
+  it("keeps remaining after predicted end date; remaining 0 still allows last debt lesson", async () => {
     const t = await createTestDb();
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
@@ -315,8 +315,7 @@ describe("tariff balance + attendance", () => {
       "s11",
       "homework"
     );
-    expect(access.allowed).toBe(false);
-    expect(access.reason).toBe("exhausted");
+    expect(access.allowed).toBe(true);
     expect(access.remaining).toBe(0);
 
     const login = await loginWithPassword(t.db, {

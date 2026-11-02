@@ -49,11 +49,25 @@ const EMBED_HOSTS = new Set([
   "www.vk.ru",
   "vkvideo.ru",
   "www.vkvideo.ru",
+  "m.vkvideo.ru",
   "www.youtube.com",
   "youtube.com",
   "www.youtube-nocookie.com",
   "rutube.ru",
   "www.rutube.ru",
+]);
+
+const VK_EMBED_REWRITE_HOSTS = new Set([
+  "vk.com",
+  "www.vk.com",
+  "m.vk.com",
+  "new.vk.com",
+  "vk.ru",
+  "www.vk.ru",
+  "m.vk.ru",
+  "vkvideo.ru",
+  "www.vkvideo.ru",
+  "m.vkvideo.ru",
 ]);
 
 function extractIframeSrc(input: string): string | null {
@@ -99,7 +113,7 @@ function vkWatchUrl(oid: string, id: string): string {
 function vkEmbedUrl(oid: string, id: string, hash?: string | null): string {
   const params = new URLSearchParams({ oid, id, hd: "2" });
   if (hash) params.set("hash", hash);
-  return `https://vk.com/video_ext.php?${params.toString()}`;
+  return `https://vkvideo.ru/video_ext.php?${params.toString()}`;
 }
 
 function parseVkVideoId(value: string): { oid: string; id: string } | null {
@@ -129,15 +143,12 @@ function parseVk(url: URL): ParsedVideoLink | null {
       embedUrl: vkEmbedUrl(oid, id, hash),
       embedAllowed: true,
       watchUrl: vkWatchUrl(oid, id),
-      warning: hash
-        ? undefined
-        : "Если ролик не откроется внутри сайта, вставьте код из «Экспортировать» на VK — там есть ключ доступа.",
     };
   }
 
   const fromZ = url.searchParams.get("z");
   const zMatch = fromZ ? /(?:video|clip)(-?\d+_\d+)/.exec(fromZ) : null;
-  const pathMatch = /\/(?:video|clip)(-?\d+_\d+)/.exec(path);
+  const pathMatch = /\/(?:video|clip)\/?(-?\d+_\d+)/.exec(path);
   const parsed = parseVkVideoId(
     zMatch?.[1] ?? pathMatch?.[1] ?? ""
   );
@@ -160,9 +171,32 @@ function parseVk(url: URL): ParsedVideoLink | null {
     embedUrl: vkEmbedUrl(parsed.oid, parsed.id, url.searchParams.get("hash")),
     embedAllowed: true,
     watchUrl: vkWatchUrl(parsed.oid, parsed.id),
-    warning:
-      "Встраивание работает для роликов, у которых разрешён показ на других сайтах. Закрытые видео откройте по кнопке на VK.",
   };
+}
+
+/**
+ * Актуальный виджет VK — video_ext.php на vkvideo.ru.
+ * Старые сохранённые ссылки vk.com/video_ext.php приводим к тому же формату.
+ */
+export function resolveTheoryEmbedUrl(
+  embedUrl: string | null | undefined
+): string | null {
+  if (!embedUrl) return null;
+  try {
+    const url = new URL(embedUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    const path = url.pathname.replace(/\/+$/, "") || "/";
+    const isExt = path === "/video_ext.php" || path.endsWith("/video_ext.php");
+    if (!isExt || !VK_EMBED_REWRITE_HOSTS.has(hostOf(url))) return embedUrl;
+    url.protocol = "https:";
+    url.hostname = "vkvideo.ru";
+    url.port = "";
+    url.username = "";
+    url.password = "";
+    return url.toString();
+  } catch {
+    return embedUrl;
+  }
 }
 
 function youtubeId(url: URL): string | null {

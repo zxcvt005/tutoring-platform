@@ -28,11 +28,49 @@ export function currentAssignmentForStudent(
   return activePaid ?? list[0] ?? null;
 }
 
+/** Тариф из назначения или из выбранного для будущей оплаты каталожного тарифа. */
+export function studentTariffLabel(input: {
+  assignments: StudentTariffAssignment[];
+  studentId: string;
+  tariffs: { id: string; name: string }[];
+  purchaseTariffId?: string | null;
+}): {
+  name: string;
+  awaitingPayment: boolean;
+  assignment: StudentTariffAssignment | null;
+} | null {
+  const assignment = currentAssignmentForStudent(
+    input.assignments,
+    input.studentId
+  );
+  if (assignment) {
+    const unpaid =
+      assignment.paymentStatus !== "paid" ||
+      assignment.status === "pending_payment";
+    return {
+      name: assignment.tariffName ?? "Тариф",
+      awaitingPayment: unpaid,
+      assignment,
+    };
+  }
+  const purchaseId = input.purchaseTariffId?.trim();
+  if (!purchaseId) return null;
+  const tariff = input.tariffs.find((item) => item.id === purchaseId);
+  if (!tariff) return null;
+  return {
+    name: tariff.name,
+    awaitingPayment: true,
+    assignment: null,
+  };
+}
+
 export const packageStatusLabel: Record<StudentPackageStatus, string> = {
   none: "Нет тарифа",
   unpaid: "Ожидает оплаты",
   active: "Оплачен",
-  exhausted: "Занятия закончились",
+  queued: "В очереди",
+  exhausted: "Тариф закончился",
+  debt: "Занятие в долг — требуется продление",
   paused: "Приостановлен",
   cancelled: "Отменён",
 };

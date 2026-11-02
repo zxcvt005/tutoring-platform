@@ -1,31 +1,21 @@
 /**
  * Правила окружения для auth.
- *
- * Обычный production: демо-вход запрещён, даже при ALLOW_DEMO_LOGIN=1.
- * Открытое тестирование: явный ALLOW_OPEN_TEST_LOGIN=1 включает существующий
- * демо-вход при NODE_ENV=production (без смены runtime на development).
+ * Демо-вход закрыт и в production, и локально.
+ * ALLOW_DEMO_LOGIN и ALLOW_OPEN_TEST_LOGIN его не включают.
  */
 
 export function isProductionRuntime(): boolean {
   return process.env.NODE_ENV === "production";
 }
 
-/** Явный флаг открытого тестового сайта. Не путать с ALLOW_DEMO_LOGIN. */
+/** Флаг больше не открывает демо-вход. Оставлен, чтобы старые окружения не падали. */
 export function isOpenTestLoginEnabled(): boolean {
   return process.env.ALLOW_OPEN_TEST_LOGIN === "1";
 }
 
-/**
- * Демо-вход (переключатель тестовых аккаунтов и /api/auth/demo).
- * В обычном production выключен. Включается либо вне production
- * (ALLOW_DEMO_LOGIN), либо флагом открытого теста.
- */
+/** Публичный демо-вход и переключатель тестовых аккаунтов отключены. */
 export function isDemoLoginAllowed(): boolean {
-  if (isOpenTestLoginEnabled()) return true;
-  if (isProductionRuntime()) return false;
-  if (process.env.ALLOW_DEMO_LOGIN === "0") return false;
-  if (process.env.ALLOW_DEMO_LOGIN === "1") return true;
-  return process.env.NODE_ENV === "development";
+  return false;
 }
 
 /** Секрет одноразового bootstrap первого директора (не коммитить). */

@@ -27,6 +27,7 @@ function DirekciyaOverview() {
   const needsAttention = data.homeworkAssignments.filter(
     (a) =>
       a.sourceKind !== "theory" &&
+      a.sourceKind !== "intensive" &&
       (a.status === "completed" || a.status === "overdue")
   );
   const completed = needsAttention.filter((a) => a.status === "completed").length;

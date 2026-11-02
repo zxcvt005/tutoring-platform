@@ -11,6 +11,12 @@ import {
   readJsonBody,
   requireAuth,
 } from "@/server/http/request";
+import {
+  createMockExam,
+  deleteMockExam,
+  setMockExamResult,
+  updateMockExam,
+} from "@/server/services/mock-exams-service";
 import * as m from "@/server/services/platform-mutations";
 
 const bodySchema = z.object({
@@ -36,6 +42,14 @@ export async function POST(request: Request) {
           return m.upsertStudent(db, ctx, p as never);
         case "deleteStudent":
           return m.deleteStudent(db, ctx, String(p.id));
+        case "archiveStudent":
+          return m.archiveStudent(db, ctx, {
+            id: String(p.id),
+            reason: p.reason as never,
+            comment: (p.comment as string | null | undefined) ?? null,
+          });
+        case "restoreStudent":
+          return m.restoreStudent(db, ctx, String(p.id));
         case "upsertLesson":
           return m.upsertLesson(db, ctx, p as never);
         case "createRecurringSchedule":
@@ -52,6 +66,8 @@ export async function POST(request: Request) {
             String(p.studentId),
             p.status as never
           );
+        case "resetLessonConduct":
+          return m.resetLessonConductAction(db, ctx, p);
         case "setLessonTopic":
           return m.setLessonTopic(db, ctx, {
             lessonId: String(p.lessonId),
@@ -103,6 +119,8 @@ export async function POST(request: Request) {
           return m.upsertHomework(db, ctx, p as never);
         case "deleteHomework":
           return m.deleteHomework(db, ctx, String(p.id));
+        case "restoreHomework":
+          return m.restoreHomework(db, ctx, String(p.id));
         case "publishHomework":
           return m.publishHomework(db, ctx, String(p.id));
         case "assignHomework":
@@ -135,16 +153,44 @@ export async function POST(request: Request) {
           );
         case "upsertTariff":
           return m.upsertTariffAction(db, ctx, p);
+        case "listProducts":
+          return m.listProductsAction(db, ctx);
+        case "upsertProduct":
+          return m.upsertProductAction(db, ctx, p);
         case "archiveTariff":
           return m.archiveTariffAction(db, ctx, String(p.id));
         case "assignTariff":
           return m.assignTariffAction(db, ctx, p);
+        case "setStudentPurchaseTariff":
+          return m.setStudentPurchaseTariffAction(db, ctx, p);
         case "adminMarkPaymentPaid":
           return m.adminMarkPaidAction(db, ctx, p);
+        case "adminRejectPayment":
+          return m.adminRejectPaymentAction(db, ctx, p);
         case "studentRequestPayment":
-          return m.studentPayAction(db, ctx, String(p.assignmentId));
+          return m.studentPayAction(
+            db,
+            ctx,
+            p.assignmentId ? String(p.assignmentId) : undefined
+          );
+        case "studentStartCheckout":
+          return m.studentStartCheckoutAction(db, ctx);
         case "getIncomeOverview":
           return m.getIncomeOverviewAction(db, ctx);
+        case "getTeacherPayRates":
+          return m.getTeacherPayRatesAction(db, ctx, p);
+        case "setTeacherPayRates":
+          return m.setTeacherPayRatesAction(db, ctx, p);
+        case "getPayrollOverview":
+          return m.getPayrollOverviewAction(db, ctx, p);
+        case "getTeacherPayrollDetail":
+          return m.getTeacherPayrollDetailAction(db, ctx, p);
+        case "createTeacherPayout":
+          return m.createTeacherPayoutAction(db, ctx, p);
+        case "previewPayrollBackfill":
+          return m.previewPayrollBackfillAction(db, ctx, p);
+        case "getTestGradesStats":
+          return m.getTestGradesStatsAction(db, ctx, p);
         case "upsertTheory":
           return m.upsertTheoryAction(db, ctx, p);
         case "deleteTheory":
@@ -160,6 +206,31 @@ export async function POST(request: Request) {
             String(p.materialId),
             String(p.fileId)
           );
+        case "transferKnowledge":
+          return m.transferKnowledgeAction(db, ctx, p);
+        case "saveToSchoolLibrary":
+          return m.saveToSchoolLibraryAction(db, ctx, p);
+        case "createMockExam":
+          return createMockExam(db, ctx, p);
+        case "updateMockExam":
+          return updateMockExam(db, ctx, p);
+        case "deleteMockExam":
+          return deleteMockExam(db, ctx, String(p.id ?? ""));
+        case "setMockExamResult":
+          return setMockExamResult(db, ctx, p);
+        case "upsertIntensive":
+          return m.upsertIntensiveAction(db, ctx, p);
+        case "deleteIntensive":
+          return m.deleteIntensiveAction(db, ctx, String(p.id ?? ""));
+        case "assignIntensive":
+          return m.assignIntensiveAction(db, ctx, p);
+        case "removeIntensiveFile":
+          return m.removeIntensiveFileAction(
+            db,
+            ctx,
+            String(p.intensiveId ?? ""),
+            String(p.fileId ?? "")
+          );
         default:
           throw validationError(`Неизвестное действие: ${raw.action}`);
       }
@@ -170,10 +241,20 @@ export async function POST(request: Request) {
       "reviewHomeworkAssignment",
       "assignHomework",
       "assignTheory",
+      "assignIntensive",
+      "transferKnowledge",
+      "saveToSchoolLibrary",
       "markTheoryViewed",
       "completeLesson",
+      "resetLessonConduct",
       "studentRequestPayment",
+      "studentStartCheckout",
       "assignTariff",
+      "setStudentPurchaseTariff",
+      "adminMarkPaymentPaid",
+      "adminRejectPayment",
+      "createTeacherPayout",
+      "setTeacherPayRates",
     ]);
 
     if (idempotent.has(raw.action)) {

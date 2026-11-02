@@ -121,18 +121,20 @@ export async function s3Put(
     "content-type": contentType,
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`S3 PUT ${res.status}${text ? `: ${text.slice(0, 180)}` : ""}`);
+    await res.body?.cancel().catch(() => undefined);
+    throw new Error(`Не удалось записать файл в хранилище (${res.status}).`);
   }
 }
 
 export async function s3Get(config: S3Config, key: string): Promise<Buffer> {
   const res = await signedFetch(config, "GET", key);
   if (res.status === 404) {
+    await res.body?.cancel().catch(() => undefined);
     throw Object.assign(new Error("not_found"), { code: "not_found" });
   }
   if (!res.ok) {
-    throw new Error(`S3 GET ${res.status}`);
+    await res.body?.cancel().catch(() => undefined);
+    throw new Error(`Не удалось прочитать файл из хранилища (${res.status}).`);
   }
   const buf = Buffer.from(await res.arrayBuffer());
   return buf;
@@ -141,6 +143,7 @@ export async function s3Get(config: S3Config, key: string): Promise<Buffer> {
 export async function s3Delete(config: S3Config, key: string): Promise<void> {
   const res = await signedFetch(config, "DELETE", key);
   if (!res.ok && res.status !== 404) {
-    throw new Error(`S3 DELETE ${res.status}`);
+    await res.body?.cancel().catch(() => undefined);
+    throw new Error(`Не удалось удалить файл из хранилища (${res.status}).`);
   }
 }

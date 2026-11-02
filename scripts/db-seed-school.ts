@@ -22,7 +22,9 @@ import {
   SCHOOL_ORG_ID,
   SCHOOL_ORG_SLUG,
   seedSchoolOrganization,
+  verifySchoolOrganization,
 } from "../src/server/db/seed-school";
+import { ensureSchoolTariffQaFixtures } from "../src/server/db/seed-school-tariff-qa";
 
 loadEnv({ path: ".env.local" });
 loadEnv();
@@ -43,7 +45,15 @@ async function main() {
     const enc = String(encRows[0]?.server_encoding ?? "").toUpperCase();
     const win1251Safe = enc.includes("WIN125") || enc === "SQL_ASCII";
     const stats = await seedSchoolOrganization(db, new Date(), { win1251Safe });
+    const qa = await ensureSchoolTariffQaFixtures(db);
+    const { errors } = await verifySchoolOrganization(db);
+    if (errors.length) {
+      throw new Error(`Seed verify failed: ${errors.join("; ")}`);
+    }
     console.log("School QA seed OK.");
+    console.log(
+      `QA-тариф ученики: ${qa.map((r) => `${r.studentId}=${r.remaining}`).join(", ")}`
+    );
     console.log(
       JSON.stringify(
         {

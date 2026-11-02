@@ -36,8 +36,18 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 
+import {
+  emptySlotRateForm,
+  SlotPayRatesFields,
+  type SlotRateForm,
+} from "@/components/teachers/slot-pay-rates-fields";
 import { initialsFromName, teacherStatusLabel } from "@/lib/format";
-import { ensureCsrfToken } from "@/lib/store/api-client";
+import {
+  kopecksToRubInput,
+  parseRubStringToKopecks,
+} from "@/lib/money-kopecks";
+import { SLOT_PAY_PRESENT_COUNTS } from "@/lib/teacher-slot";
+import { apiPlatform, ensureCsrfToken } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { Teacher, TeacherStatus } from "@/lib/types";
 
@@ -53,6 +63,11 @@ type FormState = {
   status: TeacherStatus;
   lessonPrice: string;
   teacherPay: string;
+  rate1: string;
+  rate2: string;
+  rate3: string;
+  rate4: string;
+  rate5: string;
   defaultDurationMin: string;
   workDays: string;
   workInterval: string;
@@ -73,6 +88,7 @@ function toForm(t?: Teacher): FormState {
       status: "active",
       lessonPrice: "",
       teacherPay: "",
+      ...emptySlotRateForm,
       defaultDurationMin: "60",
       workDays: "1,2,3,4,5",
       workInterval: "10:00-20:00",
@@ -92,6 +108,7 @@ function toForm(t?: Teacher): FormState {
     status: t.status,
     lessonPrice: t.lessonPrice != null ? String(t.lessonPrice) : "",
     teacherPay: t.teacherPay != null ? String(t.teacherPay) : "",
+    ...emptySlotRateForm,
     defaultDurationMin: String(t.defaultDurationMin ?? 60),
     workDays: (t.workDays ?? []).join(","),
     workInterval: t.workIntervals?.[0]
@@ -102,10 +119,21 @@ function toForm(t?: Teacher): FormState {
   };
 }
 
+function ratesFromForm(form: FormState): Record<string, number> {
+  const rates: Record<string, number> = {};
+  for (const count of SLOT_PAY_PRESENT_COUNTS) {
+    const raw = form[`rate${count}`].trim();
+    if (!raw) continue;
+    rates[String(count)] = parseRubStringToKopecks(raw);
+  }
+  return rates;
+}
+
 export function TeachersWorkspace() {
-  const { data, upsertTeacher, deleteTeacher, studentsForTeacher } = useDemoStore();
+  const { data, deleteTeacher, studentsForTeacher, reload } = useDemoStore();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormState>(toForm());
 
   const rows = useMemo(
@@ -123,42 +151,90 @@ export function TeachersWorkspace() {
     [data.teachers, query]
   );
 
-  function save() {
-    if (!form.fullName.trim()) return;
+  async function loadRates(teacherId: string) {
+    try {
+      const data = await apiPlatform<{
+        rates: Record<string, number>;
+      }>("getTeacherPayRates", { teacherId });
+      const next: SlotRateForm = { ...emptySlotRateForm };
+      for (const count of SLOT_PAY_PRESENT_COUNTS) {
+        const kop = data.rates[String(count)] ?? data.rates[count as never];
+        if (typeof kop === "number") {
+          next[`rate${count}`] = kopecksToRubInput(kop);
+        }
+      }
+      setForm((f) => ({ ...f, ...next }));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Не удалось загрузить ставки");
+    }
+  }
+
+  function openCreate() {
+    setForm(toForm());
+    setOpen(true);
+  }
+
+  function openEdit(t: Teacher) {
+    setForm(toForm(t));
+    setOpen(true);
+    void loadRates(t.id);
+  }
+
+  async function save() {
+    if (!form.fullName.trim() || saving) return;
     const [start, end] = form.workInterval.split("-").map((s) => s.trim());
-    upsertTeacher({
-      id: form.id,
-      fullName: form.fullName.trim(),
-      avatarInitials: initialsFromName(form.fullName),
-      bio: form.bio.trim() || undefined,
-      subjects: form.subjects
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
-      specializations: form.specializations
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
-      phone: form.phone.trim() || undefined,
-      email: form.email.trim() || undefined,
-      startedAt: form.startedAt
-        ? new Date(form.startedAt).toISOString()
-        : undefined,
-      status: form.status,
-      lessonPrice: form.lessonPrice ? Number(form.lessonPrice) : undefined,
-      teacherPay: form.teacherPay ? Number(form.teacherPay) : undefined,
-      defaultDurationMin: form.defaultDurationMin
-        ? Number(form.defaultDurationMin)
-        : 60,
-      workDays: form.workDays
-        .split(",")
-        .map((s) => Number(s.trim()))
-        .filter((n) => n >= 1 && n <= 7),
-      workIntervals:
-        start && end ? [{ start, end }] : undefined,
-      adminNotes: form.adminNotes.trim() || undefined,
-    });
-    setOpen(false);
+    let rates: Record<string, number>;
+    try {
+      rates = ratesFromForm(form);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Некорректная ставка");
+      return;
+    }
+    setSaving(true);
+    try {
+      const saved = await apiPlatform<{ id: string }>("upsertTeacher", {
+        id: form.id,
+        fullName: form.fullName.trim(),
+        avatarInitials: initialsFromName(form.fullName),
+        bio: form.bio.trim() || undefined,
+        subjects: form.subjects
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        specializations: form.specializations
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        phone: form.phone.trim() || undefined,
+        email: form.email.trim() || undefined,
+        startedAt: form.startedAt
+          ? new Date(form.startedAt).toISOString()
+          : undefined,
+        status: form.status,
+        lessonPrice: form.lessonPrice ? Number(form.lessonPrice) : undefined,
+        defaultDurationMin: form.defaultDurationMin
+          ? Number(form.defaultDurationMin)
+          : 60,
+        workDays: form.workDays
+          .split(",")
+          .map((s) => Number(s.trim()))
+          .filter((n) => n >= 1 && n <= 7),
+        workIntervals: start && end ? [{ start, end }] : undefined,
+        adminNotes: form.adminNotes.trim() || undefined,
+      });
+      await apiPlatform(
+        "setTeacherPayRates",
+        { teacherId: saved.id, rates },
+        crypto.randomUUID()
+      );
+      await reload();
+      toast.success("Преподаватель сохранён");
+      setOpen(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Не удалось сохранить");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function uploadPhoto(file: File | null) {
@@ -200,10 +276,7 @@ export function TeachersWorkspace() {
           <Button
             type="button"
             className="rounded-full"
-            onClick={() => {
-              setForm(toForm());
-              setOpen(true);
-            }}
+            onClick={openCreate}
           >
             Добавить преподавателя
           </Button>
@@ -281,10 +354,7 @@ export function TeachersWorkspace() {
                       type="button"
                       size="sm"
                       variant="ghost"
-                      onClick={() => {
-                        setForm(toForm(t));
-                        setOpen(true);
-                      }}
+                      onClick={() => openEdit(t)}
                     >
                       Изменить
                     </Button>
@@ -420,15 +490,16 @@ export function TeachersWorkspace() {
                 }
               />
             </div>
-            <div className="space-y-1.5">
-              <Label>Вознаграждение преподавателя</Label>
-              <Input
-                value={form.teacherPay}
-                onChange={(e) =>
-                  setForm({ ...form, teacherPay: e.target.value })
-                }
-              />
-            </div>
+            <SlotPayRatesFields
+              value={{
+                rate1: form.rate1,
+                rate2: form.rate2,
+                rate3: form.rate3,
+                rate4: form.rate4,
+                rate5: form.rate5,
+              }}
+              onChange={(rates) => setForm({ ...form, ...rates })}
+            />
             <div className="space-y-1.5">
               <Label>Длительность по умолчанию (мин)</Label>
               <Input
@@ -483,8 +554,8 @@ export function TeachersWorkspace() {
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>
                 Отмена
               </Button>
-              <Button type="button" onClick={save}>
-                Сохранить
+              <Button type="button" onClick={() => void save()} disabled={saving}>
+                {saving ? "Сохранение…" : "Сохранить"}
               </Button>
             </div>
           </DialogFooter>

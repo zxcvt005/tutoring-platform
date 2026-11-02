@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { LessonDialog } from "@/components/schedule/lesson-dialog";
+import { TrialPreviewDialog } from "@/components/schedule/trial-preview-dialog";
 import { WeekCalendar } from "@/components/schedule/week-calendar";
+import type { TrialLessonPublic } from "@/lib/trial-lessons";
 import {
   Select,
   SelectContent,
@@ -35,6 +37,9 @@ export function ScheduleWorkspace({
 
   const [weekAnchor, setWeekAnchor] = useState(() => new Date());
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [previewTrial, setPreviewTrial] = useState<TrialLessonPublic | null>(
+    null
+  );
   const [editing, setEditing] = useState<
     (Partial<Lesson> & { day?: Date; hour?: number; minute?: number }) | undefined
   >();
@@ -46,6 +51,10 @@ export function ScheduleWorkspace({
   const lessons = useMemo(
     () => lessonsForTeacher(teacherId),
     [lessonsForTeacher, teacherId]
+  );
+  const trialLessons = useMemo(
+    () => data.trialLessons.filter((t) => t.teacherId === teacherId),
+    [data.trialLessons, teacherId]
   );
 
   const teacher = data.teachers.find((t) => t.id === teacherId);
@@ -91,6 +100,7 @@ export function ScheduleWorkspace({
       ) : (
         <WeekCalendar
           lessons={lessons}
+          trialLessons={trialLessons}
           students={data.students}
           weekAnchor={weekAnchor}
           onWeekChange={setWeekAnchor}
@@ -102,6 +112,7 @@ export function ScheduleWorkspace({
             setEditing(lesson);
             setDialogOpen(true);
           }}
+          onTrialClick={(trial) => setPreviewTrial(trial)}
         />
       )}
 
@@ -114,6 +125,13 @@ export function ScheduleWorkspace({
         onSave={(lesson) => upsertLesson(lesson)}
         onSaveRecurring={(input) => createRecurringSchedule(input)}
         onDelete={deleteLesson}
+      />
+      <TrialPreviewDialog
+        trial={previewTrial}
+        open={Boolean(previewTrial)}
+        onOpenChange={(open) => {
+          if (!open) setPreviewTrial(null);
+        }}
       />
     </div>
   );

@@ -1,5 +1,12 @@
+import type { TrialLessonPublic } from "@/lib/trial-lessons";
+
 /** Статусы людей */
-export type PersonStatus = "active" | "paused";
+export type PersonStatus = "active" | "paused" | "archived";
+
+export type StudentArchiveReason =
+  | "trial_not_continued"
+  | "stopped"
+  | "other";
 
 export type TeacherStatus = "active" | "inactive" | "archived";
 
@@ -78,6 +85,9 @@ export type Homework = {
   topicId?: string | null;
   sectionId?: string | null;
   teacherId: string;
+  libraryScope?: LibraryScope;
+  origin?: MaterialOrigin | null;
+  updatedAt?: string;
   title: string;
   description?: string;
   status: HomeworkTemplateStatus;
@@ -86,8 +96,8 @@ export type Homework = {
   maxScore?: number;
   questionCount?: number;
   assignmentCount?: number;
-  /** homework — каталог ДЗ; theory — тест, созданный для теории */
-  purpose?: "homework" | "theory";
+  /** homework — каталог ДЗ; theory — тест теории; intensive — тест конкретного интенсива */
+  purpose?: "homework" | "theory" | "intensive";
   /** legacy */
   checkType?: CheckType;
 };
@@ -133,7 +143,8 @@ export type HomeworkAssignmentStatus =
   | "attempt2_in_progress"
   | "completed"
   | "reviewed"
-  | "overdue";
+  | "overdue"
+  | "withdrawn";
 
 export type QuestionOutcomeStatus =
   | "correct_first"
@@ -157,7 +168,7 @@ export type HomeworkAssignment = {
    * homework — обычное ДЗ; theory — попытка теста, прикреплённого к теории.
    * Не смешивается с ДЗ в списках домашних заданий.
    */
-  sourceKind?: "homework" | "theory";
+  sourceKind?: "homework" | "theory" | "intensive";
   theoryAssignmentId?: string | null;
   theoryTitle?: string | null;
   /** Занятие, с которого назначили (если есть) */
@@ -215,6 +226,7 @@ export type TariffStatus = "active" | "archived";
 export type TariffAssignmentStatus =
   | "pending_payment"
   | "active"
+  | "queued"
   | "expired"
   | "cancelled"
   | "paused";
@@ -225,11 +237,18 @@ export type StudentPackageStatus =
   | "none"
   | "unpaid"
   | "active"
+  | "queued"
   | "exhausted"
+  | "debt"
   | "paused"
   | "cancelled";
 
-export type PaymentRecordStatus = "pending" | "paid" | "cancelled" | "failed";
+export type PaymentRecordStatus =
+  | "pending"
+  | "paid"
+  | "cancelled"
+  | "failed"
+  | "rejected";
 
 export type Tariff = {
   id: string;
@@ -246,6 +265,22 @@ export type Tariff = {
   adminNotes?: string;
   /** Сколько активных/текущих назначений (для UI дирекции) */
   assignedCount?: number;
+  /** Продукты каталога, включённые в тариф */
+  productIds?: string[];
+};
+
+export type Product = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  isActive: boolean;
+  /** Есть ли реализованная функциональность в коде */
+  implemented: boolean;
+  tariffCount?: number;
+  tariffNames?: string[];
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type StudentTariffAssignment = {
@@ -280,6 +315,7 @@ export type PaymentRecord = {
   externalId?: string;
   paidAt?: string;
   createdAt: string;
+  failureReason?: string | null;
 };
 
 export type Teacher = {
@@ -328,12 +364,18 @@ export type Student = {
   teacherId: string;
   /** Внутренние заметки администрации — не отдаются ученику. */
   notes?: string;
+  archivedAt?: string | null;
+  archivedReason?: StudentArchiveReason | null;
+  archivedComment?: string | null;
+  previousTeacherId?: string | null;
   /** Когда создана карточка (для исторических сводок «Доходы»). */
   createdAt?: string;
   /** Связанная учётная запись (для входа / impersonation) */
   userId?: string | null;
   accountEmail?: string | null;
   accountRole?: "student" | null;
+  /** Тариф, который ученик может оплатить сам. Не текущий списывающий пакет. */
+  purchaseTariffId?: string | null;
 };
 
 export type LessonTopicLink = {
@@ -375,9 +417,26 @@ export type TopicSection = {
   sortOrder: number;
 };
 
+export type LibraryScope = "school" | "teacher";
+
+/** Снимок источника копии. Не связывает содержимое с оригиналом. */
+export type MaterialOrigin = {
+  sourceKind: "theory" | "test" | "topic";
+  sourceId: string | null;
+  sourceTitle: string;
+  sourceAuthorName: string | null;
+  sourceVersionId: string | null;
+  sourceScope: LibraryScope;
+  copiedAt: string;
+};
+
 export type Topic = {
   id: string;
   teacherId: string;
+  /** school — оригинал базы знаний; teacher — материал преподавателя. */
+  libraryScope?: LibraryScope;
+  origin?: MaterialOrigin | null;
+  updatedAt?: string;
   /** null / отсутствует — «Без раздела» */
   sectionId: string | null;
   title: string;
@@ -408,6 +467,8 @@ export type TheoryFile = {
 export type TheoryMaterial = {
   id: string;
   teacherId: string;
+  libraryScope?: LibraryScope;
+  origin?: MaterialOrigin | null;
   title: string;
   description?: string;
   videoUrl?: string | null;
@@ -442,7 +503,7 @@ export type TheoryAssignment = {
   testAssignmentId?: string | null;
   title: string;
   description?: string | null;
-  videoUrl: string;
+  videoUrl?: string | null;
   videoProvider?: "vk" | "youtube" | "rutube" | "unknown" | null;
   videoEmbedUrl?: string | null;
   embedAllowed: boolean;
@@ -453,11 +514,91 @@ export type TheoryAssignment = {
   testStatus?: HomeworkAssignmentStatus | null;
 };
 
+export type IntensiveTestRef = {
+  testId: string;
+  title: string;
+  sortOrder: number;
+};
+
+export type Intensive = {
+  id: string;
+  teacherId: string;
+  libraryScope?: LibraryScope;
+  title: string;
+  description?: string;
+  videoUrl?: string | null;
+  videoProvider?: "vk" | "youtube" | "rutube" | "unknown" | null;
+  videoEmbedUrl?: string | null;
+  embedAllowed: boolean;
+  videoWarning?: string | null;
+  status: TheoryStatus;
+  tests: IntensiveTestRef[];
+  fileCount: number;
+  assignedCount: number;
+  currentVersionId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  files?: TheoryFile[];
+};
+
+export type IntensiveAssignmentTest = {
+  testId: string;
+  title: string;
+  sortOrder: number;
+  dueAt: string;
+  testAssignmentId: string;
+  status: HomeworkAssignmentStatus;
+  score?: number | null;
+  maxScore?: number | null;
+  completedAt?: string | null;
+};
+
+export type IntensiveAssignment = {
+  id: string;
+  intensiveId: string;
+  versionId: string;
+  teacherId: string;
+  studentId: string;
+  assignedAt: string;
+  title: string;
+  description?: string | null;
+  videoUrl?: string | null;
+  videoProvider?: "vk" | "youtube" | "rutube" | "unknown" | null;
+  videoEmbedUrl?: string | null;
+  embedAllowed: boolean;
+  videoWarning?: string | null;
+  files: TheoryFile[];
+  tests: IntensiveAssignmentTest[];
+};
+
+export type MockExam = {
+  id: string;
+  teacherId: string;
+  title: string;
+  /** Дата проведения, YYYY-MM-DD */
+  date: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MockExamResult = {
+  id: string;
+  mockExamId: string;
+  studentId: string;
+  /** Вторичный балл ЕГЭ, 0–100. */
+  testScore: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type DemoData = {
   version: 6;
   teachers: Teacher[];
   students: Student[];
   lessons: Lesson[];
+  /** Пробные уроки для сетки расписания. Без внутренних заметок продажника. */
+  trialLessons: TrialLessonPublic[];
   attendances: Attendance[];
   topicSections: TopicSection[];
   topics: Topic[];
@@ -465,9 +606,16 @@ export type DemoData = {
   homeworkAssignments: HomeworkAssignment[];
   theories: TheoryMaterial[];
   theoryAssignments: TheoryAssignment[];
+  intensives: Intensive[];
+  intensiveAssignments: IntensiveAssignment[];
+  mockExams: MockExam[];
+  mockExamResults: MockExamResult[];
   tariffs: Tariff[];
   tariffAssignments: StudentTariffAssignment[];
   payments: PaymentRecord[];
+  products: Product[];
+  /** Реализованные продукты, доступные текущему ученику по тарифу */
+  availableProductSlugs: string[];
   currentTeacherId: string;
   direkciyaTeacherId: string;
   /** Demo-ученик для кабинета «Аудитория» */

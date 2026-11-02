@@ -22,12 +22,11 @@ import {
 } from "@/server/services/demo-accounts";
 
 /**
- * Демо-вход для локальной разработки и открытого теста.
- * Обычный production: запрещён (даже при ALLOW_DEMO_LOGIN=1).
- * Открытый тест: ALLOW_OPEN_TEST_LOGIN=1.
+ * Демо-вход закрыт. ALLOW_DEMO_LOGIN и ALLOW_OPEN_TEST_LOGIN его не включают.
+ * Маршрут оставлен, чтобы старые клиенты получали отказ, а не 404.
  */
 const bodySchema = z.object({
-  role: z.enum(["director", "teacher", "student"]),
+  role: z.enum(["director", "teacher", "student", "press"]),
   teacherId: z.string().optional(),
   studentId: z.string().optional(),
   email: z.string().email().optional(),

@@ -4,7 +4,9 @@ import {
   allowEarlySubmitWithUnanswered,
   createSubmitLock,
   firstAttemptStats,
+  filledQuestionCount,
   lastQuestionNavAction,
+  questionNavTone,
   resolveHomeworkTakePhase,
 } from "@/lib/homework-take-flow";
 import { gradeSubmission } from "@/lib/tests/grading";
@@ -139,6 +141,25 @@ describe("homework take flow", () => {
     expect(lastQuestionNavAction(0, 3)).toBe("next");
     expect(lastQuestionNavAction(2, 3)).toBe("submit");
     expect(lastQuestionNavAction(0, 1)).toBe("submit");
+  });
+
+  it("marks a question filled only when an answer is stored", () => {
+    expect(
+      filledQuestionCount([q1, q2], [
+        { questionId: "q1", selectedOptionIds: ["a"], isCorrect: true },
+      ])
+    ).toBe(1);
+    expect(filledQuestionCount([q1], [])).toBe(0);
+    expect(questionNavTone({ active: true, answered: true, isCorrect: true })).toBe(
+      "current"
+    );
+    expect(
+      questionNavTone({ active: false, answered: true, isCorrect: null })
+    ).toBe("filled");
+    expect(
+      questionNavTone({ active: false, answered: true, isCorrect: false })
+    ).toBe("incorrect");
+    expect(questionNavTone({ active: false, answered: false })).toBe("empty");
   });
 
   it("warns about unanswered questions but still allows submit", () => {

@@ -47,6 +47,10 @@ function directorUserId() {
   return "user_director_demo";
 }
 
+function pressUserId() {
+  return "user_press_demo";
+}
+
 function toDate(iso?: string) {
   return iso ? new Date(iso) : null;
 }
@@ -159,6 +163,7 @@ export async function seedDemoOrganization(
   // Пользователи demo — не cascade от org; удаляем явно
   const demoUserIds = [
     directorUserId(),
+    pressUserId(),
     ...demo.teachers.map((x) => userIdForTeacher(x.id)),
     ...demo.students.map((x) => userIdForStudent(x.id)),
   ];
@@ -185,6 +190,21 @@ export async function seedDemoOrganization(
     organizationId: DEMO_ORG_ID,
     userId: directorUserId(),
     role: "director",
+  });
+
+  await db.insert(t.users).values({
+    id: pressUserId(),
+    email: "press@demo.local",
+    passwordHash,
+    fullName: "Мария Пресса",
+    status: "active",
+  });
+
+  await db.insert(t.memberships).values({
+    id: "mem_press_demo",
+    organizationId: DEMO_ORG_ID,
+    userId: pressUserId(),
+    role: "press",
   });
 
   for (const teacher of demo.teachers) {
@@ -450,6 +470,11 @@ export async function seedDemoOrganization(
       });
     }
   }
+
+  const { ensureDefaultProducts } = await import(
+    "@/server/services/products-service"
+  );
+  await ensureDefaultProducts(db as never, DEMO_ORG_ID);
 
   for (const tariff of demo.tariffs) {
     await db.insert(t.tariffs).values({

@@ -8,6 +8,14 @@ import {
   putChatObject,
 } from "@/server/media/chat-storage";
 
+export function intensiveObjectKey(
+  organizationId: string,
+  intensiveId: string
+): string {
+  const id = randomBytes(8).toString("hex");
+  return `intensive/${organizationId}/${intensiveId}/${id}.pdf`;
+}
+
 export function theoryObjectKey(
   organizationId: string,
   materialId: string,

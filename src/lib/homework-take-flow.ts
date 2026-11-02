@@ -28,6 +28,38 @@ export type FirstAttemptStats = {
   percentIsPreliminary: boolean;
 };
 
+export type QuestionNavTone =
+  | "current"
+  | "correct"
+  | "incorrect"
+  | "filled"
+  | "empty";
+
+/** Текущий вопрос важнее отметки. Верность показывается только если она уже есть в ответе. */
+export function questionNavTone(input: {
+  active: boolean;
+  answered: boolean;
+  isCorrect?: boolean | null;
+}): QuestionNavTone {
+  if (input.active) return "current";
+  if (!input.answered) return "empty";
+  if (input.isCorrect === true) return "correct";
+  if (input.isCorrect === false) return "incorrect";
+  return "filled";
+}
+
+export function filledQuestionCount(
+  questions: TestQuestion[],
+  answers: StudentAnswer[]
+): number {
+  return questions.filter((question) =>
+    isQuestionAnswered(
+      question,
+      answers.find((answer) => answer.questionId === question.id)
+    )
+  ).length;
+}
+
 export function lastQuestionNavAction(
   index: number,
   questionCount: number

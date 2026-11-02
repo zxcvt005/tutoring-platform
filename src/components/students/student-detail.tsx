@@ -19,7 +19,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { TariffBalanceNotice } from "@/components/tariff-balance-notice";
 import { formatDateTime, formatDueAt } from "@/lib/format";
+import {
+  currentAssignmentForStudent,
+  packageStatusLabel,
+  studentTariffLabel,
+} from "@/lib/tariff-package";
 import {
   gradeLabel,
   phoneHref,
@@ -41,8 +47,21 @@ export function StudentDetail({
 
   const student = data.students.find((s) => s.id === studentId);
   const teacher = student
-    ? data.teachers.find((t) => t.id === student.teacherId)
+    ? data.teachers.find((t) => t.id === student.teacherId) ??
+      data.teachers.find((t) => t.id === (student.previousTeacherId ?? ""))
     : undefined;
+  const tariff = currentAssignmentForStudent(
+    data.tariffAssignments,
+    studentId
+  );
+  const tariffLabel = student
+    ? studentTariffLabel({
+        assignments: data.tariffAssignments,
+        studentId,
+        tariffs: data.tariffs,
+        purchaseTariffId: student.purchaseTariffId,
+      })
+    : null;
 
   const lessons = useMemo(
     () =>
@@ -82,9 +101,13 @@ export function StudentDetail({
       <PageHeader
         title={student.fullName}
         description={
-          teacher
-            ? `Преподаватель: ${teacher.fullName}`
-            : "Преподаватель не назначен"
+          student.status === "archived"
+            ? teacher
+              ? `В архиве · ранее: ${teacher.fullName}`
+              : "В архиве · преподаватель не назначен"
+            : teacher
+              ? `Преподаватель: ${teacher.fullName}`
+              : "Преподаватель не назначен"
         }
         actions={
           <div className="flex flex-wrap items-center gap-3">
@@ -118,6 +141,30 @@ export function StudentDetail({
               <span className="text-muted-foreground">Класс</span>
               <span>{gradeLabel(student.grade)}</span>
             </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground">Тариф</span>
+              <span>{tariffLabel?.name ?? "Нет тарифа"}</span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground">Остаток занятий</span>
+              <span className="tabular-nums">
+                {tariff?.lessonsRemaining == null ? "—" : tariff.lessonsRemaining}
+              </span>
+            </div>
+            {tariffLabel ? (
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">Статус тарифа</span>
+                <span>
+                  {tariff
+                    ? packageStatusLabel[tariff.packageStatus ?? "none"]
+                    : packageStatusLabel.unpaid}
+                </span>
+              </div>
+            ) : null}
+            <TariffBalanceNotice
+              remaining={tariff?.lessonsRemaining}
+              packageStatus={tariff?.packageStatus}
+            />
             {telegramDisplay(student.telegram) ? (
               <div className="flex justify-between gap-2">
                 <span className="text-muted-foreground">Telegram</span>

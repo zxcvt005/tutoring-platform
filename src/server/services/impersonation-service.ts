@@ -89,8 +89,14 @@ export async function startImpersonation(
     )
     .limit(1);
   if (!mem) throw notFound("Пользователь не найден в организации");
-  if (mem.role !== "teacher" && mem.role !== "student") {
-    throw forbidden("Можно открывать только кабинеты преподавателей и учеников");
+  if (
+    mem.role !== "teacher" &&
+    mem.role !== "student" &&
+    mem.role !== "press"
+  ) {
+    throw forbidden(
+      "Можно открывать только кабинеты преподавателей, учеников и прессы"
+    );
   }
 
   const [target] = await db
@@ -151,7 +157,7 @@ export async function startImpersonation(
       userId: target.id,
       email: target.email,
       fullName: target.fullName,
-      role: mem.role as "teacher" | "student",
+      role: mem.role as "teacher" | "student" | "press",
     },
   };
 }

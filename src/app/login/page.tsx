@@ -36,7 +36,7 @@ function LoginForm() {
         if (me && (me as { role?: string }).role) {
           router.replace(
             cabinetHomeForRole(
-              (me as { role: "director" | "teacher" | "student" }).role
+              (me as { role: "director" | "teacher" | "student" | "press" }).role
             )
           );
         }
@@ -54,7 +54,7 @@ function LoginForm() {
       const result = await apiLogin(email, password);
       const next = search.get("next");
       const home = cabinetHomeForRole(
-        result.role as "director" | "teacher" | "student"
+        result.role as "director" | "teacher" | "student" | "press"
       );
       if (
         next &&
@@ -62,7 +62,8 @@ function LoginForm() {
         !next.startsWith("//") &&
         ((result.role === "director" && next.startsWith("/direkciya")) ||
           (result.role === "teacher" && next.startsWith("/kafedra")) ||
-          (result.role === "student" && next.startsWith("/auditoria")))
+          (result.role === "student" && next.startsWith("/auditoria")) ||
+          (result.role === "press" && next.startsWith("/pressa")))
       ) {
         router.replace(next);
       } else {
@@ -139,17 +140,10 @@ function LoginForm() {
           </Link>
           {" · "}
           <Link
-            href="/register/teacher"
-            className="underline-offset-4 hover:underline"
-          >
-            Преподаватель
-          </Link>
-          {" · "}
-          <Link
             href="/register/student"
             className="underline-offset-4 hover:underline"
           >
-            Ученик
+            Регистрация ученика
           </Link>
           {needsBootstrap ? (
             <>

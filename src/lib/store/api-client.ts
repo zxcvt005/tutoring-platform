@@ -1,5 +1,15 @@
 import { cabinetHomeForRole } from "@/lib/auth/cabinets";
+import { clearDemoSkipAutoLogin } from "@/lib/store/demo-session";
 import type { DemoData } from "@/lib/types";
+
+export class HttpStatusError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "HttpStatusError";
+    this.status = status;
+  }
+}
 
 export type ImpersonationAuth = {
   active: true;
@@ -10,7 +20,7 @@ export type ImpersonationAuth = {
 
 export type BootstrapAuth = {
   userId: string;
-  role: "director" | "teacher" | "student";
+  role: "director" | "teacher" | "student" | "press";
   organizationId: string;
   teacherId: string | null;
   studentId: string | null;
@@ -23,13 +33,13 @@ export { cabinetHomeForRole };
 
 export type DemoAccountOption = {
   id: string;
-  role: "director" | "teacher" | "student";
+  role: "director" | "teacher" | "student" | "press";
   fullName: string;
   email: string;
   teacherId?: string;
   studentId?: string;
   href: string;
-  group: "director" | "teachers" | "students";
+  group: "director" | "teachers" | "students" | "press";
   note?: string;
 };
 
@@ -47,7 +57,10 @@ async function parseJson<T>(res: Response): Promise<T> {
     error?: { message?: string };
   };
   if (!res.ok) {
-    throw new Error(data.error?.message || `HTTP ${res.status}`);
+    throw new HttpStatusError(
+      res.status,
+      data.error?.message || `HTTP ${res.status}`
+    );
   }
   return data;
 }
@@ -88,13 +101,15 @@ export async function apiLogin(email: string, password: string) {
     credentials: "include",
     body: JSON.stringify({ email, password }),
   });
-  return parseJson<{
+  const result = await parseJson<{
     user: { id: string; email: string; fullName: string };
     organizationId: string;
-    role: "director" | "teacher" | "student";
+    role: "director" | "teacher" | "student" | "press";
     teacherId: string | null;
     studentId: string | null;
   }>(res);
+  clearDemoSkipAutoLogin();
+  return result;
 }
 
 export async function apiLogout() {
@@ -112,7 +127,7 @@ export async function apiLogout() {
 }
 
 export async function apiDemoLogin(input: {
-  role: "director" | "teacher" | "student";
+  role: "director" | "teacher" | "student" | "press";
   teacherId?: string;
   studentId?: string;
   email?: string;
@@ -124,13 +139,15 @@ export async function apiDemoLogin(input: {
     credentials: "include",
     body: JSON.stringify(input),
   });
-  return parseJson<{
+  const result = await parseJson<{
     user: { id: string; email: string; fullName: string };
     organizationId: string;
-    role: "director" | "teacher" | "student";
+    role: "director" | "teacher" | "student" | "press";
     teacherId: string | null;
     studentId: string | null;
   }>(res);
+  clearDemoSkipAutoLogin();
+  return result;
 }
 
 export async function apiBootstrapAdmin(input: {
@@ -166,6 +183,27 @@ export async function apiTheoryUploadFile(materialId: string, file: File) {
   form.append("files", file);
   const res = await fetch(
     `/api/theory/${encodeURIComponent(materialId)}/files`,
+    {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: form,
+    }
+  );
+  return parseJson<{
+    id: string;
+    originalName: string;
+    mimeType: string;
+    sizeBytes: number;
+  }>(res);
+}
+
+export async function apiIntensiveUploadFile(intensiveId: string, file: File) {
+  const headers = await csrfOnlyHeaders();
+  const form = new FormData();
+  form.append("files", file);
+  const res = await fetch(
+    `/api/intensives/${encodeURIComponent(intensiveId)}/files`,
     {
       method: "POST",
       headers,
@@ -221,7 +259,7 @@ export async function apiAdminCreateUser(body: {
   email: string;
   password: string;
   fullName: string;
-  role: "director" | "teacher" | "student";
+  role: "director" | "teacher" | "student" | "press";
   teacherId?: string;
   studentId?: string;
 }) {
@@ -309,7 +347,7 @@ export async function apiStartImpersonation(body: {
   });
   clearCsrfCache();
   return parseJson<{
-    role: "director" | "teacher" | "student";
+    role: "director" | "teacher" | "student" | "press";
     redirectTo: string;
     impersonation: ImpersonationAuth | null;
   }>(res);
@@ -361,6 +399,20 @@ export async function apiNotesDelete(id: string) {
     body: "{}",
   });
   return parseJson<{ ok: true }>(res);
+}
+
+export async function apiChatEnsure(input: {
+  teacherId?: string;
+  studentId?: string;
+}) {
+  const headers = await mutatingHeaders();
+  const res = await fetch("/api/chats", {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: JSON.stringify(input),
+  });
+  return parseJson<{ chat: import("@/lib/chat/types").ChatThreadMeta }>(res);
 }
 
 export async function apiChatList(input: { query?: string; offset?: number } = {}) {
@@ -499,7 +551,125 @@ export async function apiStopImpersonation() {
   });
   clearCsrfCache();
   return parseJson<{
-    role: "director" | "teacher" | "student";
+    role: "director" | "teacher" | "student" | "press";
     redirectTo: string;
   }>(res);
+}
+
+export async function apiPressGet<T = unknown>(
+  action: string,
+  params?: Record<string, string | undefined>
+): Promise<T> {
+  const search = new URLSearchParams();
+  search.set("action", action);
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value) search.set(key, value);
+    }
+  }
+  const res = await fetch(`/api/press?${search.toString()}`, {
+    credentials: "include",
+  });
+  return parseJson(res);
+}
+
+export async function apiPress<T = unknown>(
+  action: string,
+  payload?: unknown
+): Promise<T> {
+  const headers = await mutatingHeaders();
+  const res = await fetch("/api/press", {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: JSON.stringify({ action, payload }),
+  });
+  return parseJson(res);
+}
+
+export async function apiFeedbackGet<T = unknown>(
+  action: string,
+  params?: Record<string, string | undefined>
+): Promise<T> {
+  const search = new URLSearchParams();
+  search.set("action", action);
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value) search.set(key, value);
+    }
+  }
+  const res = await fetch(`/api/feedback?${search.toString()}`, {
+    credentials: "include",
+  });
+  return parseJson(res);
+}
+
+export async function apiLessonRatingsGet<T = unknown>(
+  action: string,
+  params?: Record<string, string | undefined>
+): Promise<T> {
+  const search = new URLSearchParams();
+  search.set("action", action);
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value) search.set(key, value);
+    }
+  }
+  const res = await fetch(`/api/lesson-ratings?${search.toString()}`, {
+    credentials: "include",
+  });
+  return parseJson(res);
+}
+
+export async function apiLessonRatings<T = unknown>(
+  action: string,
+  payload?: unknown
+): Promise<T> {
+  const headers = await mutatingHeaders();
+  const res = await fetch("/api/lesson-ratings", {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: JSON.stringify({ action, payload }),
+  });
+  return parseJson(res);
+}
+
+export async function apiFeedback<T = unknown>(
+  action: string,
+  payload?: unknown
+): Promise<T> {
+  const headers = await mutatingHeaders();
+  const res = await fetch("/api/feedback", {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: JSON.stringify({ action, payload }),
+  });
+  return parseJson(res);
+}
+
+export async function apiFormulaTrainerGet<T = unknown>(
+  action: string
+): Promise<T> {
+  const search = new URLSearchParams();
+  search.set("action", action);
+  const res = await fetch(`/api/formula-trainer?${search.toString()}`, {
+    credentials: "include",
+  });
+  return parseJson(res);
+}
+
+export async function apiFormulaTrainer<T = unknown>(
+  action: string,
+  payload?: unknown
+): Promise<T> {
+  const headers = await mutatingHeaders();
+  const res = await fetch("/api/formula-trainer", {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: JSON.stringify({ action, payload }),
+  });
+  return parseJson(res);
 }

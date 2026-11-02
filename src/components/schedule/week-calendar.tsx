@@ -4,8 +4,14 @@ import { useMemo, useState } from "react";
 
 import { LessonStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { appZonedParts, formatInAppZone } from "@/lib/app-time";
 import { formatTime, weekdayShort } from "@/lib/format";
+import type { TrialLessonPublic } from "@/lib/trial-lessons";
 import {
   DAY_END_HOUR,
   DAY_START_HOUR,
@@ -23,21 +29,57 @@ import { cn } from "@/lib/utils";
 
 type WeekCalendarProps = {
   lessons: Lesson[];
+  trialLessons?: TrialLessonPublic[];
   students: Student[];
   weekAnchor: Date;
   onWeekChange: (anchor: Date) => void;
   onSlotClick: (day: Date, hour: number, minute: number) => void;
   onLessonClick: (lesson: Lesson) => void;
+  onTrialClick?: (trial: TrialLessonPublic) => void;
+  /** Подпись кнопки свободного слота на мобильной сетке */
+  slotActionLabel?: string;
 };
+
+function trialAsLesson(trial: TrialLessonPublic): Lesson {
+  return {
+    id: trial.id,
+    teacherId: trial.teacherId,
+    studentIds: [],
+    startsAt: trial.startsAt,
+    endsAt: trial.endsAt,
+    status:
+      trial.lessonStatus === "completed"
+        ? "done"
+        : trial.lessonStatus === "cancelled"
+          ? "cancelled"
+          : "planned",
+    subject: trial.prospectName,
+  };
+}
 
 export function WeekCalendar({
   lessons,
+  trialLessons = [],
   students,
   weekAnchor,
   onWeekChange,
   onSlotClick,
   onLessonClick,
+  onTrialClick,
+  slotActionLabel = "+ Занятие",
 }: WeekCalendarProps) {
+  const trialById = useMemo(
+    () => new Map(trialLessons.map((t) => [t.id, t])),
+    [trialLessons]
+  );
+  const visibleTrials = useMemo(
+    () => trialLessons.filter((t) => t.lessonStatus !== "cancelled"),
+    [trialLessons]
+  );
+  const calendarLessons = useMemo(
+    () => [...lessons, ...visibleTrials.map(trialAsLesson)],
+    [lessons, visibleTrials]
+  );
   const weekStart = useMemo(() => startOfWeek(weekAnchor), [weekAnchor]);
   const days = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
@@ -107,7 +149,7 @@ export function WeekCalendar({
 
       <div className="space-y-2 md:hidden">
         {days.map((day) => {
-          const dayLessons = lessons
+          const dayLessons = calendarLessons
             .filter((l) => sameDay(new Date(l.startsAt), day))
             .sort(
               (a, b) =>
@@ -129,7 +171,7 @@ export function WeekCalendar({
                   variant="ghost"
                   onClick={() => onSlotClick(day, 10, 0)}
                 >
-                  + Занятие
+                  {slotActionLabel}
                 </Button>
               </div>
               {dayLessons.length === 0 ? (
@@ -141,14 +183,24 @@ export function WeekCalendar({
                       <button
                         type="button"
                         className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left hover:bg-muted/40"
-                        onClick={() => onLessonClick(l)}
+                        onClick={() => {
+                          const trial = trialById.get(l.id);
+                          if (trial) onTrialClick?.(trial);
+                          else onLessonClick(l);
+                        }}
                       >
                         <div className="min-w-0">
                           <div className="text-sm font-medium tabular-nums">
                             {formatTime(l.startsAt)}–{formatTime(l.endsAt)}
+                            {trialById.has(l.id) ? (
+                              <span className="ml-1.5 text-[0.65rem] font-semibold tracking-wide text-amber-800 uppercase">
+                                Пробный
+                              </span>
+                            ) : null}
                           </div>
                           <div className="truncate text-sm">
-                            {lessonParticipantsLabel(l, nameOf)}
+                            {trialById.get(l.id)?.prospectName ??
+                              lessonParticipantsLabel(l, nameOf)}
                           </div>
                         </div>
                         <LessonStatusBadge status={l.status} />
@@ -209,12 +261,16 @@ export function WeekCalendar({
             <DayColumn
               key={day.toISOString()}
               day={day}
-              lessons={lessons.filter((l) => sameDay(new Date(l.startsAt), day))}
+              lessons={calendarLessons.filter((l) =>
+                sameDay(new Date(l.startsAt), day)
+              )}
+              trialById={trialById}
               nameOf={nameOf}
               gridHeight={gridHeight}
               dayStartMin={dayStartMin}
               onSlotClick={onSlotClick}
               onLessonClick={onLessonClick}
+              onTrialClick={onTrialClick}
             />
           ))}
         </div>
@@ -226,19 +282,23 @@ export function WeekCalendar({
 function DayColumn({
   day,
   lessons,
+  trialById,
   nameOf,
   gridHeight,
   dayStartMin,
   onSlotClick,
   onLessonClick,
+  onTrialClick,
 }: {
   day: Date;
   lessons: Lesson[];
+  trialById: Map<string, TrialLessonPublic>;
   nameOf: (id: string) => string;
   gridHeight: number;
   dayStartMin: number;
   onSlotClick: (day: Date, hour: number, minute: number) => void;
   onLessonClick: (lesson: Lesson) => void;
+  onTrialClick?: (trial: TrialLessonPublic) => void;
 }) {
   const [hoverY, setHoverY] = useState<number | null>(null);
   const laidOut = useMemo(() => layoutLessonColumns(lessons), [lessons]);
@@ -284,17 +344,20 @@ function DayColumn({
           18
                 );
         const { leftPct, widthPct } = lessonCardSlotLayout(column, columns);
-        return (
+        const trial = trialById.get(l.id);
+        const card = (
           <button
             key={l.id}
             type="button"
             className={cn(
               "absolute z-10 overflow-hidden rounded-md border px-1 py-0.5 text-left text-[0.65rem] leading-tight shadow-none transition-opacity hover:opacity-95",
-              l.status === "cancelled"
-                ? "border-destructive/30 bg-destructive/10 text-destructive line-through"
-                : l.status === "done"
-                  ? "border-success/25 surface-mint text-foreground"
-                  : "border-border/80 surface-sky text-foreground"
+              trial
+                ? "border-amber-400/70 bg-amber-50 text-amber-950"
+                : l.status === "cancelled"
+                  ? "border-destructive/30 bg-destructive/10 text-destructive line-through"
+                  : l.status === "done"
+                    ? "border-success/25 surface-mint text-foreground"
+                    : "border-border/80 surface-sky text-foreground"
             )}
             style={{
               top,
@@ -304,14 +367,49 @@ function DayColumn({
             }}
             onClick={(e) => {
               e.stopPropagation();
-              onLessonClick(l);
+              if (trial) onTrialClick?.(trial);
+              else onLessonClick(l);
             }}
           >
             <div className="font-semibold tabular-nums">
               {formatTime(l.startsAt)}
             </div>
-            <div className="truncate">{lessonParticipantsLabel(l, nameOf)}</div>
+            <div className="truncate">
+              {trial
+                ? trial.prospectName
+                : lessonParticipantsLabel(l, nameOf)}
+            </div>
+            {trial ? (
+              <div className="truncate text-[0.6rem] font-semibold tracking-wide uppercase opacity-80">
+                Пробный
+              </div>
+            ) : null}
           </button>
+        );
+        if (!trial) return card;
+        return (
+          <Tooltip key={l.id}>
+            <TooltipTrigger
+              delay={200}
+              closeDelay={80}
+              closeOnClick
+              render={card}
+            />
+            <TooltipContent className="w-56 space-y-1 p-2.5">
+              <p className="text-[0.65rem] font-semibold tracking-wide text-amber-800 uppercase">
+                Пробный урок
+              </p>
+              <p className="font-medium">{trial.prospectName}</p>
+              <p className="tabular-nums text-muted-foreground">
+                {formatTime(trial.startsAt)}–{formatTime(trial.endsAt)}
+              </p>
+              {trial.teacherNotes ? (
+                <p className="text-muted-foreground">{trial.teacherNotes}</p>
+              ) : (
+                <p className="text-muted-foreground">Нет заметок для преподавателя</p>
+              )}
+            </TooltipContent>
+          </Tooltip>
         );
       })}
     </div>

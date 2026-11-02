@@ -2,15 +2,18 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check } from "lucide-react";
 import { toast } from "sonner";
 
 import { QuestionFields } from "@/components/tests/question-fields";
 import { Button } from "@/components/ui/button";
 import {
   allowEarlySubmitWithUnanswered,
+  filledQuestionCount,
   firstAttemptStats,
   lastQuestionNavAction,
+  questionNavTone,
   resolveHomeworkTakePhase,
   unansweredBeforeSubmit,
   type FirstAttemptStats,
@@ -27,6 +30,8 @@ import {
   getAssignmentQuestions,
   getAssignmentTitle,
 } from "@/lib/tests/helpers";
+import { LearningLockedBanner } from "@/components/tariff-balance-notice";
+import { isHomeworkHistoryView, studentLearningLock } from "@/lib/learning-lock";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { QuestionOutcomeStatus, StudentAnswer, TestQuestion } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -58,13 +63,36 @@ export function HomeworkTake({
     ? data.homeworks.find((h) => h.id === assignment.homeworkId)
     : undefined;
 
+  const learning = studentLearningLock(
+    data.tariffAssignments,
+    data.currentStudentId
+  );
+  if (
+    assignment &&
+    assignment.studentId === data.currentStudentId &&
+    learning.locked &&
+    !isHomeworkHistoryView(assignment.status)
+  ) {
+    return (
+      <div className="space-y-3 rounded-2xl border border-border/70 bg-auditoria-surface p-4">
+        <LearningLockedBanner message={learning.message} />
+        <Link
+          href={backHref}
+          className="inline-flex h-8 items-center rounded-full border border-border bg-auditoria-surface px-3 text-sm"
+        >
+          К списку
+        </Link>
+      </div>
+    );
+  }
+
   if (!assignment || assignment.studentId !== data.currentStudentId) {
     return (
-      <div className="space-y-3">
+      <div className="space-y-3 rounded-2xl border border-border/70 bg-auditoria-surface p-4">
         <p className="text-sm">Задание не найдено или принадлежит другому ученику.</p>
         <Link
           href={backHref}
-          className="inline-flex h-8 items-center rounded-full border border-border px-3 text-sm"
+          className="inline-flex h-8 items-center rounded-full border border-border bg-auditoria-surface px-3 text-sm"
         >
           К списку
         </Link>
@@ -132,7 +160,7 @@ export function HomeworkTake({
   return (
     <div className="space-y-3">
       {missed ? (
-        <p className="rounded-lg border border-destructive/40 bg-destructive/8 px-3 py-2 text-sm">
+        <p className="rounded-2xl border border-[#f0d4d6] bg-pastel-rose px-4 py-3 text-sm text-foreground">
           Не выполнено к следующему занятию. Можно продолжить — сохранённые ответы
           и попытки не сбрасываются.
         </p>
@@ -166,8 +194,9 @@ export function HomeworkTake({
 
       {activeAttempt != null ? (
         <TakeForm
-          key={`${assignment.id}-${assignment.status}-${activeAttempt}`}
+          key={`${assignment.id}-attempt-${activeAttempt}`}
           assignmentId={assignment.id}
+          workKind={assignment.sourceKind === "theory" ? "theory" : "homework"}
           title={title}
           questions={questions}
           visibleQuestions={visibleQuestions}
@@ -194,6 +223,7 @@ export function HomeworkTake({
         <TakeForm
           key={`${assignment.id}-results`}
           assignmentId={assignment.id}
+          workKind={assignment.sourceKind === "theory" ? "theory" : "homework"}
           title={title}
           questions={questions}
           visibleQuestions={[]}
@@ -246,25 +276,25 @@ function FirstAttemptSummary({
         </p>
       </div>
       <dl className="grid gap-2 text-sm sm:grid-cols-2">
-        <div className="rounded-xl bg-muted/40 px-3 py-2">
+        <div className="rounded-xl bg-muted px-3 py-2">
           <dt className="text-xs text-muted-foreground">Отвечено вопросов</dt>
           <dd className="font-display text-lg font-semibold tabular-nums">
             {stats.answered} из {stats.total}
           </dd>
         </div>
-        <div className="rounded-xl bg-muted/40 px-3 py-2">
+        <div className="rounded-xl bg-muted px-3 py-2">
           <dt className="text-xs text-muted-foreground">Верных ответов</dt>
           <dd className="font-display text-lg font-semibold tabular-nums">
             {stats.correct}
           </dd>
         </div>
-        <div className="rounded-xl bg-muted/40 px-3 py-2">
+        <div className="rounded-xl bg-muted px-3 py-2">
           <dt className="text-xs text-muted-foreground">Решить повторно</dt>
           <dd className="font-display text-lg font-semibold tabular-nums">
             {stats.retryCount}
           </dd>
         </div>
-        <div className="rounded-xl bg-muted/40 px-3 py-2">
+        <div className="rounded-xl bg-muted px-3 py-2">
           <dt className="text-xs text-muted-foreground">Незавершённых</dt>
           <dd className="font-display text-lg font-semibold tabular-nums">
             {stats.unanswered}
@@ -298,6 +328,7 @@ function FirstAttemptSummary({
 
 function TakeForm({
   assignmentId,
+  workKind,
   title,
   questions,
   visibleQuestions,
@@ -319,6 +350,7 @@ function TakeForm({
   backLabel = "Домашние задания",
 }: {
   assignmentId: string;
+  workKind: "homework" | "theory";
   title: string;
   questions: TestQuestion[];
   visibleQuestions: TestQuestion[];
@@ -337,7 +369,8 @@ function TakeForm({
   saveHomeworkDraft: (
     id: string,
     answers: StudentAnswer[],
-    attemptNumber?: 1 | 2
+    attemptNumber?: 1 | 2,
+    options?: { silent?: boolean }
   ) => Promise<{ ok: boolean; error?: string }>;
   submitHomeworkAssignment: (
     id: string,
@@ -359,10 +392,11 @@ function TakeForm({
   });
 
   const current = visibleQuestions[index];
-  const filled = visibleQuestions.filter((q) =>
-    isQuestionAnswered(q, answers.find((a) => a.questionId === q.id))
-  );
+  const filledCount = filledQuestionCount(visibleQuestions, answers);
   const navAction = lastQuestionNavAction(index, visibleQuestions.length);
+  const answersRef = useRef(answers);
+  answersRef.current = answers;
+  const savedSnapshot = useRef(JSON.stringify(answers));
 
   function patchAnswer(next: StudentAnswer) {
     setAnswers((prev) => {
@@ -374,10 +408,26 @@ function TakeForm({
     });
   }
 
-  async function save() {
-    const result = await saveHomeworkDraft(assignmentId, answers, attemptNumber);
+  async function save(options?: { silent?: boolean }) {
+    const result = await saveHomeworkDraft(
+      assignmentId,
+      answersRef.current,
+      attemptNumber,
+      options
+    );
     if (!result.ok) toast.error(result.error || "Не удалось сохранить");
   }
+
+  useEffect(() => {
+    if (!canEdit) return;
+    const snapshot = JSON.stringify(answers);
+    if (snapshot === savedSnapshot.current) return;
+    const timer = window.setTimeout(() => {
+      savedSnapshot.current = snapshot;
+      void save({ silent: true });
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [answers, canEdit]);
 
   async function submit() {
     if (submittingRef.current || busy) return;
@@ -385,7 +435,7 @@ function TakeForm({
     if (unanswered > 0) {
       if (!allowEarlySubmitWithUnanswered(unanswered)) return;
       const ok = window.confirm(
-        `Есть незаполненные вопросы (${unanswered}). Сдать попытку досрочно?`
+        `Заполнено ${filledCount} из ${visibleQuestions.length}. Без ответа: ${unanswered}. Отправить работу?`
       );
       if (!ok) return;
     }
@@ -418,70 +468,116 @@ function TakeForm({
   const showResults =
     reveal || attempt2Submitted || (attempt1Submitted && retryIds.length === 0);
 
+  const progress =
+    visibleQuestions.length === 0
+      ? 0
+      : Math.round((filledCount / visibleQuestions.length) * 100);
+  const subtitle = canEdit
+    ? workKind === "theory"
+      ? "Ответьте на вопросы по изученному материалу. Ответы сохраняются автоматически."
+      : "Продолжите с того места, где остановились. Ответы сохраняются автоматически."
+    : "Результат";
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
+    <div className="auditoria-home-card min-w-0 space-y-5 overflow-x-hidden">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <p className="text-xs text-muted-foreground">
             <Link href={backHref} className="hover:underline">
               {backLabel}
             </Link>
           </p>
-          <h1 className="font-display text-xl font-semibold">{title}</h1>
-          <p className="text-sm text-muted-foreground">
-            {canEdit
-              ? attemptNumber === 2
-                ? "Вторая попытка: только задания с ошибками. Правильные ответы скрыты."
-                : attempt1Submitted
-                  ? "Дорешивание: только вопросы, на которые ещё не ответили."
-                  : "Первая попытка. Можно сохранить черновик и завершить досрочно."
-              : "Результат"}
+          <p className="mt-2 text-[0.68rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
+            {workKind === "theory" ? "Тест по теории" : "Домашнее задание"}
           </p>
+          <h1 className="mt-1 font-display text-2xl font-semibold tracking-tight sm:text-3xl">
+            {title}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground sm:text-base">{subtitle}</p>
+          {canEdit && attemptNumber === 2 ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Вторая попытка: только задания с ошибками. Правильные ответы скрыты.
+            </p>
+          ) : null}
+          {canEdit && attemptNumber === 1 && attempt1Submitted ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Дорешивание: только вопросы, на которые ещё не ответили.
+            </p>
+          ) : null}
         </div>
         {canEdit ? (
-          <div className="flex gap-2">
-            <Button type="button" variant="outline" onClick={() => void save()}>
+          <div className="flex w-full shrink-0 gap-2 sm:w-auto">
+            <button
+              type="button"
+              className="inline-flex h-10 flex-1 items-center justify-center rounded-full border border-black/10 bg-auditoria-surface px-4 text-sm text-foreground sm:flex-none"
+              onClick={() => void save()}
+            >
               Сохранить
-            </Button>
-            <Button type="button" disabled={busy} onClick={() => void submit()}>
-              Завершить попытку
-            </Button>
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              className="inline-flex h-10 flex-1 items-center justify-center rounded-full bg-[#e7dff6] px-4 text-sm text-foreground disabled:opacity-60 sm:flex-none"
+              onClick={() => void submit()}
+            >
+              {busy ? "Отправка…" : "Завершить попытку"}
+            </button>
           </div>
         ) : null}
       </div>
 
       {canEdit && visibleQuestions.length > 0 ? (
         <>
-          <div className="flex flex-wrap gap-1">
-            {visibleQuestions.map((q, i) => {
-              const done = isQuestionAnswered(
-                q,
-                answers.find((a) => a.questionId === q.id)
-              );
-              return (
-                <button
-                  key={q.id}
-                  type="button"
-                  className={cn(
-                    "h-7 w-7 rounded-full text-xs font-medium",
-                    i === index
-                      ? "bg-primary text-primary-foreground"
-                      : done
-                        ? "bg-muted"
-                        : "border border-border"
-                  )}
-                  onClick={() => setIndex(i)}
-                >
-                  {i + 1}
-                </button>
-              );
-            })}
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div className="flex min-w-0 flex-wrap gap-1.5">
+              {visibleQuestions.map((q, i) => {
+                const answer = answers.find((a) => a.questionId === q.id);
+                const tone = questionNavTone({
+                  active: i === index,
+                  answered: isQuestionAnswered(q, answer),
+                  isCorrect: answer?.isCorrect,
+                });
+                return (
+                  <button
+                    key={q.id}
+                    type="button"
+                    aria-current={i === index ? "step" : undefined}
+                    className={cn(
+                      "inline-flex h-9 min-w-9 items-center justify-center rounded-full border px-2 text-sm",
+                      tone === "current" && "border-transparent bg-pastel-blue",
+                      tone === "correct" && "border-transparent bg-pastel-mint",
+                      tone === "incorrect" && "border-transparent bg-pastel-rose",
+                      tone === "filled" && "border-black/20 bg-auditoria-surface",
+                      tone === "empty" && "border-black/10 bg-auditoria-surface text-muted-foreground"
+                    )}
+                    onClick={() => {
+                      void save({ silent: true });
+                      setIndex(i);
+                    }}
+                  >
+                    {tone === "correct" ? <Check className="size-4" /> : i + 1}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+              <p className="shrink-0 text-sm text-foreground/80">
+                Вопрос {Math.min(index + 1, visibleQuestions.length)} из{" "}
+                {visibleQuestions.length}
+              </p>
+              <div className="h-1.5 min-w-0 flex-1 rounded-full bg-[#eef2f6]">
+                <div
+                  className="h-full rounded-full bg-[#c9d8ea]"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              <p className="shrink-0 text-sm text-muted-foreground">
+                Заполнено {filledCount} из {visibleQuestions.length}
+              </p>
+            </div>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Заполнено {filled.length} из {visibleQuestions.length}
-          </p>
           {current ? (
-            <div className="space-y-2">
+            <div className="space-y-3">
               <QuestionFields
                 question={current}
                 index={index}
@@ -506,26 +602,33 @@ function TakeForm({
                   Не знаю
                 </Button>
               ) : null}
-              <div className="flex justify-between">
-                <Button
+              <div className="flex flex-col-reverse gap-2 border-t border-black/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <button
                   type="button"
-                  variant="ghost"
                   disabled={index === 0 || busy}
-                  onClick={() => setIndex((i) => i - 1)}
-                >
-                  Назад
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  disabled={busy}
+                  className="inline-flex h-11 items-center justify-center rounded-full px-4 text-sm text-foreground disabled:opacity-40"
                   onClick={() => {
-                    if (navAction === "submit") void submit();
-                    else setIndex((i) => i + 1);
+                    void save({ silent: true });
+                    setIndex((i) => i - 1);
                   }}
                 >
-                  {navAction === "submit" ? "Завершить попытку" : "Далее"}
-                </Button>
+                  Назад
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="inline-flex h-11 items-center justify-center rounded-full bg-pastel-blue px-5 text-sm text-foreground disabled:opacity-60"
+                  onClick={() => {
+                    if (navAction === "submit") {
+                      void submit();
+                      return;
+                    }
+                    void save({ silent: true });
+                    setIndex((i) => i + 1);
+                  }}
+                >
+                  {navAction === "submit" ? "Завершить попытку" : "Далее →"}
+                </button>
               </div>
             </div>
           ) : null}
@@ -571,8 +674,19 @@ function TakeForm({
               const a2 = attempt2Answers.find((a) => a.questionId === q.id);
               return (
                 <li key={q.id} className="space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">
-                    {outcomeLabel[st]}
+                  <p
+                    className={cn(
+                      "inline-flex rounded-full px-2.5 py-1 text-xs",
+                      st === "correct_first" || st === "corrected_second"
+                        ? "bg-pastel-mint text-foreground"
+                        : st === "incorrect"
+                          ? "bg-pastel-rose text-foreground"
+                          : "bg-[#f8fafc] text-muted-foreground"
+                    )}
+                  >
+                    {st === "correct_first" || st === "corrected_second"
+                      ? "Верно!"
+                      : outcomeLabel[st]}
                   </p>
                   <QuestionFields
                     question={q}

@@ -1,3 +1,4 @@
+import { appZonedParts, formatInAppZone } from "@/lib/app-time";
 import { lessonHistoryAttendanceLabel } from "@/lib/format";
 import { isHomeworkComplete } from "@/lib/homework-missed";
 import { topicsForLesson, type LessonTopicView } from "@/lib/lesson-topics";
@@ -111,9 +112,102 @@ export function historyStripeTone(
 }
 
 export const historyStripeClass: Record<HistoryStripeTone, string> = {
-  present: "border-l-[3px] border-l-emerald-500",
-  absent_unexcused: "border-l-[3px] border-l-destructive",
-  absent_excused: "border-l-[3px] border-l-orange-500",
-  cancelled: "border-l-[3px] border-l-sky-500",
-  neutral: "border-l-[3px] border-l-transparent",
+  present: "border-l-[#8fbfa0]",
+  absent_unexcused: "border-l-[#e3a4aa]",
+  absent_excused: "border-l-[#e3b08a]",
+  cancelled: "border-l-[#c5c2d4]",
+  neutral: "border-l-[#e4c48a]",
 };
+
+export type HistoryFilterId =
+  | "all"
+  | "present"
+  | "missed"
+  | "cancelled"
+  | "pending";
+
+export type HistoryStatusPresentation = {
+  filter: Exclude<HistoryFilterId, "all">;
+  title: string;
+  detail: string | null;
+};
+
+/** Подпись строки списка. Правила те же, что у historyStripeTone и текстовых статусов. */
+export function historyStatusPresentation(
+  lesson: Pick<Lesson, "status">,
+  attendance?: Pick<Attendance, "status"> | null
+): HistoryStatusPresentation {
+  const tone = historyStripeTone(lesson, attendance);
+  if (tone === "present") {
+    return { filter: "present", title: "Был на занятии", detail: null };
+  }
+  if (tone === "absent_excused") {
+    return {
+      filter: "missed",
+      title: "Не был",
+      detail: "уважительная причина",
+    };
+  }
+  if (tone === "absent_unexcused") {
+    return {
+      filter: "missed",
+      title: "Не был",
+      detail: "неуважительная причина",
+    };
+  }
+  if (tone === "cancelled") {
+    if (lesson.status !== "cancelled" && attendance?.status === "rescheduled") {
+      return { filter: "cancelled", title: "Перенесено", detail: null };
+    }
+    return { filter: "cancelled", title: "Отменено", detail: "преподавателем" };
+  }
+  return { filter: "pending", title: "Ожидает отметки", detail: null };
+}
+
+export function lessonMatchesHistoryFilter(
+  filter: HistoryFilterId,
+  lesson: Pick<Lesson, "status">,
+  attendance?: Pick<Attendance, "status"> | null
+): boolean {
+  if (filter === "all") return true;
+  return historyStatusPresentation(lesson, attendance).filter === filter;
+}
+
+export type HistoryMonthGroup<T> = {
+  key: string;
+  title: string;
+  items: T[];
+};
+
+/** Месяц считается в часовом поясе приложения. Пустые месяцы сюда не попадают. */
+export function groupHistoryByMonth<T extends { startsAt: string }>(
+  lessons: readonly T[]
+): HistoryMonthGroup<T>[] {
+  const groups: HistoryMonthGroup<T>[] = [];
+  for (const lesson of lessons) {
+    const parts = appZonedParts(lesson.startsAt);
+    const key = `${parts.year}-${String(parts.month).padStart(2, "0")}`;
+    const current = groups[groups.length - 1];
+    if (current?.key === key) {
+      current.items.push(lesson);
+      continue;
+    }
+    const raw = formatInAppZone(lesson.startsAt, {
+      month: "long",
+      year: "numeric",
+    }).replace(/\s*г\.\s*$/, "");
+    const title = raw.charAt(0).toLocaleUpperCase("ru-RU") + raw.slice(1);
+    groups.push({ key, title, items: [lesson] });
+  }
+  return groups;
+}
+
+export function historyLessonDateParts(iso: string): {
+  dayMonth: string;
+  weekday: string;
+} {
+  return {
+    dayMonth: formatInAppZone(iso, { day: "numeric", month: "short" }),
+    weekday: formatInAppZone(iso, { weekday: "short" }).replace(/\.$/, ""),
+  };
+}

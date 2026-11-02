@@ -23,6 +23,12 @@
 # misc
 .DS_Store
 *.pem
+*.key
+
+# Локальный HTTPS sidecar видеолаборатории (mkcert). Ключи и CA не коммитить.
+/certs/*
+!/certs/.gitkeep
+/mkcert.exe
 
 # temporary embedded PostgreSQL data (db:verify:pg)
 .embedded-pg/

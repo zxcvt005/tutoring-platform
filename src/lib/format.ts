@@ -4,6 +4,7 @@ import type {
   HomeworkAssignmentStatus,
   LessonStatus,
   PersonStatus,
+  StudentArchiveReason,
   TeacherStatus,
   TheoryAssignmentStatus,
   TheoryStatus,
@@ -56,14 +57,24 @@ export function initialsFromName(name: string): string {
 export const personStatusLabel: Record<PersonStatus, string> = {
   active: "Активный",
   paused: "На паузе",
+  archived: "В архиве",
 };
 
-export const userRoleLabel: Record<"director" | "teacher" | "student", string> =
-  {
-    director: "Директор",
-    teacher: "Преподаватель",
-    student: "Ученик",
-  };
+export const studentArchiveReasonLabel: Record<StudentArchiveReason, string> = {
+  trial_not_continued: "Не продолжил после пробного занятия",
+  stopped: "Прекратил обучение",
+  other: "Другое",
+};
+
+export const userRoleLabel: Record<
+  "director" | "teacher" | "student" | "press",
+  string
+> = {
+  director: "Директор",
+  teacher: "Преподаватель",
+  student: "Ученик",
+  press: "Пресса",
+};
 
 export const userAccountStatusLabel: Record<string, string> = {
   active: "Активен",
@@ -140,6 +151,7 @@ export const homeworkAssignmentStatusLabel: Record<
   completed: "На проверке",
   reviewed: "Проверено",
   overdue: "Просрочено",
+  withdrawn: "Снято со занятия",
 };
 
 /** Подписи для ученика (Аудитория) — статус выполнения отдельно от балла */
@@ -155,6 +167,7 @@ export const studentHomeworkStatusLabel: Record<
   completed: "Ожидает проверки",
   reviewed: "Завершено",
   overdue: "Просрочено",
+  withdrawn: "Снято",
 };
 
 export function studentHomeworkDisplayLabel(
@@ -184,7 +197,7 @@ export const theoryAssignmentStatusLabel: Record<TheoryAssignmentStatus, string>
     viewed: "Просмотр отмечен",
     in_progress: "Тест не завершён",
     awaiting_review: "Ожидает проверки",
-    completed: "Завершена",
+    completed: "Изучено",
   };
 
 export const weekdayShort = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"] as const;

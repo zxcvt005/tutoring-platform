@@ -71,6 +71,7 @@ export function TestEditorDialog({
   topicId,
   sectionId,
   teacherId,
+  libraryScope = "teacher",
   homework,
   open,
   onOpenChange,
@@ -80,6 +81,7 @@ export function TestEditorDialog({
   topicId?: string | null;
   sectionId?: string | null;
   teacherId: string;
+  libraryScope?: "school" | "teacher";
   homework: Homework | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -95,6 +97,7 @@ export function TestEditorDialog({
             topicId={topicId ?? homework?.topicId ?? null}
             sectionId={sectionId ?? homework?.sectionId ?? null}
             teacherId={teacherId}
+            libraryScope={libraryScope}
             homework={homework}
             purpose={purpose}
             onClose={() => onOpenChange(false)}
@@ -112,6 +115,7 @@ function TestEditorForm({
   topicId,
   sectionId,
   teacherId,
+  libraryScope = "teacher",
   homework,
   purpose = "homework",
   onClose,
@@ -120,6 +124,7 @@ function TestEditorForm({
   topicId?: string | null;
   sectionId?: string | null;
   teacherId: string;
+  libraryScope?: "school" | "teacher";
   homework: Homework | null;
   purpose?: Homework["purpose"];
   onClose: () => void;
@@ -133,6 +138,7 @@ function TestEditorForm({
   );
   const [preview, setPreview] = useState(false);
   const [addType, setAddType] = useState<QuestionType>("single_choice");
+  const [busy, setBusy] = useState(false);
 
   const maxScore = useMemo(
     () => computeMaxScore(form.questions),
@@ -171,7 +177,8 @@ function TestEditorForm({
     }));
   }
 
-  function save(andPublish: boolean) {
+  async function save(andPublish: boolean) {
+    if (busy) return;
     if (!form.title.trim()) {
       toast.error("Укажите название теста");
       return;
@@ -186,34 +193,42 @@ function TestEditorForm({
         return;
       }
     }
-    const id = upsertHomework({
-      id: form.id,
-      topicId: topicId || null,
-      sectionId: purpose === "theory" ? null : selectedSectionId || null,
-      teacherId,
-      title: form.title.trim(),
-      description: form.description.trim() || undefined,
-      status: andPublish
-        ? "published"
-        : form.status === "published"
+    setBusy(true);
+    try {
+      // Сначала дожидаемся сохранения теста: раньше upsertHomework был
+      // fire-and-forget, и publishHomework сразу получал «Не найдено».
+      const saved = await upsertHomework({
+        id: form.id,
+        topicId: topicId || null,
+        sectionId: purpose === "homework" ? selectedSectionId || null : null,
+        teacherId,
+        libraryScope,
+        title: form.title.trim(),
+        description: form.description.trim() || undefined,
+        status: andPublish
           ? "published"
-          : "draft",
-      purpose,
-      questions: form.questions,
-      maxScore,
-    });
-    if (andPublish) {
-      void (async () => {
-        const result = await publishHomework(form.id ?? id);
+          : form.status === "published"
+            ? "published"
+            : "draft",
+        purpose,
+        questions: form.questions,
+        maxScore,
+      });
+      if (!saved.ok || !saved.id) return;
+      setForm((prev) => ({ ...prev, id: saved.id }));
+      if (andPublish) {
+        const result = await publishHomework(saved.id);
         if (!result.ok) return;
-        onSaved?.({ id: form.id ?? id });
+        onSaved?.({ id: saved.id });
         onClose();
-      })();
-      return;
+        return;
+      }
+      toast.success("Тест сохранён");
+      onSaved?.({ id: saved.id });
+      onClose();
+    } finally {
+      setBusy(false);
     }
-    toast.success("Тест сохранён");
-    onSaved?.({ id });
-    onClose();
   }
 
   return (
@@ -254,6 +269,7 @@ function TestEditorForm({
                   placeholder="Кратко, что проверяет тест"
                 />
               </div>
+              {libraryScope === "teacher" && purpose === "homework" ? (
               <div className="space-y-1.5">
                 <Label>Раздел</Label>
                 <Select
@@ -290,6 +306,7 @@ function TestEditorForm({
                   </p>
                 ) : null}
               </div>
+              ) : null}
             </div>
 
             <div className="space-y-3">
@@ -421,21 +438,31 @@ function TestEditorForm({
       </div>
 
       <DialogFooter className="shrink-0 border-t border-border/70 px-5 py-3">
-        <Button type="button" variant="outline" onClick={onClose}>
+        <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
           Отмена
         </Button>
         <Button
           type="button"
           variant="outline"
+          disabled={busy}
           onClick={() => setPreview((p) => !p)}
         >
           {preview ? "К редактированию" : "Предпросмотр"}
         </Button>
-        <Button type="button" variant="outline" onClick={() => save(false)}>
-          Сохранить черновик
+        <Button
+          type="button"
+          variant="outline"
+          disabled={busy}
+          onClick={() => void save(false)}
+        >
+          {busy ? "Сохранение…" : "Сохранить черновик"}
         </Button>
-        <Button type="button" onClick={() => save(true)}>
-          Сохранить и опубликовать
+        <Button
+          type="button"
+          disabled={busy}
+          onClick={() => void save(true)}
+        >
+          {busy ? "Публикация…" : "Сохранить и опубликовать"}
         </Button>
       </DialogFooter>
     </>

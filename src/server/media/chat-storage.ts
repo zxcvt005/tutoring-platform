@@ -16,7 +16,9 @@ function assertSafeChatKey(key: string): string {
     !normalized ||
     normalized.includes("..") ||
     normalized.startsWith("/") ||
-    !/^(chats|chat-pending|theory|theory-pending)\//.test(normalized) ||
+    !/^(chats|chat-pending|theory|theory-pending|intensive|intensive-pending|teachers)\//.test(
+      normalized
+    ) ||
     !/^[a-zA-Z0-9/._-]+$/.test(normalized)
   ) {
     throw badRequest("Некорректный ключ файла");
@@ -30,46 +32,51 @@ function localRoot(): string {
     : path.join(process.cwd(), "uploads", "chat");
 }
 
-function readS3Config(): S3Config | null {
-  const bucket = process.env.S3_BUCKET?.trim();
-  const accessKeyId = process.env.S3_ACCESS_KEY_ID?.trim();
-  const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY?.trim();
-  const endpoint = process.env.S3_ENDPOINT?.trim();
+function readS3ConfigFrom(
+  env: NodeJS.ProcessEnv = process.env
+): S3Config | null {
+  const bucket = env.S3_BUCKET?.trim();
+  const accessKeyId = env.S3_ACCESS_KEY_ID?.trim();
+  const secretAccessKey = env.S3_SECRET_ACCESS_KEY?.trim();
+  const endpoint = env.S3_ENDPOINT?.trim();
   if (!bucket || !accessKeyId || !secretAccessKey || !endpoint) return null;
   return {
     endpoint,
-    region: process.env.S3_REGION?.trim() || "ru-1",
+    region: env.S3_REGION?.trim() || "ru-1",
     bucket,
     accessKeyId,
     secretAccessKey,
-    forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== "0",
+    forcePathStyle: env.S3_FORCE_PATH_STYLE !== "0",
   };
 }
 
-function requestedDriver(): "s3" | "local" | "auto" {
-  const raw = (process.env.CHAT_STORAGE_DRIVER ?? "auto").trim().toLowerCase();
+function requestedDriverFrom(
+  env: NodeJS.ProcessEnv = process.env
+): "s3" | "local" | "auto" {
+  const raw = (env.CHAT_STORAGE_DRIVER ?? "auto").trim().toLowerCase();
   if (raw === "s3" || raw === "local") return raw;
   return "auto";
 }
 
-export function resolveChatStorageDriver(): "s3" | "local" {
-  const requested = requestedDriver();
-  const s3 = readS3Config();
+function missingS3Message(): string {
+  return "Хранилище файлов не настроено. Задайте S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID и S3_SECRET_ACCESS_KEY.";
+}
+
+export function resolveChatStorageDriver(
+  env: NodeJS.ProcessEnv = process.env
+): "s3" | "local" {
+  const requested = requestedDriverFrom(env);
+  const s3 = readS3ConfigFrom(env);
+  if (env.NODE_ENV === "production") {
+    if (!s3) throw badRequest(missingS3Message());
+    return "s3";
+  }
   if (requested === "s3") {
-    if (!s3) {
-      throw badRequest(
-        "Хранилище файлов не настроено. Задайте S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID и S3_SECRET_ACCESS_KEY."
-      );
-    }
+    if (!s3) throw badRequest(missingS3Message());
     return "s3";
   }
   if (requested === "local") return "local";
   if (s3) return "s3";
-  if (process.env.NODE_ENV === "production" && process.env.CHAT_STORAGE_ALLOW_LOCAL !== "1") {
-    throw badRequest(
-      "Для вложений чата в production нужно S3-совместимое хранилище. Локальный диск контейнера не сохраняет файлы после деплоя."
-    );
-  }
   return "local";
 }
 
@@ -134,7 +141,7 @@ export function getChatObjectStore(): ChatObjectStore {
   if (testStore) return testStore;
   const driver = resolveChatStorageDriver();
   if (driver === "s3") {
-    const config = readS3Config();
+    const config = readS3ConfigFrom();
     if (!config) {
       throw badRequest("S3-хранилище не настроено");
     }

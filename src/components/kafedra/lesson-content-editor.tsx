@@ -56,7 +56,8 @@ export function LessonContentEditor({
     (a) =>
       a.lessonId === lesson.id &&
       a.studentId === studentId &&
-      a.sourceKind !== "theory"
+      a.sourceKind !== "theory" &&
+      a.sourceKind !== "intensive"
   );
   const [topics, setTopics] = useState<DraftLessonTopic[]>(() =>
     draftTopicsFromSaved(savedTopics)

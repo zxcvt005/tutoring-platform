@@ -12,22 +12,39 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  hasTheoryComponent,
+  THEORY_NEED_COMPONENT_MESSAGE,
+} from "@/lib/theory/components";
 import { theoryFileKindLabel } from "@/lib/theory/file-sniff";
+import { attachedTheoryTest } from "@/lib/theory/editor";
 import { parseVideoLink } from "@/lib/theory/video";
 import { useDemoStore } from "@/lib/store/demo-store";
 
-export function TheoryEditor({ materialId }: { materialId?: string }) {
+export function TheoryEditor({
+  materialId,
+  libraryScope,
+  listHref = "/kafedra/theory",
+  editorBase = "/kafedra/theory",
+}: {
+  materialId?: string;
+  libraryScope?: "school" | "teacher";
+  listHref?: string;
+  editorBase?: string;
+}) {
   const {
     data,
     upsertTheory,
     uploadTheoryFile,
     removeTheoryFile,
-    theoriesForTeacher,
   } = useDemoStore();
   const router = useRouter();
   const existing = materialId
-    ? theoriesForTeacher(data.currentTeacherId).find((t) => t.id === materialId)
+    ? data.theories.find((t) => t.id === materialId)
     : undefined;
+  const scope = existing?.libraryScope ?? libraryScope ?? "teacher";
+  const teacherId =
+    scope === "school" ? "" : existing?.teacherId || data.currentTeacherId;
 
   const [title, setTitle] = useState(existing?.title ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
@@ -41,12 +58,7 @@ export function TheoryEditor({ materialId }: { materialId?: string }) {
     () => (videoUrl.trim() ? parseVideoLink(videoUrl) : null),
     [videoUrl]
   );
-  const tests = data.homeworks.filter(
-    (h) =>
-      h.teacherId === data.currentTeacherId &&
-      (h.status === "published" || h.id === testId)
-  );
-  const attachedTest = data.homeworks.find((h) => h.id === testId);
+  const attachedTest = attachedTheoryTest(data.homeworks, testId);
   const files = existing?.files ?? [];
 
   async function save(publish: boolean) {
@@ -54,28 +66,46 @@ export function TheoryEditor({ materialId }: { materialId?: string }) {
       toast.error("Укажите название теории");
       return;
     }
-    if (publish && (!parsed || !parsed.ok)) {
-      toast.error(
-        parsed && !parsed.ok ? parsed.error : "Для публикации нужна ссылка на видео"
-      );
+    if (videoUrl.trim() && parsed && !parsed.ok) {
+      toast.error(parsed.error);
+      return;
+    }
+    if (
+      publish &&
+      !hasTheoryComponent({
+        videoUrl: parsed?.ok ? videoUrl : null,
+        testId,
+        fileCount: files.length,
+      })
+    ) {
+      toast.error(THEORY_NEED_COMPONENT_MESSAGE);
       return;
     }
     setBusy(true);
-    const result = await upsertTheory({
-      id,
-      teacherId: data.currentTeacherId,
-      title: title.trim(),
-      description: description.trim() || null,
-      videoUrl: videoUrl.trim() || null,
-      testId: testId || null,
-      publish,
-    });
-    setBusy(false);
-    if (!result.ok) return;
-    const nextId = result.id ?? id;
-    if (nextId && !id) {
-      setId(nextId);
-      router.replace(`/kafedra/theory/${nextId}`);
+    try {
+      const result = await upsertTheory({
+        id,
+        teacherId,
+        libraryScope: scope,
+        title: title.trim(),
+        description: description.trim() || null,
+        videoUrl: videoUrl.trim() || null,
+        testId: testId || null,
+        publish,
+      });
+      if (!result.ok) return;
+      const nextId = result.id ?? id;
+      if (publish) {
+        // Только после подтверждённого ответа сервера — к списку теорий.
+        router.push(listHref);
+        return;
+      }
+      if (nextId && !id) {
+        setId(nextId);
+        router.replace(`${editorBase}/${nextId}`);
+      }
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -89,7 +119,8 @@ export function TheoryEditor({ materialId }: { materialId?: string }) {
       }
       setBusy(true);
       const created = await upsertTheory({
-        teacherId: data.currentTeacherId,
+        teacherId,
+        libraryScope: scope,
         title: title.trim(),
         description: description.trim() || null,
         videoUrl: videoUrl.trim() || null,
@@ -99,7 +130,7 @@ export function TheoryEditor({ materialId }: { materialId?: string }) {
       if (!created.ok || !created.id) return;
       currentId = created.id;
       setId(currentId);
-      router.replace(`/kafedra/theory/${currentId}`);
+      router.replace(`${editorBase}/${currentId}`);
     }
     await uploadTheoryFile(currentId, file);
   }
@@ -108,9 +139,9 @@ export function TheoryEditor({ materialId }: { materialId?: string }) {
     <div className="space-y-4">
       <PageHeader
         title={existing ? existing.title : "Новая теория"}
-        description="Черновик не виден ученикам. После публикации изменения сохраняются новой версией — уже отправленные материалы не теряют историю."
+        description="Видео, конспект и тест независимы: нужен хотя бы один. Черновик не виден ученикам. После публикации изменения сохраняются новой версией."
         actions={
-          <Link href="/kafedra/theory" className={buttonVariants({ variant: "outline" })}>
+          <Link href={listHref} className={buttonVariants({ variant: "outline" })}>
             К списку
           </Link>
         }
@@ -132,15 +163,15 @@ export function TheoryEditor({ materialId }: { materialId?: string }) {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
-              placeholder="Кратко, о чём ролик"
+              placeholder="Кратко, о чём материал"
             />
           </div>
           <div className="space-y-1.5">
-            <Label>Ссылка на видео</Label>
+            <Label>Ссылка на видео (необязательно)</Label>
             <Input
               value={videoUrl}
               onChange={(e) => setVideoUrl(e.target.value)}
-              placeholder="https://vk.com/video-123_456 или код экспорта"
+              placeholder="https://vk.com/video-123_456, vkvideo.ru или код «Экспортировать»"
             />
             {parsed && !parsed.ok ? (
               <p className="text-xs text-destructive">{parsed.error}</p>
@@ -159,24 +190,16 @@ export function TheoryEditor({ materialId }: { materialId?: string }) {
 
         <aside className="space-y-4">
           <section className="panel space-y-2 p-3">
-            <p className="text-sm font-medium">Тест</p>
+            <p className="text-sm font-medium">Тест (необязательно)</p>
             <p className="text-xs text-muted-foreground">
-              Необязательно. Используется тот же конструктор, что и для ДЗ, но
-              результат не считается домашним заданием.
+              Собственный тест этой теории. Из каталога домашних заданий выбрать
+              нельзя. Результат не считается домашним заданием.
             </p>
-            <select
-              className="h-8 w-full rounded-lg border border-border bg-background px-2 text-sm"
-              value={testId}
-              onChange={(e) => setTestId(e.target.value)}
-            >
-              <option value="">Без теста</option>
-              {tests.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.title}
-                  {t.status !== "published" ? " (черновик)" : ""}
-                </option>
-              ))}
-            </select>
+            {attachedTest ? (
+              <p className="text-sm">{attachedTest.title}</p>
+            ) : (
+              <p className="text-xs text-muted-foreground">Тест ещё не создан.</p>
+            )}
             <Button
               type="button"
               size="sm"
@@ -188,7 +211,7 @@ export function TheoryEditor({ materialId }: { materialId?: string }) {
           </section>
 
           <section className="panel space-y-2 p-3">
-            <p className="text-sm font-medium">Конспекты</p>
+            <p className="text-sm font-medium">Конспекты (необязательно)</p>
             <p className="text-xs text-muted-foreground">PDF, DOC, DOCX</p>
             <input
               type="file"
@@ -245,7 +268,8 @@ export function TheoryEditor({ materialId }: { materialId?: string }) {
       </div>
 
       <TestEditorDialog
-        teacherId={data.currentTeacherId}
+        teacherId={teacherId}
+        libraryScope={scope}
         homework={attachedTest ?? null}
         open={testOpen}
         onOpenChange={setTestOpen}

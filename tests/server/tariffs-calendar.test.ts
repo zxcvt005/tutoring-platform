@@ -115,7 +115,9 @@ describe("tariffs + calendar helpers + unassigned", () => {
     const a = await studentRequestPayment(t.db, studentCtx, assigned.id);
     const b = await studentRequestPayment(t.db, studentCtx, assigned.id);
     expect(a.paymentId).toBe(b.paymentId);
-    expect(a.checkoutUrl).toBeNull();
+    expect(a.paymentId).toBe(assigned.paymentId);
+    expect(a.checkoutUrl).toContain("tochkaplace.com");
+    expect(a.alreadyPending).toBe(true);
 
     let access = await resolveLearningAccess(
       t.db,

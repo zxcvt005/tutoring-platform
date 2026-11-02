@@ -1,16 +1,26 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { CompactScheduleCard } from "@/components/auditoria/compact-schedule";
+import {
+  LessonRatingHomePrompt,
+  type PendingLessonRating,
+} from "@/components/auditoria/lesson-rating-form";
 import { MyTariffBlock } from "@/components/auditoria/my-tariff-block";
 import { AuditoriaTeacherCard } from "@/components/auditoria/teacher-card";
 import { EmptyState } from "@/components/empty-state";
-import { PageHeader } from "@/components/layout/page-header";
+import { FormulaTrainerQuickCard } from "@/components/formula-trainer/quick-card";
+import { FORMULA_TRAINER_PRODUCT_SLUG } from "@/lib/products";
+import { StudentInviteBanners } from "@/components/video-calls/student-invite-banners";
+import { TheoryNewMark } from "@/components/theory/theory-new-mark";
 import { homeworkAssignedDateInfo, sortHomeworkForStudent } from "@/lib/homework-list";
 import { getAssignmentTitle } from "@/lib/tests/helpers";
 import { incompleteTheoryCount, newestIncompleteTheory } from "@/lib/theory/list";
+import { LearningLockedBanner } from "@/components/tariff-balance-notice";
+import { studentLearningLock } from "@/lib/learning-lock";
+import { apiLessonRatingsGet } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +29,7 @@ export function AuditoriaHomePanel() {
     useDemoStore();
   const studentId = data.currentStudentId;
   const student = data.students.find((s) => s.id === studentId);
+  const learning = studentLearningLock(data.tariffAssignments, studentId);
   const teacher = data.teachers.find((t) => t.id === student?.teacherId);
 
   const lessons = useMemo(
@@ -30,6 +41,23 @@ export function AuditoriaHomePanel() {
     [assignmentsForStudent, studentId]
   );
   const now = useMemo(() => new Date(), []);
+  const [pendingRatings, setPendingRatings] = useState<PendingLessonRating[]>(
+    []
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void apiLessonRatingsGet<{ lessons: PendingLessonRating[] }>("pending")
+      .then((data) => {
+        if (!cancelled) setPendingRatings(data.lessons ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setPendingRatings([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [studentId]);
 
   const { missed, incomplete } = useMemo(
     () => sortHomeworkForStudent(assignments, lessons),
@@ -50,33 +78,53 @@ export function AuditoriaHomePanel() {
   }
 
   return (
-    <div className="space-y-4">
-      <PageHeader title={`Здравствуйте, ${student.fullName.split(" ")[0]}`} />
+    <div className="space-y-5">
+      <StudentInviteBanners />
+      {pendingRatings.length > 0 ? (
+        <LessonRatingHomePrompt
+          lessons={pendingRatings}
+          onRated={(lessonId) => {
+            setPendingRatings((prev) =>
+              prev.filter((item) => item.lessonId !== lessonId)
+            );
+          }}
+        />
+      ) : null}
+      {learning.locked ? (
+        <LearningLockedBanner message={learning.message} />
+      ) : null}
 
-      {latestTheory && theoryOpen > 0 ? (
-        <section className="rounded-2xl border border-primary/30 bg-primary/5 px-4 py-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+      {latestTheory && theoryOpen > 0 && !learning.locked ? (
+        <section className="auditoria-home-card px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-sm font-medium">Новая теория</p>
-              <p className="truncate text-sm text-muted-foreground">
+              <p className="flex items-center gap-2 font-display text-base font-semibold tracking-tight">
+                <TheoryNewMark />
+                Новая теория
+              </p>
+              <p className="mt-1 truncate text-sm text-muted-foreground">
                 {latestTheory.title}
                 {theoryOpen > 1 ? ` · ещё ${theoryOpen - 1}` : ""}
               </p>
             </div>
             <Link
               href={`/auditoria/theory/${latestTheory.id}`}
-              className="text-sm hover:underline"
+              className="shrink-0 text-sm text-foreground/80 hover:text-foreground hover:underline"
             >
-              Открыть
+              Открыть →
             </Link>
           </div>
         </section>
       ) : null}
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div className="grid min-w-0 gap-4 lg:grid-cols-2">
         <AuditoriaTeacherCard teacher={teacher ?? null} compact />
-        <MyTariffBlock studentId={studentId} compact />
+        <MyTariffBlock studentId={studentId} compact featured />
       </div>
+
+      {(data.availableProductSlugs ?? []).includes(FORMULA_TRAINER_PRODUCT_SLUG) ? (
+        <FormulaTrainerQuickCard />
+      ) : null}
 
       <div className="grid min-w-0 gap-4 lg:grid-cols-2">
         <div className="min-w-0">
@@ -88,25 +136,25 @@ export function AuditoriaHomePanel() {
           />
         </div>
 
-        <section className="min-w-0 rounded-2xl border border-border/70 bg-card p-4">
+        <section className="auditoria-home-card min-w-0">
           <div className="flex items-baseline justify-between gap-3">
-            <h2 className="font-display text-lg font-semibold tracking-tight">
+            <h2 className="font-display text-xl font-semibold tracking-tight">
               Актуальные задания
             </h2>
             <Link
               href="/auditoria/homework"
-              className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+              className="shrink-0 text-sm text-muted-foreground hover:text-foreground hover:underline"
             >
               Все домашние задания →
             </Link>
           </div>
           {attention.length === 0 ? (
-            <p className="mt-3 text-sm text-muted-foreground">
+            <p className="mt-4 text-sm text-muted-foreground">
               Нет заданий, которые требуют внимания. Завершённые работы — в
               разделе «Домашние задания».
             </p>
           ) : (
-            <ul className="mt-3 space-y-2">
+            <ul className="mt-4 space-y-2">
               {attention.map((a) => {
                 const hw = data.homeworks.find((h) => h.id === a.homeworkId);
                 const assigned = homeworkAssignedDateInfo(a, lessons);
@@ -116,15 +164,14 @@ export function AuditoriaHomePanel() {
                     <Link
                       href={`/auditoria/homework/${a.id}`}
                       className={cn(
-                        "block rounded-xl border border-border/70 px-3 py-2.5 hover:bg-muted/40",
-                        overdue &&
-                          "border-destructive/50 bg-destructive/5 ring-1 ring-destructive/25"
+                        "block rounded-2xl border border-[#f2d7d9] bg-pastel-rose px-4 py-3 hover:bg-[#f8e0e2]",
+                        overdue && "border-destructive/40"
                       )}
                     >
-                      <p className="min-w-0 font-medium">
+                      <p className="min-w-0 font-display text-base font-semibold tracking-tight">
                         {getAssignmentTitle(a, hw)}
                       </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
+                      <p className="mt-1 text-sm text-muted-foreground">
                         {assigned.label}
                       </p>
                     </Link>

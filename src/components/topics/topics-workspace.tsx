@@ -127,7 +127,10 @@ export function TopicsWorkspace() {
   function topicStats(topicId: string) {
     const hws = homeworksForTopic(topicId);
     const assignments = data.homeworkAssignments.filter(
-      (a) => a.topicId === topicId && a.sourceKind !== "theory"
+      (a) =>
+        a.topicId === topicId &&
+        a.sourceKind !== "theory" &&
+        a.sourceKind !== "intensive"
     );
     const lessons = data.lessons.filter((l) => l.topicId === topicId);
     const doneHw = assignments.filter(

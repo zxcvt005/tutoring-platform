@@ -7,6 +7,24 @@ import type {
   TestQuestion,
 } from "@/lib/types";
 
+const RING_DONE_STATUSES: HomeworkAssignmentStatus[] = [
+  "completed",
+  "reviewed",
+];
+
+function isCountableOutcome(status: QuestionOutcomeStatus): boolean {
+  return (
+    status === "correct_first" ||
+    status === "corrected_second" ||
+    status === "incorrect"
+  );
+}
+
+function roundPercent(got: number, max: number): number | null {
+  if (max <= 0) return null;
+  return Math.round((got / max) * 1000) / 10;
+}
+
 /** Буквальный ответ кнопки «Не знаю» во второй попытке. */
 export const DONT_KNOW_TEXT = "не знаю";
 
@@ -299,5 +317,85 @@ export function studentHomeworkStats(
     avgAttempt2: a2.length
       ? Math.round((a2.reduce((s, n) => s + n, 0) / a2.length) * 10) / 10
       : null,
+  };
+}
+
+export type HomeworkRingStats = {
+  completedCount: number;
+  /** Внутреннее кольцо: доля вопросов, верных с первой попытки. */
+  firstAttemptPercent: number | null;
+  /** Внешнее кольцо: доля вопросов, верных с учётом обеих попыток. */
+  finalPercent: number | null;
+  countable: number;
+  firstCorrect: number;
+  eventuallyCorrect: number;
+};
+
+/**
+ * Кольца прогресса ДЗ. Считается по `questionOutcomes` завершённых работ:
+ * внутреннее — `correct_first`, внешнее — `correct_first + corrected_second`.
+ * Без второй попытки внешнее совпадает с внутренним, без выдуманных данных.
+ * `pending_review` и `unanswered` не входят в знаменатель (как в attemptPercent).
+ */
+export function studentHomeworkRingStats(
+  assignments: {
+    status: HomeworkAssignmentStatus;
+    attempt1Percent?: number | null;
+    attempt2Submitted?: boolean;
+    questionOutcomes?: QuestionOutcome[];
+  }[]
+): HomeworkRingStats {
+  const done = assignments.filter((a) => RING_DONE_STATUSES.includes(a.status));
+  let countable = 0;
+  let firstCorrect = 0;
+  let eventuallyCorrect = 0;
+  let usedOutcomes = false;
+
+  for (const assignment of done) {
+    const outcomes = assignment.questionOutcomes;
+    if (!outcomes || outcomes.length === 0) continue;
+    usedOutcomes = true;
+    for (const outcome of outcomes) {
+      if (!isCountableOutcome(outcome.status)) continue;
+      countable += 1;
+      if (outcome.status === "correct_first") {
+        firstCorrect += 1;
+        eventuallyCorrect += 1;
+      } else if (
+        outcome.status === "corrected_second" &&
+        assignment.attempt2Submitted
+      ) {
+        eventuallyCorrect += 1;
+      }
+    }
+  }
+
+  if (usedOutcomes) {
+    return {
+      completedCount: done.length,
+      firstAttemptPercent: roundPercent(firstCorrect, countable),
+      finalPercent: roundPercent(eventuallyCorrect, countable),
+      countable,
+      firstCorrect,
+      eventuallyCorrect,
+    };
+  }
+
+  const firstPercents = done
+    .map((a) => a.attempt1Percent)
+    .filter((n): n is number => n != null);
+  const firstAttemptPercent = firstPercents.length
+    ? Math.round(
+        (firstPercents.reduce((s, n) => s + n, 0) / firstPercents.length) * 10
+      ) / 10
+    : null;
+
+  return {
+    completedCount: done.length,
+    firstAttemptPercent,
+    finalPercent: firstAttemptPercent,
+    countable: 0,
+    firstCorrect: 0,
+    eventuallyCorrect: 0,
   };
 }

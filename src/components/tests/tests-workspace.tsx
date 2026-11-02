@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { FilterBar } from "@/components/layout/filter-bar";
 import { PageHeader } from "@/components/layout/page-header";
+import { TestArchiveButton } from "@/components/tests/test-archive-button";
 import { TestEditorDialog } from "@/components/tests/test-editor-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,7 @@ export function TestsWorkspace() {
     homeworksForTeacher,
     upsertTopicSection,
     deleteHomework,
+    restoreHomework,
   } = useDemoStore();
   const teacherId = data.currentTeacherId;
   const [query, setQuery] = useState("");
@@ -43,6 +45,7 @@ export function TestsWorkspace() {
   const [editing, setEditing] = useState<Homework | null>(null);
   const [sectionId, setSectionId] = useState<string | null>(null);
   const [newSection, setNewSection] = useState("");
+  const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null);
 
   const sections = sectionsForTeacher(teacherId);
   const tests = homeworksForTeacher(teacherId);
@@ -203,17 +206,20 @@ export function TestsWorkspace() {
                           </p>
                         ) : null}
                       </button>
-                      {t.status !== "archived" ? (
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="ghost"
-                          className="mt-0.5"
-                          onClick={() => deleteHomework(t.id)}
-                        >
-                          В архив
-                        </Button>
-                      ) : null}
+                      <TestArchiveButton
+                        status={t.status}
+                        className="mt-0.5"
+                        busy={archiveBusyId === t.id}
+                        onToggle={() => {
+                          if (archiveBusyId) return;
+                          setArchiveBusyId(t.id);
+                          const action =
+                            t.status === "archived"
+                              ? restoreHomework(t.id)
+                              : deleteHomework(t.id);
+                          void action.finally(() => setArchiveBusyId(null));
+                        }}
+                      />
                     </li>
                   ))}
                 </ul>

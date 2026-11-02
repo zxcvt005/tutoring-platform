@@ -19,6 +19,7 @@ import {
   getAssignmentQuestions,
   getAssignmentTitle,
 } from "@/lib/tests/helpers";
+import { studentLearningLock } from "@/lib/learning-lock";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { HomeworkAssignment, StudentAnswer } from "@/lib/types";
 
@@ -67,13 +68,18 @@ function TestTakeForm({
   );
   const title = getAssignmentTitle(assignment, hw);
 
+  const learning = studentLearningLock(
+    data.tariffAssignments,
+    assignment.studentId
+  );
   const canEdit =
-    assignment.status === "assigned" ||
+    !learning.locked &&
+    (assignment.status === "assigned" ||
     assignment.status === "in_progress" ||
     assignment.status === "overdue" ||
     assignment.status === "remaining_questions" ||
     assignment.status === "attempt1_submitted" ||
-    assignment.status === "attempt2_in_progress";
+    assignment.status === "attempt2_in_progress");
   const isReviewed = assignment.status === "reviewed";
   const isSubmitted =
     assignment.status === "completed" || assignment.status === "reviewed";

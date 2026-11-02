@@ -2,14 +2,17 @@
  * Один вход в локальную разработку Неодин (Windows-friendly):
  * 1) поднимает embedded PostgreSQL, если ещё не слушает порт;
  * 2) миграции;
- * 3) seed школы org_school_qa (если не UMBA_SKIP_SEED=1);
- * 4) Next.js на :43127 (не стартует второй экземпляр, если порт занят).
+ * 3) seed школы org_school_qa (если не --keep / UMBA_SKIP_SEED=1;
+ *    при --keep seed только если организации ещё нет);
+ * 4) восстанавливает 4 QA-ученика с остатком 2/1/0/−1, не дублируя их;
+ * 5) Next.js на :43127 (не стартует второй экземпляр, если порт занят).
  *
  *   npm run start:local
  *   npm run start:local:keep   — без повторного seed
  */
 import { spawn, execSync, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 
@@ -21,11 +24,13 @@ import postgres from "postgres";
 
 import * as schema from "../src/server/db/schema";
 import { parseDatabaseUrl } from "../src/server/db/database-url";
+import { createDb } from "../src/server/db/client";
 import {
   SCHOOL_ORG_ID,
   seedSchoolOrganization,
   verifySchoolOrganization,
 } from "../src/server/db/seed-school";
+import { ensureSchoolTariffQaFixtures } from "../src/server/db/seed-school-tariff-qa";
 
 loadEnv({ path: ".env.local" });
 loadEnv();
@@ -108,34 +113,142 @@ async function waitForPort(port: number, ms = 30_000) {
   throw new Error(`Порт ${port} не открылся за ${ms} мс`);
 }
 
+function httpStatus(port: number, timeoutMs = 2000): Promise<number> {
+  return new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${port}/`, { timeout: timeoutMs }, (res) => {
+      res.resume();
+      resolve(res.statusCode || 0);
+    });
+    req.on("error", () => resolve(0));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(0);
+    });
+  });
+}
+
+async function waitForHttp(port: number, ms = 180_000) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    const code = await httpStatus(port);
+    if (code > 0) return code;
+    await new Promise((r) => setTimeout(r, 700));
+  }
+  throw new Error(
+    `Сайт на http://127.0.0.1:${port}/ не ответил за ${Math.round(ms / 1000)} с. Смотрите лог в этом окне.`
+  );
+}
+
+async function postgresAnswers(): Promise<boolean> {
+  const sql = postgres(DATABASE_URL, { max: 1, connect_timeout: 3 });
+  try {
+    await sql`select 1 as ok`;
+    return true;
+  } catch {
+    return false;
+  } finally {
+    try {
+      await sql.end({ timeout: 1 });
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function stopStuckLocalPostgres() {
+  console.log(
+    `PostgreSQL на :${PG_PORT} не отвечает. Перезапускаю только локальный embedded-процесс, файлы базы не удаляю.`
+  );
+  const markers = ["@embedded-postgres", "tutoring-pg-data"];
+  const filter = markers
+    .map((m) => `$_.CommandLine -like '*${m.replace(/'/g, "''")}*'`)
+    .join(" -or ");
+  try {
+    execSync(
+      `powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'postgres' -and (${filter}) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`,
+      { stdio: "ignore" }
+    );
+  } catch {
+    /* ignore */
+  }
+  try {
+    execSync(
+      `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${PG_PORT} -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"`,
+      { stdio: "ignore" }
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+async function waitForPortClosed(port: number, ms = 20_000) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    if (!(await portOpen(port))) return;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+}
+
 async function migrateAndMaybeSeed(connectionString: string) {
   assertLocalUrl(connectionString);
   const sqlClient = postgres(connectionString, { max: 1 });
-  const db = drizzle(sqlClient, { schema });
+  const dbMigrate = drizzle(sqlClient, { schema });
   try {
     await sqlClient`select 1 as ok`;
     console.log("migrate …");
-    await migrate(db, {
+    await migrate(dbMigrate, {
       migrationsFolder: path.join(process.cwd(), "drizzle"),
     });
-    if (SKIP_SEED) {
-      console.log("seed пропущен (UMBA_SKIP_SEED=1)");
+  } finally {
+    await sqlClient.end({ timeout: 5 });
+  }
+
+  const { db, sql } = createDb(connectionString);
+  try {
+    const orgRows = await sql<{ id: string }[]>`
+      select id from organizations where id = ${SCHOOL_ORG_ID} limit 1
+    `;
+    const orgMissing = orgRows.length === 0;
+    const shouldSeed = !SKIP_SEED || orgMissing;
+    if (!shouldSeed) {
+      console.log(
+        "seed пропущен (--keep): организация уже есть, данные не затираем"
+      );
     } else {
-      const encRows = await sqlClient<{ server_encoding: string }[]>`SHOW server_encoding`;
+      if (SKIP_SEED && orgMissing) {
+        console.log("организации нет — первичное заполнение школы");
+      }
+      const encRows = await sql<{ server_encoding: string }[]>`SHOW server_encoding`;
       const enc = String(encRows[0]?.server_encoding ?? "").toUpperCase();
       const win1251Safe = enc.includes("WIN125") || enc === "SQL_ASCII";
       console.log(`seed ${SCHOOL_ORG_ID} … encoding=${enc}`);
       const stats = await seedSchoolOrganization(db, new Date(), {
         win1251Safe,
       });
-      const { errors } = await verifySchoolOrganization(db);
       console.log("Seed OK", stats);
+    }
+
+    const qa = await ensureSchoolTariffQaFixtures(db);
+    const restored = qa.filter((r) => r.restored).length;
+    console.log(
+      `QA-тариф ученики: ${qa.length} (восстановлено ${restored}) ` +
+        qa.map((r) => `${r.studentId}=${r.remaining}`).join(", ")
+    );
+
+    const { ensureDefaultProducts } = await import(
+      "../src/server/services/products-service"
+    );
+    await ensureDefaultProducts(db, SCHOOL_ORG_ID);
+    console.log("каталог продуктов: тренажёр формул зарегистрирован");
+
+    if (shouldSeed) {
+      const { errors } = await verifySchoolOrganization(db);
       if (errors.length) {
         throw new Error(`Seed verify failed: ${errors.join("; ")}`);
       }
     }
   } finally {
-    await sqlClient.end({ timeout: 5 });
+    await sql.end({ timeout: 5 });
   }
 }
 
@@ -147,9 +260,13 @@ async function ensurePostgres(): Promise<{
   process.env.DATABASE_URL = DATABASE_URL;
 
   if (await portOpen(PG_PORT)) {
-    console.log(`PostgreSQL уже слушает :${PG_PORT}`);
-    await migrateAndMaybeSeed(DATABASE_URL);
-    return { pg: null, startedHere: false };
+    if (await postgresAnswers()) {
+      console.log(`PostgreSQL уже слушает :${PG_PORT}`);
+      await migrateAndMaybeSeed(DATABASE_URL);
+      return { pg: null, startedHere: false };
+    }
+    stopStuckLocalPostgres();
+    await waitForPortClosed(PG_PORT);
   }
 
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -229,9 +346,16 @@ async function main() {
   const { pg, startedHere } = await ensurePostgres();
 
   if (await portOpen(APP_PORT)) {
+    const code = await httpStatus(APP_PORT);
     console.log("");
-    console.log(`Порт ${APP_PORT} уже занят — новый Next.js не запускаю.`);
-    console.log(`Откройте http://127.0.0.1:${APP_PORT}/`);
+    if (code > 0) {
+      console.log(`Сайт уже отвечает (HTTP ${code}): http://127.0.0.1:${APP_PORT}/`);
+      console.log("Новый Next.js не запускаю.");
+    } else {
+      console.log(
+        `Порт ${APP_PORT} занят, но HTTP не отвечает. Закройте зависшее окно этого проекта и запустите BAT снова.`
+      );
+    }
     console.log("БД готова. Остановка этого окна не гасит уже запущенный Next.");
     if (startedHere && pg) {
       console.log("PostgreSQL запущен этим скриптом — окно нужно оставить открытым.");
@@ -241,6 +365,13 @@ async function main() {
   }
 
   const child = startNext();
+
+  try {
+    await waitForHttp(APP_PORT, 180_000);
+    console.log(`Сайт отвечает: http://127.0.0.1:${APP_PORT}/`);
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : e);
+  }
 
   const shutdown = async (code = 0) => {
     try {

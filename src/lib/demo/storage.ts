@@ -237,6 +237,9 @@ export function migrateToV5(raw: unknown): DemoData | null {
     teachers: blob.teachers,
     students: blob.students,
     lessons,
+    trialLessons: Array.isArray((blob as DemoData).trialLessons)
+      ? (blob as DemoData).trialLessons
+      : [],
     attendances: Array.isArray(blob.attendances) ? blob.attendances : [],
     topicSections,
     topics,
@@ -248,6 +251,18 @@ export function migrateToV5(raw: unknown): DemoData | null {
     theoryAssignments: Array.isArray((blob as DemoData).theoryAssignments)
       ? (blob as DemoData).theoryAssignments
       : [],
+    intensives: Array.isArray((blob as DemoData).intensives)
+      ? (blob as DemoData).intensives
+      : [],
+    intensiveAssignments: Array.isArray((blob as DemoData).intensiveAssignments)
+      ? (blob as DemoData).intensiveAssignments
+      : [],
+    mockExams: Array.isArray((blob as DemoData).mockExams)
+      ? (blob as DemoData).mockExams
+      : [],
+    mockExamResults: Array.isArray((blob as DemoData).mockExamResults)
+      ? (blob as DemoData).mockExamResults
+      : [],
     tariffs: Array.isArray((blob as DemoData).tariffs)
       ? (blob as DemoData).tariffs
       : [],
@@ -256,6 +271,12 @@ export function migrateToV5(raw: unknown): DemoData | null {
       : [],
     payments: Array.isArray((blob as DemoData).payments)
       ? (blob as DemoData).payments
+      : [],
+    products: Array.isArray((blob as DemoData).products)
+      ? (blob as DemoData).products
+      : [],
+    availableProductSlugs: Array.isArray((blob as DemoData).availableProductSlugs)
+      ? (blob as DemoData).availableProductSlugs
       : [],
     currentTeacherId: blob.currentTeacherId ?? "",
     direkciyaTeacherId: blob.direkciyaTeacherId ?? "",

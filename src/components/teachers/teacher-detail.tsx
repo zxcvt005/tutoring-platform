@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { EnterCabinetButton } from "@/components/admin/enter-cabinet-button";
 import { PageHeader } from "@/components/layout/page-header";
@@ -26,7 +26,10 @@ import {
   initialsFromName,
   teacherStatusLabel,
 } from "@/lib/format";
+import { formatKopecksRu } from "@/lib/money-kopecks";
+import { apiPlatform } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
+import { SLOT_PAY_PRESENT_COUNTS } from "@/lib/teacher-slot";
 
 export function TeacherDetail({ teacherId }: { teacherId: string }) {
   const {
@@ -57,6 +60,28 @@ export function TeacherDetail({ teacherId }: { teacherId: string }) {
   ).length;
   const reviewed = assignments.filter((a) => a.status === "reviewed").length;
   const overdue = assignments.filter((a) => a.status === "overdue").length;
+  const [slotRates, setSlotRates] = useState<{
+    complete: boolean;
+    rates: Record<string, number>;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void apiPlatform<{
+      complete: boolean;
+      rates: Record<string, number>;
+    }>("getTeacherPayRates", { teacherId }).then(
+      (data) => {
+        if (!cancelled) setSlotRates(data);
+      },
+      () => {
+        if (!cancelled) setSlotRates({ complete: false, rates: {} });
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [teacherId]);
 
   if (ready && !teacher) notFound();
   if (!teacher) {
@@ -123,9 +148,16 @@ export function TeacherDetail({ teacherId }: { teacherId: string }) {
               }
             />
             <Row
-              label="Вознаграждение"
+              label="Ставки за слот"
               value={
-                teacher.teacherPay != null ? `${teacher.teacherPay} ₽` : "—"
+                !slotRates
+                  ? "Загрузка…"
+                  : slotRates.complete
+                    ? SLOT_PAY_PRESENT_COUNTS.map(
+                        (n) =>
+                          `${n}: ${formatKopecksRu(slotRates.rates[String(n)] ?? 0)}`
+                      ).join(" · ")
+                    : "Ставки не настроены"
               }
             />
             <Row

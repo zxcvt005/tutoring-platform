@@ -191,6 +191,7 @@ export function NotesWidget({
 
   return (
     <div
+      data-cabinet-float=""
       className="pointer-events-none fixed z-40 flex flex-col items-end gap-2"
       style={{
         right: "max(1rem, env(safe-area-inset-right))",

@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 
+import { isHomeworkSource } from "@/lib/homework/source-kind";
 import { applyManualScores, computeFinalScore } from "@/lib/tests/grading";
 import {
   attemptPercent,
@@ -286,6 +287,9 @@ export async function getAssignmentForViewer(
 
   if (!isOwnerStudent && !isOwnerTeacher && !isDirector) {
     throw forbidden();
+  }
+  if (isOwnerStudent && assignment.status === "withdrawn") {
+    throw notFound("Домашнее задание снято со занятия");
   }
 
   const questionsWithKeys = mergeQuestionsWithKeys(
@@ -627,7 +631,7 @@ export async function submitAssignment(
     },
   });
 
-  if (assignment.sourceKind !== "theory") {
+  if (isHomeworkSource(assignment.sourceKind)) {
     if (status === "completed" && pending) {
       await recordChatSystemEventSafe(db, {
         organizationId: ctx.organizationId,
@@ -763,7 +767,7 @@ export async function reviewAssignment(
     payload: { score: next.score, status: next.status },
   });
 
-  if (next.status === "reviewed" && assignment.sourceKind !== "theory") {
+  if (next.status === "reviewed" && isHomeworkSource(assignment.sourceKind)) {
     await recordChatSystemEventSafe(db, {
       organizationId: ctx.organizationId,
       studentId: assignment.studentId,

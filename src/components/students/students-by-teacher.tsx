@@ -36,16 +36,27 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 
-import { formatDate, personStatusLabel } from "@/lib/format";
+import { TariffBalanceNotice } from "@/components/tariff-balance-notice";
+import {
+  formatDate,
+  personStatusLabel,
+  studentArchiveReasonLabel,
+} from "@/lib/format";
 import {
   currentAssignmentForStudent,
   packageStatusLabel,
+  studentTariffLabel,
 } from "@/lib/tariff-package";
 import { averageFinishedAttempt2 } from "@/lib/tests/attempts";
 import { apiPlatform } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { STUDENT_GRADES, gradeLabel } from "@/lib/student-contacts";
-import type { PersonStatus, Student, StudentGrade } from "@/lib/types";
+import type {
+  PersonStatus,
+  Student,
+  StudentArchiveReason,
+  StudentGrade,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type FormState = {
@@ -81,7 +92,8 @@ export function StudentsByTeacher({
   const {
     data,
     upsertStudent,
-    deleteStudent,
+    archiveStudent,
+    restoreStudent,
     studentsForTeacher,
     unassignedStudents,
     reload,
@@ -97,23 +109,44 @@ export function StudentsByTeacher({
   const [initialTariffId, setInitialTariffId] = useState("");
   const [assignFor, setAssignFor] = useState<Student | null>(null);
   const [assignTariffId, setAssignTariffId] = useState("");
+  const [assignReason, setAssignReason] = useState("");
   const [assignBusy, setAssignBusy] = useState(false);
+  const [listSection, setListSection] = useState<"work" | "archive">("work");
+  const [archiveFor, setArchiveFor] = useState<Student | null>(null);
+  const [archiveReason, setArchiveReason] =
+    useState<StudentArchiveReason>("stopped");
+  const [archiveComment, setArchiveComment] = useState("");
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [restoreBusyId, setRestoreBusyId] = useState<string | null>(null);
 
   const basePath = mode === "direkciya" ? "/direkciya" : "/kafedra";
 
   const rows = useMemo(() => {
-    const list: Student[] =
-      mode === "kafedra"
-        ? studentsForTeacher(data.currentTeacherId)
-        : teacherFilter === "all"
-          ? data.students
+    const archived = mode === "direkciya" && listSection === "archive";
+    let list: Student[];
+    if (mode === "kafedra") {
+      list = studentsForTeacher(data.currentTeacherId);
+    } else if (archived) {
+      const allArchived = data.students.filter((s) => s.status === "archived");
+      list =
+        teacherFilter === "all"
+          ? allArchived
           : teacherFilter === "unassigned"
-            ? unassignedStudents()
-            : studentsForTeacher(teacherFilter);
+            ? allArchived.filter((s) => !s.previousTeacherId)
+            : allArchived.filter((s) => s.previousTeacherId === teacherFilter);
+    } else if (teacherFilter === "all") {
+      list = data.students.filter((s) => s.status !== "archived");
+    } else if (teacherFilter === "unassigned") {
+      list = unassignedStudents();
+    } else {
+      list = studentsForTeacher(teacherFilter);
+    }
 
     return list
       .filter((s) => {
-        if (statusFilter !== "all" && s.status !== statusFilter) return false;
+        if (!archived && statusFilter !== "all" && s.status !== statusFilter) {
+          return false;
+        }
         if (!query.trim()) return true;
         const q = query.toLowerCase();
         return (
@@ -127,6 +160,7 @@ export function StudentsByTeacher({
   }, [
     data.currentTeacherId,
     data.students,
+    listSection,
     mode,
     query,
     statusFilter,
@@ -158,7 +192,7 @@ export function StudentsByTeacher({
         (a, b) =>
           new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime()
       )[0];
-    const tariffId = currentTariff?.tariffId ?? "";
+    const tariffId = student.purchaseTariffId ?? currentTariff?.tariffId ?? "";
     setInitialTariffId(tariffId);
     setForm({
       id: student.id,
@@ -197,11 +231,16 @@ export function StudentsByTeacher({
       form.tariffId !== initialTariffId
     ) {
       try {
-        await apiPlatform("assignTariff", {
+        await apiPlatform("setStudentPurchaseTariff", {
           studentId: id,
           tariffId: form.tariffId,
+          reason: !form.id
+            ? "Назначение при создании ученика"
+            : "Тариф для будущей оплаты",
         });
-        toast.success("Тариф назначен");
+        toast.success(
+          "Тариф назначен. Оплата создаётся, когда ученик перейдёт к оплате в Аудитории."
+        );
         await reload();
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Не удалось назначить тариф");
@@ -210,16 +249,20 @@ export function StudentsByTeacher({
     setOpen(false);
   }
 
-  async function saveAssignOnly() {
+  async function saveAssign() {
     if (!assignFor || !assignTariffId) return;
     setAssignBusy(true);
     try {
-      await apiPlatform("assignTariff", {
+      await apiPlatform("setStudentPurchaseTariff", {
         studentId: assignFor.id,
         tariffId: assignTariffId,
+        reason: assignReason.trim() || undefined,
       });
-      toast.success("Тариф назначен");
+      toast.success(
+        "Тариф назначен. Оплата создаётся, когда ученик перейдёт к оплате в Аудитории."
+      );
       setAssignFor(null);
+      setAssignReason("");
       await reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Не удалось назначить тариф");
@@ -231,6 +274,62 @@ export function StudentsByTeacher({
   const teacherName = (id: string) =>
     !id ? "Не назначен" : (data.teachers.find((t) => t.id === id)?.fullName ?? "—");
 
+  const lastLessonAt = (studentId: string) => {
+    const done = data.lessons
+      .filter(
+        (l) => l.studentIds.includes(studentId) && l.status !== "cancelled"
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime()
+      );
+    return done[0]?.startsAt ?? null;
+  };
+
+  async function confirmArchive() {
+    if (!archiveFor) return;
+    setArchiveBusy(true);
+    try {
+      const result = await archiveStudent({
+        id: archiveFor.id,
+        reason: archiveReason,
+        comment: archiveReason === "other" ? archiveComment.trim() || null : null,
+      });
+      if (!result.ok) {
+        toast.error(result.error || "Не удалось архивировать");
+        return;
+      }
+      toast.success("Ученик переведён в архив");
+      setArchiveFor(null);
+      setOpen(false);
+      await reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Не удалось архивировать");
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
+
+  async function confirmRestore(student: Student) {
+    setRestoreBusyId(student.id);
+    try {
+      const result = await restoreStudent(student.id);
+      if (!result.ok) {
+        toast.error(result.error || "Не удалось вернуть в работу");
+        return;
+      }
+      toast.success("Ученик возвращён в работу");
+      await reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Не удалось вернуть");
+    } finally {
+      setRestoreBusyId(null);
+    }
+  }
+
+  const archivedView = mode === "direkciya" && listSection === "archive";
+  const archivedCount = data.students.filter((s) => s.status === "archived").length;
+
   return (
     <div>
       <PageHeader
@@ -241,13 +340,43 @@ export function StudentsByTeacher({
             : "Ученики по преподавателям. Смена преподавателя не удаляет историю."
         }
         actions={
-          editable ? (
+          editable && !archivedView ? (
             <Button type="button" className="rounded-full" onClick={openCreate}>
               Добавить ученика
             </Button>
           ) : null
         }
       />
+
+      {mode === "direkciya" ? (
+        <div className="mb-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setListSection("work")}
+            className={cn(
+              "rounded-full border px-3 py-1.5 text-sm transition-colors",
+              listSection === "work"
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border/80 hover:bg-muted/50"
+            )}
+          >
+            Ученики в работе
+          </button>
+          <button
+            type="button"
+            onClick={() => setListSection("archive")}
+            className={cn(
+              "rounded-full border px-3 py-1.5 text-sm transition-colors",
+              listSection === "archive"
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border/80 hover:bg-muted/50"
+            )}
+          >
+            Ученики в архиве{" "}
+            <span className="tabular-nums opacity-70">({archivedCount})</span>
+          </button>
+        </div>
+      ) : null}
 
       <FilterBar>
         {mode === "direkciya" ? (
@@ -283,6 +412,7 @@ export function StudentsByTeacher({
           placeholder="Поиск…"
           className="border-transparent bg-background sm:max-w-xs"
         />
+        {archivedView ? null : (
         <Select
           value={statusFilter}
           onValueChange={(v) => v && setStatusFilter(v as "all" | PersonStatus)}
@@ -302,6 +432,7 @@ export function StudentsByTeacher({
             <SelectItem value="paused">{personStatusLabel.paused}</SelectItem>
           </SelectContent>
         </Select>
+        )}
       </FilterBar>
 
       {mode === "direkciya" && teacherFilter === "all" ? (
@@ -338,12 +469,16 @@ export function StudentsByTeacher({
       {rows.length === 0 ? (
         <EmptyState
           title={
-            mode === "direkciya" && teacherFilter === "unassigned"
+            query.trim()
+              ? "Никого не нашли"
+              : mode === "direkciya" && teacherFilter === "unassigned"
               ? "Все ученики назначены"
               : "Нет учеников"
           }
           description={
-            mode === "direkciya" && teacherFilter === "unassigned"
+            query.trim()
+              ? "Измените поисковый запрос или фильтр преподавателя."
+              : mode === "direkciya" && teacherFilter === "unassigned"
               ? "Сейчас нет учеников без преподавателя. Можно показать всех или выбрать преподавателя."
               : "Измените фильтр или добавьте запись."
           }
@@ -353,7 +488,18 @@ export function StudentsByTeacher({
           <TableHeader>
             <TableRow>
               <TableHead>ФИО</TableHead>
-              {mode === "direkciya" ? <TableHead>Преподаватель</TableHead> : null}
+              {mode === "direkciya" ? (
+                <TableHead>
+                  {archivedView ? "Бывший преподаватель" : "Преподаватель"}
+                </TableHead>
+              ) : null}
+              {archivedView ? (
+                <>
+                  <TableHead>Дата архивации</TableHead>
+                  <TableHead>Причина</TableHead>
+                  <TableHead>Последнее занятие</TableHead>
+                </>
+              ) : null}
               {mode === "kafedra" ? (
                 <>
                   <TableHead className="whitespace-nowrap">
@@ -390,19 +536,63 @@ export function StudentsByTeacher({
                   {s.contacts ? (
                     <div className="text-xs text-muted-foreground">{s.contacts}</div>
                   ) : null}
+                  {(() => {
+                    const asg = currentAssignmentForStudent(
+                      data.tariffAssignments,
+                      s.id
+                    );
+                    return (
+                      <TariffBalanceNotice
+                        remaining={asg?.lessonsRemaining}
+                        packageStatus={asg?.packageStatus}
+                        compact
+                        className="mt-1"
+                      />
+                    );
+                  })()}
                 </TableCell>
                 {mode === "direkciya" ? (
                   <TableCell
-                    className={cn(!s.teacherId && "text-destructive")}
+                    className={cn(
+                      !(archivedView ? s.previousTeacherId : s.teacherId) &&
+                        "text-destructive"
+                    )}
                   >
-                    {teacherName(s.teacherId)}
+                    {teacherName(
+                      archivedView ? (s.previousTeacherId ?? "") : s.teacherId
+                    )}
                   </TableCell>
+                ) : null}
+                {archivedView ? (
+                  <>
+                    <TableCell className="text-sm tabular-nums">
+                      {s.archivedAt ? formatDate(s.archivedAt) : "—"}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {s.archivedReason
+                        ? studentArchiveReasonLabel[s.archivedReason]
+                        : "—"}
+                      {s.archivedReason === "other" && s.archivedComment ? (
+                        <div className="text-xs text-muted-foreground">
+                          {s.archivedComment}
+                        </div>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="text-sm tabular-nums">
+                      {lastLessonAt(s.id)
+                        ? formatDate(lastLessonAt(s.id)!)
+                        : "—"}
+                    </TableCell>
+                  </>
                 ) : null}
                 {mode === "kafedra"
                   ? (() => {
                       const avg2 = averageFinishedAttempt2(
                         data.homeworkAssignments.filter(
-                          (a) => a.studentId === s.id && a.sourceKind !== "theory"
+                          (a) =>
+                            a.studentId === s.id &&
+                            a.sourceKind !== "theory" &&
+                            a.sourceKind !== "intensive"
                         )
                       );
                       const asg = currentAssignmentForStudent(
@@ -418,18 +608,31 @@ export function StudentsByTeacher({
                             —
                           </TableCell>
                           <TableCell className="min-w-[8.5rem]">
-                            {asg ? (
-                              <div>
-                                <div className="font-medium leading-tight">
-                                  {asg.tariffName ?? "Тариф"}
+                            {(() => {
+                              const labeled = studentTariffLabel({
+                                assignments: data.tariffAssignments,
+                                studentId: s.id,
+                                tariffs: data.tariffs,
+                                purchaseTariffId: s.purchaseTariffId,
+                              });
+                              if (!labeled) {
+                                return (
+                                  <span className="text-muted-foreground">—</span>
+                                );
+                              }
+                              return (
+                                <div>
+                                  <div className="font-medium leading-tight">
+                                    {labeled.name}
+                                  </div>
+                                  <div className="text-[0.7rem] text-muted-foreground">
+                                    {asg
+                                      ? packageStatusLabel[asg.packageStatus ?? "none"]
+                                      : packageStatusLabel.unpaid}
+                                  </div>
                                 </div>
-                                <div className="text-[0.7rem] text-muted-foreground">
-                                  {packageStatusLabel[asg.packageStatus ?? "none"]}
-                                </div>
-                              </div>
-                            ) : (
-                              <span className="text-muted-foreground">—</span>
-                            )}
+                              );
+                            })()}
                           </TableCell>
                         </>
                       );
@@ -444,11 +647,19 @@ export function StudentsByTeacher({
                         data.tariffAssignments,
                         s.id
                       );
+                      const labeled = studentTariffLabel({
+                        assignments: data.tariffAssignments,
+                        studentId: s.id,
+                        tariffs: data.tariffs,
+                        purchaseTariffId: s.purchaseTariffId,
+                      });
                       const pkg = asg?.packageStatus ?? "none";
                       return (
                         <>
                           <TableCell>
-                            {asg?.tariffName ?? (
+                            {labeled ? (
+                              labeled.name
+                            ) : (
                               <span className="text-muted-foreground">Нет тарифа</span>
                             )}
                           </TableCell>
@@ -464,7 +675,11 @@ export function StudentsByTeacher({
                             {asg ? formatDate(asg.endsAt) : "—"}
                           </TableCell>
                           <TableCell className="text-sm">
-                            {packageStatusLabel[pkg]}
+                            {asg
+                              ? packageStatusLabel[pkg]
+                              : labeled
+                                ? packageStatusLabel.unpaid
+                                : packageStatusLabel.none}
                           </TableCell>
                         </>
                       );
@@ -496,7 +711,7 @@ export function StudentsByTeacher({
                     >
                       Карточка
                     </Link>
-                    {mode === "direkciya" ? (
+                    {mode === "direkciya" && !archivedView ? (
                       <>
                         <button
                           type="button"
@@ -506,7 +721,10 @@ export function StudentsByTeacher({
                               data.tariffAssignments,
                               s.id
                             );
-                            setAssignTariffId(current?.tariffId ?? "");
+                            setAssignTariffId(
+                              s.purchaseTariffId ?? current?.tariffId ?? ""
+                            );
+                            setAssignReason("");
                             setAssignFor(s);
                           }}
                         >
@@ -519,7 +737,28 @@ export function StudentsByTeacher({
                         >
                           Изменить
                         </button>
+                        <button
+                          type="button"
+                          className="text-sm text-destructive underline-offset-2 hover:underline"
+                          onClick={() => {
+                            setArchiveReason("stopped");
+                            setArchiveComment("");
+                            setArchiveFor(s);
+                          }}
+                        >
+                          В архив
+                        </button>
                       </>
+                    ) : null}
+                    {archivedView ? (
+                      <button
+                        type="button"
+                        className="text-sm font-medium underline-offset-2 hover:underline"
+                        disabled={restoreBusyId === s.id}
+                        onClick={() => void confirmRestore(s)}
+                      >
+                        Вернуть в работу
+                      </button>
                     ) : null}
                   </div>
                 </TableCell>
@@ -681,7 +920,8 @@ export function StudentsByTeacher({
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Новое назначение создаётся только при смене тарифа.
+                  При сохранении меняется только тариф для будущей оплаты.
+                  История назначений и списаний не пересчитывается.
                 </p>
               </div>
             ) : null}
@@ -711,11 +951,14 @@ export function StudentsByTeacher({
                 type="button"
                 variant="destructive"
                 onClick={() => {
-                  deleteStudent(form.id!);
-                  setOpen(false);
+                  const student = data.students.find((x) => x.id === form.id);
+                  if (!student) return;
+                  setArchiveReason("stopped");
+                  setArchiveComment("");
+                  setArchiveFor(student);
                 }}
               >
-                Удалить
+                В архив
               </Button>
             ) : (
               <span />
@@ -774,11 +1017,19 @@ export function StudentsByTeacher({
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              Создаётся новое назначение со снимком пакета. Предыдущее
-              сохраняется в истории как истёкшее.
+              Тариф назначается сразу. Заявка на оплату не создаётся — ученик
+              оплачивает его в Аудитории. Действующий пакет не меняется, пока
+              оплата не подтверждена.
             </p>
+            <Label>Причина (необязательно)</Label>
+            <Textarea
+              value={assignReason}
+              onChange={(e) => setAssignReason(e.target.value)}
+              placeholder="Согласовано с куратором…"
+              rows={2}
+            />
           </div>
-          <DialogFooter>
+          <DialogFooter className="flex-col gap-2 sm:flex-col">
             <Button
               type="button"
               variant="outline"
@@ -789,9 +1040,84 @@ export function StudentsByTeacher({
             <Button
               type="button"
               disabled={!assignTariffId || assignBusy}
-              onClick={() => void saveAssignOnly()}
+              onClick={() => void saveAssign()}
             >
-              Назначить
+              Назначить тариф
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!archiveFor}
+        onOpenChange={(o) => {
+          if (!o) setArchiveFor(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              В архив{archiveFor ? ` · ${archiveFor.fullName}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Ученик будет переведён в архив и отвязан от преподавателя. История
+            занятий, платежей, тарифов и результатов сохранится.
+          </p>
+          <div className="space-y-1.5">
+            <Label>Причина</Label>
+            <Select
+              value={archiveReason}
+              onValueChange={(v) =>
+                v && setArchiveReason(v as StudentArchiveReason)
+              }
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue>
+                  {(v) =>
+                    studentArchiveReasonLabel[v as StudentArchiveReason] ??
+                    "Причина"
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="trial_not_continued">
+                  {studentArchiveReasonLabel.trial_not_continued}
+                </SelectItem>
+                <SelectItem value="stopped">
+                  {studentArchiveReasonLabel.stopped}
+                </SelectItem>
+                <SelectItem value="other">
+                  {studentArchiveReasonLabel.other}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {archiveReason === "other" ? (
+            <div className="space-y-1.5">
+              <Label>Комментарий (необязательно)</Label>
+              <Textarea
+                value={archiveComment}
+                onChange={(e) => setArchiveComment(e.target.value)}
+                rows={3}
+              />
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setArchiveFor(null)}
+            >
+              Отмена
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={archiveBusy}
+              onClick={() => void confirmArchive()}
+            >
+              Перевести в архив
             </Button>
           </DialogFooter>
         </DialogContent>

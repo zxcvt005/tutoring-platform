@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/empty-state";
-import { PageHeader } from "@/components/layout/page-header";
 import { HomeworkAssignmentStatusBadge } from "@/components/status-badge";
 import { TestTakeDialog } from "@/components/tests/test-take-dialog";
 import { Button } from "@/components/ui/button";
@@ -70,13 +69,8 @@ export function AuditoriaResultsPanel() {
 
   return (
     <div>
-      <PageHeader
-        title="Результаты"
-        description="История сданных и проверенных работ. Динамика строится только из ваших баллов."
-      />
-
       {dynamics.length >= 2 ? (
-        <section className="mb-8 space-y-3">
+        <section className="mb-8 space-y-3 rounded-2xl border border-border/70 bg-auditoria-surface p-4">
           <h2 className="font-display text-lg font-semibold tracking-tight">
             Динамика баллов
           </h2>
@@ -101,7 +95,7 @@ export function AuditoriaResultsPanel() {
           </p>
         </section>
       ) : dynamics.length === 1 ? (
-        <p className="mb-6 text-sm text-muted-foreground">
+        <p className="mb-6 rounded-2xl border border-border/70 bg-auditoria-surface px-4 py-3 text-sm text-muted-foreground">
           Пока одна проверенная работа с баллом — динамика появится после
           следующих проверок.
         </p>

@@ -85,9 +85,15 @@ export async function getIncomeOverview(
       studentId: p.studentId,
       assignmentId: p.assignmentId,
       amount: Number(p.amount),
-      status: p.status as "pending" | "paid" | "cancelled" | "failed",
+      status: p.status as
+        | "pending"
+        | "paid"
+        | "cancelled"
+        | "failed"
+        | "rejected",
       paidAt: p.paidAt?.toISOString() ?? null,
       createdAt: p.createdAt.toISOString(),
+      failureReason: p.failureReason ?? null,
     })),
     students: studentRows.map((s) => ({
       id: s.id,
@@ -96,12 +102,20 @@ export async function getIncomeOverview(
     })),
     assignments: mappedAssignments.map((a) => ({
       id: a.id,
+      studentId: a.studentId,
       tariffName: a.tariffName,
+      lessonsLimitSnapshot: a.lessonsLimitSnapshot ?? null,
+      status: a.status,
+      paymentStatus: a.paymentStatus,
     })),
   });
 
   const current = buildCurrentTariffOverview({
-    students: studentRows.map((s) => ({ id: s.id, fullName: s.fullName })),
+    students: studentRows.map((s) => ({
+      id: s.id,
+      fullName: s.fullName,
+      status: s.status,
+    })),
     assignments: mappedAssignments,
   });
 

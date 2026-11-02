@@ -1,10 +1,11 @@
 import { describe, it, expect, afterEach } from "vitest";
 
-import { organizations, testAttempts, tests } from "@/server/db/schema";
+import { organizations, students, testAttempts, tests } from "@/server/db/schema";
 import { DEMO_ORG_ID } from "@/server/db/seed";
 import {
   SCHOOL_ORG_ID,
   SCHOOL_SEED_EXPECTED,
+  SCHOOL_TARIFF_QA_STUDENT_IDS,
   seedSchoolOrganization,
   verifySchoolOrganization,
 } from "@/server/db/seed-school";
@@ -79,6 +80,33 @@ describe("school QA seed integrity", () => {
         attemptsAfter.length
       ).toBe(attemptsBefore.length);
       expect(attemptsAfter.every((a) => a.attemptNumber <= 2)).toBe(true);
+    },
+    60_000
+  );
+
+  it(
+    "counts the four tariff QA students separately and does not fail on 24 total",
+    async () => {
+      const t = await createTestDb();
+      close = t.close;
+      const now = new Date(2026, 9, 21, 12, 0, 0, 0);
+      await seedSchoolOrganization(t.db, now);
+
+      await t.db.insert(students).values(
+        SCHOOL_TARIFF_QA_STUDENT_IDS.map((id) => ({
+          id,
+          organizationId: SCHOOL_ORG_ID,
+          fullName: `ТЕСТ ${id}`,
+          grade: "11",
+          status: "active",
+          primaryTeacherId: "sch_t1",
+        }))
+      );
+
+      const { stats, errors } = await verifySchoolOrganization(t.db, now);
+      expect(errors).toEqual([]);
+      expect(stats.students).toBe(20);
+      expect(stats.tariffQaStudents).toBe(4);
     },
     60_000
   );

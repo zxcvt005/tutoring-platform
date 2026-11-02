@@ -108,12 +108,9 @@ export default function RegisterStudentPage() {
           {loading ? "Создание…" : "Зарегистрироваться"}
         </Button>
         <p className="text-xs text-muted-foreground">
-          Вы преподаватель?{" "}
-          <Link
-            href="/register/teacher"
-            className="underline-offset-4 hover:underline"
-          >
-            Регистрация преподавателя
+          Уже есть аккаунт?{" "}
+          <Link href="/login" className="underline-offset-4 hover:underline">
+            Войти
           </Link>
         </p>
       </form>

@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from "react";
 
+import { LearningLockedBanner } from "@/components/tariff-balance-notice";
 import { EmptyState } from "@/components/empty-state";
-import { PageHeader } from "@/components/layout/page-header";
+import { isHomeworkHistoryView, studentLearningLock } from "@/lib/learning-lock";
 import { HomeworkAssignmentStatusBadge } from "@/components/status-badge";
 import { TestTakeDialog } from "@/components/tests/test-take-dialog";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,7 @@ export function AuditoriaLearningPanel() {
   } = useDemoStore();
   const studentId = data.currentStudentId;
   const student = data.students.find((s) => s.id === studentId);
+  const learning = studentLearningLock(data.tariffAssignments, studentId);
   const teacherId = student?.teacherId ?? "";
   const [openHw, setOpenHw] = useState<HomeworkAssignment | null>(null);
 
@@ -116,10 +118,9 @@ export function AuditoriaLearningPanel() {
 
   return (
     <div>
-      <PageHeader
-        title="Обучение"
-        description="Темы вашей программы, статус изучения и связанные домашние задания."
-      />
+      {learning.locked ? (
+        <LearningLockedBanner message={learning.message} />
+      ) : null}
 
       {sectionBlocks.length === 0 ? (
         <EmptyState
@@ -129,11 +130,11 @@ export function AuditoriaLearningPanel() {
       ) : (
         <div className="space-y-10">
           {sectionBlocks.map((block) => (
-            <section key={block.id} className="space-y-4">
+            <section key={block.id} className="space-y-4 rounded-2xl border border-border/70 bg-auditoria-surface p-4">
               <h2 className="font-display text-lg font-semibold tracking-tight">
                 {block.title}
               </h2>
-              <ul className="divide-y divide-border/70 border-y border-border/70">
+              <ul className="divide-y divide-border/70 overflow-hidden rounded-2xl border border-border/70 bg-auditoria-surface px-4">
                 {block.topics.map((topic) => {
                   const status = studyStatus(topic);
                   const related = assignments
@@ -201,6 +202,12 @@ export function AuditoriaLearningPanel() {
                                     status={a.status}
                                     perspective="student"
                                   />
+                                  {learning.locked &&
+                                  !isHomeworkHistoryView(a.status) ? (
+                                    <span className="text-xs text-muted-foreground">
+                                      Недоступно
+                                    </span>
+                                  ) : (
                                   <Button
                                     type="button"
                                     size="sm"
@@ -214,6 +221,7 @@ export function AuditoriaLearningPanel() {
                                       ? "Выполнить"
                                       : "Открыть"}
                                   </Button>
+                                  )}
                                 </div>
                               </li>
                             );

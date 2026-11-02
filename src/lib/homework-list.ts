@@ -73,6 +73,13 @@ export function isNewHomework(a: HomeworkAssignment): boolean {
   return a.status === "assigned" && !isMissedHomework(a);
 }
 
+/** Снятое сбросом занятия ДЗ не показывается ученику и не открывается по ссылке. */
+export function isHomeworkVisibleToStudent(
+  status: HomeworkAssignment["status"]
+): boolean {
+  return status !== "withdrawn";
+}
+
 /**
  * Одно назначение — ровно в одной секции:
  * Просроченные → Новые → Незавершённые → Завершённые.
@@ -118,6 +125,7 @@ export function sortHomeworkForStudent(
   const completed: HomeworkAssignment[] = [];
 
   for (const a of assignments) {
+    if (!isHomeworkVisibleToStudent(a.status)) continue;
     const section = homeworkSectionFor(a);
     if (section === "overdue") overdue.push(a);
     else if (section === "new") newItems.push(a);
@@ -137,5 +145,28 @@ export function sortHomeworkForStudent(
     incomplete,
     completed,
     ordered: [...overdue, ...newItems, ...incomplete, ...completed],
+  };
+}
+
+export type HomeworkBoardKey = "overdue" | "assigned" | "completed";
+
+export type HomeworkBoardFilter = "all" | HomeworkBoardKey;
+
+/**
+ * Три секции страницы ученика.
+ * «Назначенные» — текущие «Новые» и «Незавершённые», чтобы работы в процессе не пропадали.
+ */
+export function homeworkBoardForStudent(
+  assignments: HomeworkAssignment[],
+  lessons: Lesson[] = []
+): Record<HomeworkBoardKey, HomeworkAssignment[]> {
+  const sorted = sortHomeworkForStudent(assignments, lessons);
+  const assigned = [...sorted.newItems, ...sorted.incomplete].sort((a, b) =>
+    byAssignedNewest(a, b, lessons)
+  );
+  return {
+    overdue: sorted.overdue,
+    assigned,
+    completed: sorted.completed,
   };
 }

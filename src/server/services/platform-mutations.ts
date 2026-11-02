@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { parseAppInstant } from "@/lib/app-time";
 import { dateKeyLocal } from "@/lib/calendar-month";
@@ -12,14 +12,21 @@ import {
   findStudentScheduleConflict,
   uniqueStudentIds,
 } from "@/lib/schedule";
+import {
+  SLOT_STUDENT_LIMIT_ERROR,
+  wouldExceedSlotStudentLimit,
+} from "@/lib/teacher-slot";
 import { normalizeGrade } from "@/lib/student-contacts";
+import { restoredTestStatus } from "@/lib/tests/archive";
 import { computeMaxScore } from "@/lib/tests/helpers";
 import type {
   AttendanceStatus,
   Homework,
   Lesson,
   LessonTopicLink,
+  LibraryScope,
   Student,
+  StudentArchiveReason,
   Teacher,
   TestQuestion,
   Topic,
@@ -27,6 +34,7 @@ import type {
 } from "@/lib/types";
 import type { AuthContext } from "@/server/authz/context";
 import {
+  assertDirectorSeesTeacher,
   requireRoles,
   requireStudentProfile,
   requireTeacherProfile,
@@ -48,6 +56,7 @@ import {
 } from "@/server/db/schema";
 import {
   applyAttendanceBalance,
+  attendanceDebitsLesson,
   recordScheduleException,
   reverseLessonDebits,
 } from "@/server/services/lesson-balance";
@@ -57,6 +66,7 @@ import {
 } from "@/server/services/chat-events";
 import type { AppDb } from "@/server/db/types";
 import { badRequest, conflict, forbidden, notFound } from "@/server/errors";
+import { settleLessonPayroll } from "@/server/services/teacher-payroll-service";
 import {
   reviewAssignment,
   saveDraft,
@@ -389,13 +399,16 @@ export async function upsertStudent(
     telegram,
     phone,
     parentContacts,
-    status: student.status,
+    status: student.status === "archived" ? "active" : student.status,
     primaryTeacherId: student.teacherId || null,
     notes: student.notes ?? null,
     updatedAt: new Date(),
   };
   if (existing[0]) {
     if (existing[0].organizationId !== ctx.organizationId) throw forbidden();
+    if (existing[0].status === "archived") {
+      throw badRequest("Ученик в архиве. Сначала верните его в работу.");
+    }
     if (
       ctx.role === "teacher" &&
       existing[0].primaryTeacherId !== ctx.teacherId
@@ -413,6 +426,70 @@ export async function upsertStudent(
     await db.insert(students).values({ ...values, createdAt: new Date() });
   }
   return { id };
+}
+
+const ARCHIVE_REASONS = new Set<StudentArchiveReason>([
+  "trial_not_continued",
+  "stopped",
+  "other",
+]);
+
+export async function archiveStudent(
+  db: AppDb,
+  ctx: AuthContext,
+  input: {
+    id: string;
+    reason: StudentArchiveReason;
+    comment?: string | null;
+  }
+) {
+  requireRoles(ctx, ["director"]);
+  if (!ARCHIVE_REASONS.has(input.reason)) {
+    throw badRequest("Укажите причину архивации");
+  }
+  const comment = input.comment?.trim() || null;
+  if (input.reason === "other" && comment && comment.length > 500) {
+    throw badRequest("Комментарий слишком длинный");
+  }
+  const [row] = await db.select().from(students).where(eq(students.id, input.id)).limit(1);
+  if (!row || row.organizationId !== ctx.organizationId) throw notFound();
+  if (row.status === "archived") return { ok: true, alreadyArchived: true };
+
+  const now = new Date();
+  await db
+    .update(students)
+    .set({
+      status: "archived",
+      previousTeacherId: row.primaryTeacherId ?? row.previousTeacherId,
+      primaryTeacherId: null,
+      archivedAt: now,
+      archivedReason: input.reason,
+      archivedComment: comment,
+      archivedByUserId: ctx.userId,
+      updatedAt: now,
+    })
+    .where(eq(students.id, input.id));
+  return { ok: true, alreadyArchived: false };
+}
+
+export async function restoreStudent(db: AppDb, ctx: AuthContext, id: string) {
+  requireRoles(ctx, ["director"]);
+  const [row] = await db.select().from(students).where(eq(students.id, id)).limit(1);
+  if (!row || row.organizationId !== ctx.organizationId) throw notFound();
+  if (row.status !== "archived") return { ok: true, alreadyActive: true };
+
+  await db
+    .update(students)
+    .set({
+      status: "active",
+      archivedAt: null,
+      archivedReason: null,
+      archivedComment: null,
+      archivedByUserId: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(students.id, id));
+  return { ok: true, alreadyActive: false };
 }
 
 export async function deleteStudent(db: AppDb, ctx: AuthContext, id: string) {
@@ -465,6 +542,17 @@ export async function upsertLesson(
   const conflictLesson = findStudentScheduleConflict(existingLessons, draft);
   if (conflictLesson) {
     throw conflict("Конфликт расписания у ученика");
+  }
+  if (
+    lesson.status !== "cancelled" &&
+    wouldExceedSlotStudentLimit(existingLessons, {
+      teacherId: lesson.teacherId,
+      startsAt: lesson.startsAt,
+      studentIds,
+      excludeLessonId: existing?.id,
+    })
+  ) {
+    throw badRequest(SLOT_STUDENT_LIMIT_ERROR);
   }
 
   const values: {
@@ -527,6 +615,9 @@ export async function upsertLesson(
       studentIds.map((studentId) => ({ lessonId: id, studentId }))
     );
   }
+  if (lesson.status === "cancelled") {
+    await settleLessonPayroll(db, ctx, id);
+  }
   return { ok: true, id };
 }
 
@@ -579,6 +670,7 @@ export async function deleteLesson(db: AppDb, ctx: AuthContext, id: string) {
       .set({ status: "cancelled", updatedAt: new Date() })
       .where(eq(lessons.id, id));
     await emitLessonCancelled(db, row);
+    await settleLessonPayroll(db, ctx, id);
     return { ok: true, cancelled: true };
   }
 
@@ -901,18 +993,28 @@ export async function completeLesson(
   }
 
   for (const [studentId, status] of byStudent) {
+    if (attendanceDebitsLesson(status)) {
+      await applyAttendanceBalance(db, ctx, {
+        lessonId: input.lessonId,
+        studentId,
+        attendanceStatus: status,
+        lessonCancelled: false,
+      });
+    }
     const { previous } = await writeAttendanceRow(
       db,
       input.lessonId,
       studentId,
       status
     );
-    await applyAttendanceBalance(db, ctx, {
-      lessonId: input.lessonId,
-      studentId,
-      attendanceStatus: status,
-      lessonCancelled: false,
-    });
+    if (!attendanceDebitsLesson(status)) {
+      await applyAttendanceBalance(db, ctx, {
+        lessonId: input.lessonId,
+        studentId,
+        attendanceStatus: status,
+        lessonCancelled: false,
+      });
+    }
     if (previous !== status) {
       await emitAttendanceSaved(db, lesson, studentId, status);
     }
@@ -935,7 +1037,19 @@ export async function completeLesson(
     });
     assignedCount += result.created;
   }
+  await settleLessonPayroll(db, ctx, input.lessonId);
   return { ok: true, assignedCount };
+}
+
+export async function resetLessonConductAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { resetLessonConduct } = await import(
+    "@/server/services/lesson-conduct-reset"
+  );
+  return resetLessonConduct(db, ctx, String(payload.lessonId ?? ""));
 }
 
 export async function setAttendance(
@@ -981,13 +1095,26 @@ export async function setAttendance(
     (existing?.status as AttendanceStatus | undefined) ?? null
   );
 
-  const { previous } = await writeAttendanceRow(db, lessonId, studentId, status);
-  const balance = await applyAttendanceBalance(db, ctx, {
-    lessonId,
-    studentId,
-    attendanceStatus: status,
-    lessonCancelled: false,
-  });
+  const debiting = attendanceDebitsLesson(status);
+  let previous: AttendanceStatus | null | undefined;
+  let balance: Awaited<ReturnType<typeof applyAttendanceBalance>> = null;
+  if (debiting) {
+    balance = await applyAttendanceBalance(db, ctx, {
+      lessonId,
+      studentId,
+      attendanceStatus: status,
+      lessonCancelled: false,
+    });
+    ({ previous } = await writeAttendanceRow(db, lessonId, studentId, status));
+  } else {
+    ({ previous } = await writeAttendanceRow(db, lessonId, studentId, status));
+    balance = await applyAttendanceBalance(db, ctx, {
+      lessonId,
+      studentId,
+      attendanceStatus: status,
+      lessonCancelled: false,
+    });
+  }
   const becameDone = await maybeMarkLessonDone(db, lessonId);
   if (previous !== status) {
     await emitAttendanceSaved(db, lesson, studentId, status);
@@ -995,6 +1122,7 @@ export async function setAttendance(
   if (becameDone) {
     await emitLessonConducted(db, lesson);
   }
+  await settleLessonPayroll(db, ctx, lessonId);
   return {
     ok: true,
     remaining: balance?.remaining ?? null,
@@ -1125,6 +1253,44 @@ export async function setLessonTopics(
   return { ok: true, topics: written.saved };
 }
 
+async function resolveLibraryOwner(
+  db: AppDb,
+  ctx: AuthContext,
+  input: { teacherId?: string | null; libraryScope?: LibraryScope },
+  existing?: {
+    organizationId: string;
+    teacherId: string | null;
+    libraryScope: string;
+  } | null
+): Promise<{ teacherId: string | null; libraryScope: LibraryScope }> {
+  if (existing && existing.organizationId !== ctx.organizationId) throw forbidden();
+  if (existing?.libraryScope === "school" && ctx.role !== "director") throw forbidden();
+  const requested: LibraryScope =
+    input.libraryScope === "school" ? "school" : "teacher";
+  const scope: LibraryScope = existing
+    ? (existing.libraryScope as LibraryScope)
+    : requested;
+  if (existing && requested !== scope) {
+    throw badRequest("Нельзя сменить владельца материала");
+  }
+  if (scope === "school") {
+    if (ctx.role !== "director") throw forbidden();
+    return { teacherId: null, libraryScope: "school" };
+  }
+  if (ctx.role === "teacher") {
+    const teacherId = await requireTeacherProfile(ctx);
+    if ((input.teacherId ?? "") !== teacherId) throw forbidden();
+    if (existing && existing.teacherId !== teacherId) throw forbidden();
+    return { teacherId, libraryScope: "teacher" };
+  }
+  requireRoles(ctx, ["director"]);
+  const teacherId = existing?.teacherId ?? input.teacherId ?? "";
+  if (!teacherId) throw badRequest("Укажите преподавателя");
+  await assertDirectorSeesTeacher(db, ctx, teacherId);
+  if (existing && existing.teacherId !== teacherId) throw forbidden();
+  return { teacherId, libraryScope: "teacher" };
+}
+
 export async function upsertTopicSection(
   db: AppDb,
   ctx: AuthContext,
@@ -1239,24 +1405,25 @@ export async function upsertTopic(
   }
 ) {
   requireRoles(ctx, ["teacher", "director"]);
-  if (ctx.role === "teacher") {
-    const tid = await requireTeacherProfile(ctx);
-    if (topic.teacherId !== tid) throw forbidden();
-  }
   const title = topic.title.trim();
   if (!title) throw badRequest("Укажите название темы");
   const description = (topic.description ?? "").trim();
   if (!description) throw badRequest("Укажите описание темы");
   const subject = (topic.subject ?? "").trim() || "Предмет";
   const id = topic.id ?? newId("tp");
-  const sectionId = topic.sectionId === undefined ? null : topic.sectionId;
+  const [existing] = await db.select().from(topics).where(eq(topics.id, id)).limit(1);
+  const owner = await resolveLibraryOwner(db, ctx, topic, existing);
+  let sectionId = topic.sectionId === undefined ? null : topic.sectionId;
+  if (owner.libraryScope === "school") sectionId = null;
   const siblings = await db
     .select()
     .from(topics)
     .where(
       and(
         eq(topics.organizationId, ctx.organizationId),
-        eq(topics.teacherId, topic.teacherId),
+        owner.teacherId == null
+          ? isNull(topics.teacherId)
+          : eq(topics.teacherId, owner.teacherId),
         sectionId == null
           ? sql`${topics.sectionId} is null`
           : eq(topics.sectionId, sectionId)
@@ -1268,11 +1435,11 @@ export async function upsertTopic(
       ? Math.max(...siblings.filter((s) => s.id !== id).map((s) => s.sortOrder)) + 1
       : 0);
 
-  const [existing] = await db.select().from(topics).where(eq(topics.id, id)).limit(1);
   const values = {
     id,
     organizationId: ctx.organizationId,
-    teacherId: topic.teacherId,
+    teacherId: owner.teacherId,
+    libraryScope: owner.libraryScope,
     sectionId,
     title,
     subject,
@@ -1298,7 +1465,13 @@ export async function deleteTopic(db: AppDb, ctx: AuthContext, id: string) {
   requireRoles(ctx, ["teacher", "director"]);
   const [row] = await db.select().from(topics).where(eq(topics.id, id)).limit(1);
   if (!row || row.organizationId !== ctx.organizationId) throw notFound();
-  if (ctx.role === "teacher" && row.teacherId !== ctx.teacherId) throw forbidden();
+  if (row.libraryScope === "school") {
+    if (ctx.role !== "director") throw forbidden();
+  } else if (ctx.role === "teacher" && row.teacherId !== ctx.teacherId) {
+    throw forbidden();
+  } else if (ctx.role === "director" && row.teacherId) {
+    await assertDirectorSeesTeacher(db, ctx, row.teacherId);
+  }
   await db
     .update(topics)
     .set({ status: "archived", updatedAt: new Date() })
@@ -1370,23 +1543,21 @@ export async function upsertHomework(
   hw: Omit<Homework, "id"> & { id?: string }
 ) {
   requireRoles(ctx, ["teacher", "director"]);
-  if (ctx.role === "teacher") {
-    const tid = await requireTeacherProfile(ctx);
-    if (hw.teacherId !== tid) throw forbidden();
-  }
   const id = hw.id ?? newId("hw");
   const questions = (hw.questions ?? []) as TestQuestion[];
   const { publicQuestions, answerKeys } = splitQuestions(questions);
   const maxScore = computeMaxScore(questions) || hw.maxScore;
 
   const [existing] = await db.select().from(tests).where(eq(tests.id, id)).limit(1);
+  const owner = await resolveLibraryOwner(db, ctx, hw, existing);
   const purpose = hw.purpose ?? existing?.purpose ?? "homework";
   const values = {
     id,
     organizationId: ctx.organizationId,
-    topicId: hw.topicId || null,
-    sectionId: hw.sectionId ?? null,
-    teacherId: hw.teacherId,
+    topicId: owner.libraryScope === "school" ? null : hw.topicId || null,
+    sectionId: owner.libraryScope === "school" ? null : hw.sectionId ?? null,
+    teacherId: owner.teacherId,
+    libraryScope: owner.libraryScope,
     title: hw.title,
     description: hw.description ?? null,
     status: hw.status,
@@ -1397,9 +1568,6 @@ export async function upsertHomework(
   };
   if (existing) {
     if (existing.organizationId !== ctx.organizationId) throw forbidden();
-    if (ctx.role === "teacher" && existing.teacherId !== ctx.teacherId) {
-      throw forbidden();
-    }
     await db.update(tests).set(values).where(eq(tests.id, id));
     await db.delete(testAnswerKeys).where(eq(testAnswerKeys.testId, id));
   } else {
@@ -1420,12 +1588,42 @@ export async function deleteHomework(db: AppDb, ctx: AuthContext, id: string) {
   requireRoles(ctx, ["teacher", "director"]);
   const [row] = await db.select().from(tests).where(eq(tests.id, id)).limit(1);
   if (!row || row.organizationId !== ctx.organizationId) throw notFound();
-  if (ctx.role === "teacher" && row.teacherId !== ctx.teacherId) throw forbidden();
+  if (row.libraryScope === "school") {
+    if (ctx.role !== "director") throw forbidden();
+  } else if (ctx.role === "teacher" && row.teacherId !== ctx.teacherId) {
+    throw forbidden();
+  } else if (ctx.role === "director" && row.teacherId) {
+    await assertDirectorSeesTeacher(db, ctx, row.teacherId);
+  }
   await db
     .update(tests)
     .set({ status: "archived", updatedAt: new Date() })
     .where(eq(tests.id, id));
-  return { ok: true };
+  return { ok: true, status: "archived" as const };
+}
+
+export async function restoreHomework(db: AppDb, ctx: AuthContext, id: string) {
+  requireRoles(ctx, ["teacher", "director"]);
+  const [row] = await db.select().from(tests).where(eq(tests.id, id)).limit(1);
+  if (!row || row.organizationId !== ctx.organizationId) throw notFound();
+  if (row.libraryScope === "school") {
+    if (ctx.role !== "director") throw forbidden();
+  } else if (ctx.role === "teacher" && row.teacherId !== ctx.teacherId) {
+    throw forbidden();
+  } else if (ctx.role === "director" && row.teacherId) {
+    await assertDirectorSeesTeacher(db, ctx, row.teacherId);
+  }
+  if (row.status !== "archived") {
+    return { ok: true as const, status: row.status };
+  }
+  const status = restoredTestStatus(
+    (row.questionsPublic as { prompt?: string }[]) ?? []
+  );
+  await db
+    .update(tests)
+    .set({ status, updatedAt: new Date() })
+    .where(eq(tests.id, id));
+  return { ok: true as const, status };
 }
 
 export async function publishHomework(db: AppDb, ctx: AuthContext, id: string) {
@@ -1468,6 +1666,11 @@ export async function assignHomework(
     .where(eq(tests.id, input.homeworkId))
     .limit(1);
   if (!hw || hw.organizationId !== ctx.organizationId) throw notFound("Тест не найден");
+  if (hw.libraryScope === "school") {
+    throw badRequest(
+      "Оригинал базы знаний ученикам не назначается. Сначала передайте тест преподавателю."
+    );
+  }
   if (hw.status !== "published") throw badRequest("Назначить можно только опубликованный тест");
 
   const studentIds = [...new Set(input.studentIds.filter(Boolean))];
@@ -1491,7 +1694,7 @@ export async function assignHomework(
           )
         )
         .limit(1);
-      if (dup[0]) continue;
+      if (dup[0] && dup[0].status !== "withdrawn") continue;
     } else {
       const active = await db
         .select()
@@ -1511,7 +1714,12 @@ export async function assignHomework(
           )
         )
         .limit(1);
-      if (active[0] && !active[0].lessonId && active[0].sourceKind !== "theory") {
+      if (
+        active[0] &&
+        !active[0].lessonId &&
+        active[0].sourceKind !== "theory" &&
+        active[0].sourceKind !== "intensive"
+      ) {
         continue;
       }
     }
@@ -1579,14 +1787,15 @@ async function assertHomeworkOrTheoryTestAccess(
     .select({
       sourceKind: testAssignments.sourceKind,
       studentId: testAssignments.studentId,
+      status: testAssignments.status,
     })
     .from(testAssignments)
     .where(eq(testAssignments.id, assignmentId))
     .limit(1);
   const row = assignment[0];
-  if (row?.sourceKind === "theory") {
-    if (row.studentId !== sid) throw forbidden();
-    return;
+  if (row && row.studentId !== sid) throw forbidden();
+  if (row?.status === "withdrawn") {
+    throw notFound("Домашнее задание снято со занятия");
   }
   const { assertStudentLearningAccess } = await import(
     "@/server/services/learning-access"
@@ -1652,6 +1861,29 @@ export async function upsertTariffAction(
     features: payload.features as string[] | undefined,
     status: payload.status as "active" | "archived" | undefined,
     adminNotes: (payload.adminNotes as string) ?? null,
+    productIds: Array.isArray(payload.productIds)
+      ? payload.productIds.map((id) => String(id))
+      : undefined,
+  });
+}
+
+export async function listProductsAction(db: AppDb, ctx: AuthContext) {
+  const { listProducts } = await import("@/server/services/products-service");
+  return { products: await listProducts(db, ctx) };
+}
+
+export async function upsertProductAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { upsertProduct } = await import("@/server/services/products-service");
+  return upsertProduct(db, ctx, {
+    id: payload.id as string | undefined,
+    name: String(payload.name ?? ""),
+    description: (payload.description as string) ?? "",
+    isActive:
+      payload.isActive == null ? undefined : Boolean(payload.isActive),
   });
 }
 
@@ -1677,6 +1909,23 @@ export async function assignTariffAction(
     tariffId: String(payload.tariffId),
     startsAt: payload.startsAt as string | undefined,
     endsAt: payload.endsAt as string | undefined,
+    mode: payload.mode === "enqueue" ? "enqueue" : "purchase",
+    reason: payload.reason as string | undefined,
+  });
+}
+
+export async function setStudentPurchaseTariffAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { setStudentPurchaseTariff } = await import(
+    "@/server/services/tariffs-service"
+  );
+  return setStudentPurchaseTariff(db, ctx, {
+    studentId: String(payload.studentId),
+    tariffId: String(payload.tariffId),
+    reason: payload.reason as string | undefined,
   });
 }
 
@@ -1697,7 +1946,7 @@ export async function adminMarkPaidAction(
 export async function studentPayAction(
   db: AppDb,
   ctx: AuthContext,
-  assignmentId: string
+  assignmentId?: string
 ) {
   const { studentRequestPayment } = await import(
     "@/server/services/tariffs-service"
@@ -1705,11 +1954,221 @@ export async function studentPayAction(
   return studentRequestPayment(db, ctx, assignmentId);
 }
 
+export async function studentStartCheckoutAction(
+  db: AppDb,
+  ctx: AuthContext
+) {
+  const { studentStartCheckout } = await import(
+    "@/server/services/tariffs-service"
+  );
+  return studentStartCheckout(db, ctx);
+}
+
+export async function adminRejectPaymentAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { adminRejectPayment } = await import(
+    "@/server/services/tariffs-service"
+  );
+  return adminRejectPayment(db, ctx, {
+    paymentId: String(payload.paymentId),
+    reason: payload.reason as string | undefined,
+  });
+}
+
 export async function getIncomeOverviewAction(db: AppDb, ctx: AuthContext) {
   const { getIncomeOverview } = await import(
     "@/server/services/income-service"
   );
   return getIncomeOverview(db, ctx);
+}
+
+export async function getTeacherPayRatesAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { getTeacherPayRates } = await import(
+    "@/server/services/teacher-payroll-service"
+  );
+  return getTeacherPayRates(db, ctx, String(payload.teacherId));
+}
+
+export async function setTeacherPayRatesAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { setTeacherPayRates } = await import(
+    "@/server/services/teacher-payroll-service"
+  );
+  const raw = (payload.rates ?? {}) as Record<string, unknown>;
+  const rates: Partial<Record<1 | 2 | 3 | 4 | 5, number>> = {};
+  for (const count of [1, 2, 3, 4, 5] as const) {
+    const value = raw[String(count)];
+    if (value == null || value === "") continue;
+    const n = typeof value === "number" ? value : Number(value);
+    if (!Number.isInteger(n)) {
+      throw badRequest(`Ставка для ${count} должна быть целым числом копеек`);
+    }
+    rates[count] = n;
+  }
+  return setTeacherPayRates(db, ctx, {
+    teacherId: String(payload.teacherId),
+    rates,
+  });
+}
+
+export async function getPayrollOverviewAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { getPayrollOverview } = await import(
+    "@/server/services/teacher-payroll-overview"
+  );
+  return getPayrollOverview(db, ctx, {
+    from: payload.from ? String(payload.from) : undefined,
+    to: payload.to ? String(payload.to) : undefined,
+    query: payload.query ? String(payload.query) : undefined,
+    sort:
+      payload.sort === "debt_asc" || payload.sort === "name"
+        ? payload.sort
+        : "debt_desc",
+  });
+}
+
+export async function getTeacherPayrollDetailAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { getTeacherPayrollDetail } = await import(
+    "@/server/services/teacher-payroll-overview"
+  );
+  return getTeacherPayrollDetail(db, ctx, {
+    teacherId: String(payload.teacherId),
+    from: payload.from ? String(payload.from) : undefined,
+    to: payload.to ? String(payload.to) : undefined,
+    offset: payload.offset != null ? Number(payload.offset) : undefined,
+    limit: payload.limit != null ? Number(payload.limit) : undefined,
+  });
+}
+
+export async function createTeacherPayoutAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { createTeacherPayout } = await import(
+    "@/server/services/teacher-payroll-service"
+  );
+  return createTeacherPayout(db, ctx, {
+    teacherId: String(payload.teacherId),
+    amountKopecks: Number(payload.amountKopecks),
+    occurredAt: String(payload.occurredAt ?? ""),
+    comment: payload.comment ? String(payload.comment) : undefined,
+    idempotencyKey: String(payload.idempotencyKey ?? ""),
+  });
+}
+
+export async function previewPayrollBackfillAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { previewPayrollBackfill } = await import(
+    "@/server/services/teacher-payroll-service"
+  );
+  return previewPayrollBackfill(
+    db,
+    ctx,
+    payload.teacherId ? String(payload.teacherId) : undefined
+  );
+}
+
+export async function restoreHomeworkAction(
+  db: AppDb,
+  ctx: AuthContext,
+  id: string
+) {
+  return restoreHomework(db, ctx, id);
+}
+
+export async function getTestGradesStatsAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { getTestGradesStats } = await import(
+    "@/server/services/test-grades-service"
+  );
+  return getTestGradesStats(
+    db,
+    ctx,
+    payload.teacherId ? String(payload.teacherId) : undefined
+  );
+}
+
+export async function upsertIntensiveAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { upsertIntensive } = await import("@/server/services/intensives-service");
+  const testIds = Array.isArray(payload.testIds)
+    ? payload.testIds.map((id) => String(id))
+    : [];
+  return upsertIntensive(db, ctx, {
+    id: payload.id ? String(payload.id) : undefined,
+    teacherId: payload.teacherId ? String(payload.teacherId) : undefined,
+    libraryScope: payload.libraryScope === "school" ? "school" : "teacher",
+    title: String(payload.title ?? ""),
+    description: (payload.description as string | null | undefined) ?? null,
+    videoUrl: (payload.videoUrl as string | null | undefined) ?? null,
+    testIds,
+    publish: Boolean(payload.publish),
+  });
+}
+
+export async function deleteIntensiveAction(
+  db: AppDb,
+  ctx: AuthContext,
+  id: string
+) {
+  const { deleteIntensive } = await import("@/server/services/intensives-service");
+  return deleteIntensive(db, ctx, id);
+}
+
+export async function assignIntensiveAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { assignIntensive } = await import("@/server/services/intensives-service");
+  const deadlines = Array.isArray(payload.deadlines) ? payload.deadlines : [];
+  return assignIntensive(db, ctx, {
+    intensiveId: String(payload.intensiveId ?? ""),
+    studentId: String(payload.studentId ?? ""),
+    deadlines: deadlines.map((item) => {
+      const row = item as { testId?: unknown; dueAt?: unknown };
+      return { testId: String(row.testId ?? ""), dueAt: String(row.dueAt ?? "") };
+    }),
+  });
+}
+
+export async function removeIntensiveFileAction(
+  db: AppDb,
+  ctx: AuthContext,
+  intensiveId: string,
+  fileId: string
+) {
+  const { removeIntensiveDraftFile } = await import(
+    "@/server/services/intensives-service"
+  );
+  return removeIntensiveDraftFile(db, ctx, intensiveId, fileId);
 }
 
 export async function upsertTheoryAction(
@@ -1727,6 +2186,45 @@ export async function upsertTheoryAction(
     testId: (payload.testId as string | null | undefined) ?? null,
     status: payload.status as "draft" | "published" | "archived" | undefined,
     publish: Boolean(payload.publish),
+    libraryScope: payload.libraryScope === "school" ? "school" : "teacher",
+  });
+}
+
+export async function saveToSchoolLibraryAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { saveToSchoolLibrary } = await import(
+    "@/server/services/knowledge-service"
+  );
+  return saveToSchoolLibrary(db, ctx, {
+    kind: payload.kind as "theory" | "test" | "topic",
+    id: String(payload.id ?? ""),
+  });
+}
+
+export async function transferKnowledgeAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { transferKnowledge } = await import(
+    "@/server/services/knowledge-service"
+  );
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  const teacherIds = Array.isArray(payload.teacherIds) ? payload.teacherIds : [];
+  return transferKnowledge(db, ctx, {
+    items: items.map((item) => {
+      const row = item as { kind?: unknown; id?: unknown };
+      return {
+        kind: row.kind as "theory" | "test" | "topic",
+        id: String(row.id ?? ""),
+      };
+    }),
+    teacherIds: teacherIds.map((id) => String(id)),
+    duplicatePolicy: payload.duplicatePolicy === "create" ? "create" : "skip",
+    phase: payload.phase === "plan" ? "plan" : "commit",
   });
 }
 
@@ -1779,12 +2277,15 @@ export const platformActions = {
   upsertTeacher,
   deleteTeacher,
   upsertStudent,
+  archiveStudent,
+  restoreStudent,
   deleteStudent,
   upsertLesson,
   createRecurringSchedule: createRecurringScheduleAction,
   deleteLesson,
   completeLesson,
   setAttendance,
+  resetLessonConduct: resetLessonConductAction,
   setLessonTopic,
   setLessonTopics,
   upsertTopicSection,
@@ -1796,6 +2297,7 @@ export const platformActions = {
   reorderTopics,
   upsertHomework,
   deleteHomework,
+  restoreHomework: restoreHomeworkAction,
   publishHomework,
   assignHomework,
   deleteHomeworkAssignment,
@@ -1803,16 +2305,34 @@ export const platformActions = {
   submitHomeworkAssignment: submitHomeworkAction,
   reviewHomeworkAssignment: reviewHomeworkAction,
   upsertTariff: upsertTariffAction,
+  listProducts: listProductsAction,
+  upsertProduct: upsertProductAction,
   archiveTariff: archiveTariffAction,
   assignTariff: assignTariffAction,
+  setStudentPurchaseTariff: setStudentPurchaseTariffAction,
   adminMarkPaymentPaid: adminMarkPaidAction,
+  adminRejectPayment: adminRejectPaymentAction,
   studentRequestPayment: studentPayAction,
+  studentStartCheckout: studentStartCheckoutAction,
   getIncomeOverview: getIncomeOverviewAction,
+  getTeacherPayRates: getTeacherPayRatesAction,
+  setTeacherPayRates: setTeacherPayRatesAction,
+  getPayrollOverview: getPayrollOverviewAction,
+  getTeacherPayrollDetail: getTeacherPayrollDetailAction,
+  createTeacherPayout: createTeacherPayoutAction,
+  previewPayrollBackfill: previewPayrollBackfillAction,
   upsertTheory: upsertTheoryAction,
   deleteTheory: deleteTheoryAction,
   assignTheory: assignTheoryAction,
   markTheoryViewed: markTheoryViewedAction,
   removeTheoryFile: removeTheoryFileAction,
+  upsertIntensive: upsertIntensiveAction,
+  deleteIntensive: deleteIntensiveAction,
+  assignIntensive: assignIntensiveAction,
+  removeIntensiveFile: removeIntensiveFileAction,
+  transferKnowledge: transferKnowledgeAction,
+  saveToSchoolLibrary: saveToSchoolLibraryAction,
+  getTestGradesStats: getTestGradesStatsAction,
 } as const;
 
 export type PlatformAction = keyof typeof platformActions;

@@ -1,17 +1,5 @@
 @echo off
-chcp 65001 >nul
+REM Совместимость: keep теперь режим по умолчанию у start-local.bat
 cd /d "%~dp0"
-
-echo.
-echo === Неодин: локальный запуск БЕЗ перезаписи seed ===
-echo.
-
-call npm run start:local:keep
-if errorlevel 1 (
-  echo.
-  echo Ошибка запуска.
-  pause
-  exit /b 1
-)
-
-pause
+call "%~dp0start-local.bat" %*
+exit /b %ERRORLEVEL%

@@ -38,6 +38,7 @@ import {
   retryQuestionIds,
   unansweredQuestionIds,
 } from "@/lib/tests/attempts";
+import { loadOriginMap, originKey } from "@/server/services/material-origins";
 import { loadLessonTopicsMap } from "@/server/services/platform-mutations";
 import { mergeQuestionsWithKeys, stripQuestionKeys } from "@/server/services/question-merge";
 import type {
@@ -48,6 +49,7 @@ import type {
   HomeworkAssignmentStatus,
   Lesson,
   PaymentRecord,
+  Product,
   Student,
   StudentAnswer,
   StudentTariffAssignment,
@@ -72,7 +74,11 @@ export async function buildBootstrap(
 ): Promise<DemoData> {
   const orgId = ctx.organizationId;
   await refreshExpiredAssignments(db, orgId);
-  if (ctx.role === "director" || ctx.role === "teacher") {
+  if (
+    ctx.role === "director" ||
+    ctx.role === "teacher" ||
+    ctx.role === "press"
+  ) {
     const { ensureOrgSchedulesMaterialized } = await import(
       "@/server/services/schedule-service"
     );
@@ -108,6 +114,11 @@ export async function buildBootstrap(
     .select()
     .from(tests)
     .where(eq(tests.organizationId, orgId));
+
+  if (ctx.role !== "director") {
+    topicRows = topicRows.filter((row) => row.libraryScope !== "school");
+    testRows = testRows.filter((row) => row.libraryScope !== "school");
+  }
 
   let assignmentRows = await db
     .select()
@@ -194,6 +205,11 @@ export async function buildBootstrap(
     );
   }
 
+  const originMap =
+    ctx.role === "student"
+      ? new Map()
+      : await loadOriginMap(db, orgId);
+
   const homeworks: Homework[] = testRows.map((t) => {
     const publicQ = (t.questionsPublic as Homework["questions"]) ?? [];
     const keys = keysByTest.get(t.id) ?? {};
@@ -205,7 +221,13 @@ export async function buildBootstrap(
       id: t.id,
       topicId: t.topicId,
       sectionId: t.sectionId,
-      teacherId: t.teacherId,
+      teacherId: t.teacherId ?? "",
+      libraryScope: (t.libraryScope as Homework["libraryScope"]) ?? "teacher",
+      origin:
+        ctx.role === "student"
+          ? null
+          : (originMap.get(originKey("test", t.id)) ?? null),
+      updatedAt: t.updatedAt.toISOString(),
       title: t.title,
       description: t.description ?? undefined,
       status: t.status as Homework["status"],
@@ -399,8 +421,8 @@ export async function buildBootstrap(
     email: t.email ?? undefined,
     startedAt: t.startedAt?.toISOString(),
     status: t.status as Teacher["status"],
-    lessonPrice: n(t.lessonPrice),
-    teacherPay: n(t.teacherPay),
+    lessonPrice: ctx.role === "press" ? undefined : n(t.lessonPrice),
+    teacherPay: ctx.role === "press" ? undefined : n(t.teacherPay),
     defaultDurationMin: t.defaultDurationMin ?? undefined,
     workDays: (t.workDays as number[]) ?? undefined,
     workIntervals: t.workIntervals ?? undefined,
@@ -421,14 +443,25 @@ export async function buildBootstrap(
       contacts: s.contacts ?? undefined,
       status: s.status as Student["status"],
       teacherId: s.primaryTeacherId ?? "",
+      archivedAt: s.archivedAt?.toISOString() ?? null,
+      archivedReason: (s.archivedReason as Student["archivedReason"]) ?? null,
+      archivedComment: s.archivedComment ?? null,
+      previousTeacherId: s.previousTeacherId ?? null,
       createdAt: s.createdAt.toISOString(),
       userId: s.userId,
       accountEmail: s.userId ? accountEmailById.get(s.userId) ?? null : null,
       accountRole: s.userId ? ("student" as const) : null,
+      purchaseTariffId: s.purchaseTariffId ?? null,
     };
     // Ученик не получает внутренние заметки и контакты родителей
     if (ctx.role === "student") {
       return base;
+    }
+    if (ctx.role === "press") {
+      return {
+        ...base,
+        parentContacts: s.parentContacts ?? null,
+      };
     }
     return {
       ...base,
@@ -464,7 +497,13 @@ export async function buildBootstrap(
 
   const mappedTopics: Topic[] = topicRows.map((t) => ({
     id: t.id,
-    teacherId: t.teacherId,
+    teacherId: t.teacherId ?? "",
+    libraryScope: (t.libraryScope as Topic["libraryScope"]) ?? "teacher",
+    origin:
+      ctx.role === "student"
+        ? null
+        : (originMap.get(originKey("topic", t.id)) ?? null),
+    updatedAt: t.updatedAt.toISOString(),
     sectionId: t.sectionId,
     title: t.title,
     subject: t.subject,
@@ -493,6 +532,8 @@ export async function buildBootstrap(
     );
     paymentRows = paymentRows.filter((p) => p.studentId === ctx.studentId);
     const tariffIds = new Set(assignmentRowsTariff.map((a) => a.tariffId));
+    const purchaseId = studentRows[0]?.purchaseTariffId;
+    if (purchaseId) tariffIds.add(purchaseId);
     tariffRows = tariffRows.filter((t) => tariffIds.has(t.id));
   }
 
@@ -503,7 +544,14 @@ export async function buildBootstrap(
     );
     paymentRows = [];
     const tariffIds = new Set(assignmentRowsTariff.map((a) => a.tariffId));
+    for (const student of studentRows) {
+      if (student.purchaseTariffId) tariffIds.add(student.purchaseTariffId);
+    }
     tariffRows = tariffRows.filter((t) => tariffIds.has(t.id));
+  }
+
+  if (ctx.role === "press") {
+    paymentRows = [];
   }
 
   const assignedCount = new Map<string, number>();
@@ -513,6 +561,11 @@ export async function buildBootstrap(
     .where(eq(studentTariffAssignments.organizationId, orgId))) {
     assignedCount.set(a.tariffId, (assignedCount.get(a.tariffId) ?? 0) + 1);
   }
+
+  const { loadTariffProductIdsByTariff } = await import(
+    "@/server/services/products-service"
+  );
+  const productIdsByTariff = await loadTariffProductIdsByTariff(db, orgId);
 
   const mappedTariffs: Tariff[] = tariffRows.map((t) => ({
     id: t.id,
@@ -528,6 +581,7 @@ export async function buildBootstrap(
     adminNotes:
       ctx.role === "director" ? t.adminNotes ?? undefined : undefined,
     assignedCount: assignedCount.get(t.id) ?? 0,
+    productIds: productIdsByTariff.get(t.id) ?? [],
   }));
 
   const tariffNameById = new Map(tariffRows.map((t) => [t.id, t]));
@@ -576,6 +630,7 @@ export async function buildBootstrap(
     externalId: p.externalId ?? undefined,
     paidAt: p.paidAt?.toISOString(),
     createdAt: p.createdAt.toISOString(),
+    failureReason: p.failureReason ?? null,
   }));
 
   const now = new Date();
@@ -601,11 +656,44 @@ export async function buildBootstrap(
       ? ctx.studentId ?? ""
       : mappedStudents[0]?.id ?? "";
 
+  const { listTrialLessonsForSchedule } = await import(
+    "@/server/services/trial-lessons-service"
+  );
+  const trialLessonsForSchedule = await listTrialLessonsForSchedule(db, ctx);
+
   const { listTheoryMaterialsForBootstrap } = await import(
     "@/server/services/theory-service"
   );
   const { theories, theoryAssignments } =
     await listTheoryMaterialsForBootstrap(db, ctx);
+
+  const { loadMockExamsForBootstrap } = await import(
+    "@/server/services/mock-exams-service"
+  );
+  const { mockExams, mockExamResults } = await loadMockExamsForBootstrap(
+    db,
+    ctx
+  );
+
+  const { listIntensivesForBootstrap } = await import(
+    "@/server/services/intensives-service"
+  );
+  const { intensives, intensiveAssignments } = await listIntensivesForBootstrap(
+    db,
+    ctx
+  );
+
+  let productsCatalog: Product[] = [];
+  let availableProductSlugs: string[] = [];
+  if (ctx.role === "director") {
+    const { listProducts } = await import("@/server/services/products-service");
+    productsCatalog = await listProducts(db, ctx);
+  } else if (ctx.role === "student") {
+    const { studentAccessibleProductSlugs } = await import(
+      "@/server/services/products-service"
+    );
+    availableProductSlugs = await studentAccessibleProductSlugs(db, ctx);
+  }
 
   const theoryByTestAssignment = new Map(
     theoryAssignments
@@ -629,6 +717,7 @@ export async function buildBootstrap(
     teachers: mappedTeachers,
     students: mappedStudents,
     lessons: mappedLessons,
+    trialLessons: trialLessonsForSchedule,
     attendances: mappedAttendances,
     topicSections: mappedSections,
     topics: mappedTopics,
@@ -636,9 +725,15 @@ export async function buildBootstrap(
     homeworkAssignments: homeworkAssignmentsWithTheory,
     theories,
     theoryAssignments,
+    intensives,
+    intensiveAssignments,
+    mockExams,
+    mockExamResults,
     tariffs: mappedTariffs,
     tariffAssignments: mappedTariffAssignments,
     payments: mappedPayments,
+    products: productsCatalog,
+    availableProductSlugs,
     currentTeacherId,
     direkciyaTeacherId: currentTeacherId,
     currentStudentId,

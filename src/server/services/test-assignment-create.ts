@@ -30,11 +30,13 @@ export async function createTestAssignmentWithSnapshot(
     testId: string;
     teacherId: string;
     studentId: string;
-    sourceKind: "homework" | "theory";
+    sourceKind: "homework" | "theory" | "intensive";
     topicId?: string | null;
     lessonId?: string | null;
     dueAt?: Date | null;
     status?: "assigned" | "overdue";
+    /** Снимок теста базы знаний. Для обычного ДЗ оригинал школы по-прежнему нельзя назначить. */
+    allowSchoolOriginal?: boolean;
   }
 ): Promise<string> {
   const [hw] = await db
@@ -59,12 +61,15 @@ export async function createTestAssignmentWithSnapshot(
   const questions = (hw.questionsPublic as TestQuestion[]) ?? [];
   if (!questions.length) throw badRequest("В тесте нет заданий");
 
+  if (!hw.teacherId && !input.allowSchoolOriginal) {
+    throw badRequest("Оригинал базы знаний нельзя назначить напрямую");
+  }
   const topicId = input.topicId || hw.topicId || null;
   const fullForSnapshot: Homework = {
     id: hw.id,
     topicId,
     sectionId: hw.sectionId,
-    teacherId: hw.teacherId,
+    teacherId: hw.teacherId ?? input.teacherId,
     title: hw.title,
     description: hw.description ?? undefined,
     status: hw.status as Homework["status"],
@@ -94,7 +99,13 @@ export async function createTestAssignmentWithSnapshot(
     snapshot.questions
   );
 
-  const assignmentId = newId(input.sourceKind === "theory" ? "tta" : "ha");
+  const assignmentId = newId(
+    input.sourceKind === "theory"
+      ? "tta"
+      : input.sourceKind === "intensive"
+        ? "iha"
+        : "ha"
+  );
   await db.insert(testAssignments).values({
     id: assignmentId,
     organizationId: ctx.organizationId,
@@ -124,7 +135,11 @@ export async function createTestAssignmentWithSnapshot(
     actorUserId: ctx.userId,
     payload: {
       source:
-        input.sourceKind === "theory" ? "assignTheory" : "assignHomework",
+        input.sourceKind === "theory"
+          ? "assignTheory"
+          : input.sourceKind === "intensive"
+            ? "assignIntensive"
+            : "assignHomework",
     },
   });
   return assignmentId;

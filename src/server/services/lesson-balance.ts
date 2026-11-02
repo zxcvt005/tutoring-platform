@@ -1,8 +1,10 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 
+import { canDebitFromRemaining } from "@/lib/tariff-warnings";
 import type { AttendanceStatus, StudentPackageStatus } from "@/lib/types";
 import type { AuthContext } from "@/server/authz/context";
+import { badRequest } from "@/server/errors";
 import {
   lessonScheduleExceptions,
   studentTariffAssignments,
@@ -32,9 +34,11 @@ export function derivePackageStatus(input: {
 }): StudentPackageStatus {
   if (input.status === "cancelled") return "cancelled";
   if (input.status === "paused") return "paused";
+  if (input.status === "queued") return "queued";
   if (input.paymentStatus !== "paid" || input.status === "pending_payment") {
     return "unpaid";
   }
+  if (input.remaining != null && input.remaining < 0) return "debt";
   if (input.remaining != null && input.remaining <= 0) return "exhausted";
   return "active";
 }
@@ -168,6 +172,16 @@ export async function applyAttendanceBalance(
     if (!shouldDebit && !state) return;
 
     if (shouldDebit && !state) {
+      const current = await getAssignmentBalance(
+        tx as unknown as AppDb,
+        assignment.id,
+        assignment.lessonsLimitSnapshot
+      );
+      if (!canDebitFromRemaining(current.remaining)) {
+        throw badRequest(
+          "Нельзя списать занятие: занятие в долг уже использовано. Сначала продлите тариф."
+        );
+      }
       const ledgerId = newId("led");
       const reason =
         input.attendanceStatus === "present"
@@ -219,11 +233,28 @@ export async function applyAttendanceBalance(
     }
   });
 
-  return getAssignmentBalance(
+  const balance = await getAssignmentBalance(
     db,
     assignment.id,
     assignment.lessonsLimitSnapshot
   );
+  if (balance.remaining != null && balance.remaining < 0) {
+    const { activateQueuedIfNeeded } = await import(
+      "@/server/services/tariff-queue"
+    );
+    const activated = await activateQueuedIfNeeded(db, ctx, input.studentId);
+    if (activated.activated && activated.assignmentId) {
+      const next = await findDebitAssignment(
+        db,
+        ctx.organizationId,
+        input.studentId
+      );
+      if (next) {
+        return getAssignmentBalance(db, next.id, next.lessonsLimitSnapshot);
+      }
+    }
+  }
+  return balance;
 }
 
 export async function reverseLessonDebits(

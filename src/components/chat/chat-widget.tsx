@@ -26,8 +26,15 @@ import {
   CHAT_MAX_FILES,
   CHAT_READ_ONLY,
 } from "@/lib/chat/constants";
+import {
+  isForbiddenStatus,
+  nextChatPollDelay,
+  nextForbiddenCount,
+  pollDelay,
+} from "@/lib/chat/poll";
 import { formatFileSize, mergeChatMessages } from "@/lib/chat/preview";
 import { newChatRequestId } from "@/lib/chat/request-id";
+import { OPEN_TEACHER_CHAT_EVENT } from "@/lib/chat/student-teacher-chat";
 import type {
   ChatListItem,
   ChatMessageView,
@@ -38,6 +45,7 @@ import { formatDate, formatTime } from "@/lib/format";
 import {
   apiChatDelete,
   apiChatEdit,
+  apiChatEnsure,
   apiChatList,
   apiChatMarkRead,
   apiChatMessages,
@@ -58,13 +66,6 @@ type LocalMessage = ChatMessageView & {
 
 function acceptAttr() {
   return CHAT_ALLOWED_EXTENSIONS.join(",");
-}
-
-function pollDelay(open: boolean, thread: boolean, hidden: boolean) {
-  if (hidden) return 45_000;
-  if (thread) return 4_000;
-  if (open) return 8_000;
-  return 15_000;
 }
 
 export function ChatWidget({ role }: { role: CabinetChatRole }) {
@@ -207,13 +208,39 @@ export function ChatWidget({ role }: { role: CabinetChatRole }) {
 
   useEffect(() => {
     let stopped = false;
+    let paused = false;
+    let consecutiveForbidden = 0;
     let timer: number | undefined;
+    const clearTimer = () => {
+      if (timer) {
+        window.clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+    const schedule = (ms: number) => {
+      clearTimer();
+      timer = window.setTimeout(() => {
+        void tick();
+      }, ms);
+    };
+    const armNext = (outcome: "ok" | "forbidden" | "transient") => {
+      consecutiveForbidden = nextForbiddenCount(outcome, consecutiveForbidden);
+      const delay = nextChatPollDelay({
+        open,
+        thread: Boolean(activeId),
+        hidden: document.hidden,
+        consecutiveForbidden,
+      });
+      if (delay === "pause") {
+        paused = true;
+        return;
+      }
+      if (!stopped) schedule(delay);
+    };
     const tick = async () => {
-      if (stopped || inFlight.current) {
-        timer = window.setTimeout(
-          tick,
-          pollDelay(open, Boolean(activeId), document.hidden)
-        );
+      if (stopped || paused) return;
+      if (inFlight.current) {
+        schedule(pollDelay(open, Boolean(activeId), document.hidden));
         return;
       }
       inFlight.current = true;
@@ -221,24 +248,38 @@ export function ChatWidget({ role }: { role: CabinetChatRole }) {
         if (activeId && open) await pollNewer();
         else if (open) await refreshList();
         else await refreshSummary();
-      } catch {
-        setOffline(true);
+        setOffline(false);
+        armNext("ok");
+      } catch (err) {
+        if (isForbiddenStatus(err)) {
+          armNext("forbidden");
+        } else {
+          setOffline(true);
+          armNext("transient");
+        }
       } finally {
         inFlight.current = false;
-        if (!stopped) {
-          timer = window.setTimeout(
-            tick,
-            pollDelay(open, Boolean(activeId), document.hidden)
-          );
-        }
       }
     };
+    const resume = () => {
+      if (stopped) return;
+      paused = false;
+      consecutiveForbidden = 0;
+      void tick();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") resume();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("online", resume);
     void tick();
     return () => {
       stopped = true;
-      if (timer) window.clearTimeout(timer);
+      clearTimer();
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("online", resume);
     };
-  }, [open, activeId, pollNewer, refreshList, refreshSummary]);
+  }, [open, activeId, role, pollNewer, refreshList, refreshSummary]);
 
   useEffect(() => {
     if (open && !activeId) void refreshList();
@@ -250,6 +291,25 @@ export function ChatWidget({ role }: { role: CabinetChatRole }) {
     setUnseenNew(0);
     await loadThread(id);
   };
+
+  useEffect(() => {
+    const onRequest = (event: Event) => {
+      const teacherId = (event as CustomEvent<{ teacherId?: string }>).detail
+        ?.teacherId;
+      if (!teacherId) return;
+      void (async () => {
+        try {
+          const data = await apiChatEnsure({ teacherId });
+          setOpen(true);
+          await openChat(data.chat.id);
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : "Не удалось открыть чат");
+        }
+      })();
+    };
+    window.addEventListener(OPEN_TEACHER_CHAT_EVENT, onRequest);
+    return () => window.removeEventListener(OPEN_TEACHER_CHAT_EVENT, onRequest);
+  }, [loadThread]);
 
   const markVisibleRead = useCallback(
     async (list: LocalMessage[]) => {
@@ -434,6 +494,7 @@ export function ChatWidget({ role }: { role: CabinetChatRole }) {
   const grouped = useMemo(() => {
     const groups: { day: string; items: LocalMessage[] }[] = [];
     for (const message of messages) {
+      if (message.type === "system_event") continue;
       const day = appDateKey(message.createdAt);
       const last = groups[groups.length - 1];
       if (!last || last.day !== day) groups.push({ day, items: [message] });
@@ -447,6 +508,7 @@ export function ChatWidget({ role }: { role: CabinetChatRole }) {
 
   return (
     <div
+      data-cabinet-float=""
       className="pointer-events-none fixed z-40 flex flex-col items-end gap-2"
       style={{
         right: "max(1rem, env(safe-area-inset-right))",
@@ -621,7 +683,6 @@ export function ChatWidget({ role }: { role: CabinetChatRole }) {
                           <ChatBubble
                             key={message.id}
                             message={message}
-                            role={role}
                             editing={editingId === message.id}
                             editDraft={editDraft}
                             onEditDraft={setEditDraft}
@@ -826,7 +887,7 @@ export function ChatWidget({ role }: { role: CabinetChatRole }) {
 
       {preview ? (
         <div
-          className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="neodin-overlay pointer-events-auto fixed inset-0 z-50 flex items-center justify-center p-4"
           onClick={() => setPreview(null)}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -843,7 +904,6 @@ export function ChatWidget({ role }: { role: CabinetChatRole }) {
 
 function ChatBubble({
   message,
-  role,
   editing,
   editDraft,
   onEditDraft,
@@ -855,7 +915,6 @@ function ChatBubble({
   onPreview,
 }: {
   message: LocalMessage;
-  role: CabinetChatRole;
   editing: boolean;
   editDraft: string;
   onEditDraft: (value: string) => void;
@@ -867,20 +926,7 @@ function ChatBubble({
   onPreview: (file: ChatMessageView["attachments"][number]) => void;
 }) {
   if (message.type === "system_event") {
-    const href =
-      role === "auditoria"
-        ? message.eventPayload?.hrefStudent
-        : message.eventPayload?.hrefTeacher;
-    return (
-      <div className="mx-auto max-w-[90%] rounded-xl bg-muted/80 px-3 py-2 text-center text-xs text-muted-foreground">
-        <p>{message.eventPayload?.title ?? "Событие"}</p>
-        {href ? (
-          <Link href={href} className="mt-1 inline-block text-primary underline-offset-2 hover:underline">
-            Открыть
-          </Link>
-        ) : null}
-      </div>
-    );
+    return null;
   }
 
   if (message.deleted) {

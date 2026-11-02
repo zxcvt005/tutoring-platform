@@ -24,13 +24,13 @@ export const DEMO_LOGIN_PASSWORD = DEMO_PASSWORD;
 
 export type DemoAccount = {
   id: string;
-  role: "director" | "teacher" | "student";
+  role: "director" | "teacher" | "student" | "press";
   fullName: string;
   email: string;
   teacherId?: string;
   studentId?: string;
   href: string;
-  group: "director" | "teachers" | "students";
+  group: "director" | "teachers" | "students" | "press";
   note?: string;
 };
 
@@ -83,6 +83,33 @@ export async function listDemoAccounts(db: AppDb): Promise<{
     });
   }
 
+  const pressRows = await db
+    .select({
+      userId: users.id,
+      email: users.email,
+      fullName: users.fullName,
+    })
+    .from(memberships)
+    .innerJoin(users, eq(users.id, memberships.userId))
+    .where(
+      and(
+        eq(memberships.organizationId, organizationId),
+        eq(memberships.role, "press")
+      )
+    )
+    .limit(5);
+
+  for (const p of pressRows) {
+    accounts.push({
+      id: `press_${p.userId}`,
+      role: "press",
+      fullName: p.fullName,
+      email: p.email,
+      href: "/pressa",
+      group: "press",
+    });
+  }
+
   const teacherRows = await db
     .select()
     .from(teachers)
@@ -127,7 +154,7 @@ export async function listDemoAccounts(db: AppDb): Promise<{
   }
 
   accounts.sort((a, b) => {
-    const order = { director: 0, teachers: 1, students: 2 };
+    const order = { director: 0, press: 1, teachers: 2, students: 3 };
     const g = order[a.group] - order[b.group];
     if (g !== 0) return g;
     return a.fullName.localeCompare(b.fullName, "ru");
@@ -142,7 +169,7 @@ export async function listDemoAccounts(db: AppDb): Promise<{
 export async function resolveDemoLoginEmail(
   db: AppDb,
   input: {
-    role: "director" | "teacher" | "student";
+    role: "director" | "teacher" | "student" | "press";
     teacherId?: string;
     studentId?: string;
     email?: string;
@@ -170,6 +197,24 @@ export async function resolveDemoLoginEmail(
     return orgId === SCHOOL_ORG_ID
       ? "director@umba-school.test"
       : "director@demo.local";
+  }
+
+  if (input.role === "press") {
+    const [p] = await db
+      .select({ email: users.email })
+      .from(memberships)
+      .innerJoin(users, eq(users.id, memberships.userId))
+      .where(
+        and(
+          eq(memberships.organizationId, orgId),
+          eq(memberships.role, "press")
+        )
+      )
+      .limit(1);
+    if (p?.email) return p.email;
+    return orgId === SCHOOL_ORG_ID
+      ? "press@umba-school.test"
+      : "press@demo.local";
   }
 
   if (input.role === "teacher") {

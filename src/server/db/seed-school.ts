@@ -23,10 +23,30 @@ export const SCHOOL_ORG_ID = "org_school_qa";
 export const SCHOOL_ORG_SLUG = "umba-school-qa";
 export const SCHOOL_PASSWORD = DEMO_PASSWORD;
 
+/**
+ * Четыре намеренных QA-ученика с остатком тарифа 2 / 1 / 0 / −1.
+ * Их создаёт seed-school-tariff-qa; school seed их не удаляет.
+ */
+export const SCHOOL_TARIFF_QA_STUDENT_IDS = [
+  "s_test_tariff_2",
+  "s_test_tariff_1",
+  "s_test_tariff_0",
+  "s_test_tariff_m1",
+] as const;
+
+export function isSchoolTariffQaStudentId(id: string): boolean {
+  return (SCHOOL_TARIFF_QA_STUDENT_IDS as readonly string[]).includes(id);
+}
+
+export function isCoreSchoolStudentId(id: string): boolean {
+  return id.startsWith("sch_s");
+}
+
 export const SCHOOL_SEED_EXPECTED = {
   directors: 1,
   teachers: 3,
   students: 20,
+  tariffQaStudents: 4,
   unassignedStudents: 3,
   schedules: 17,
   pastLessonsMin: 80,
@@ -215,6 +235,7 @@ export type SchoolSeedStats = {
   directors: number;
   teachers: number;
   students: number;
+  tariffQaStudents: number;
   unassignedStudents: number;
   schedules: number;
   futureLessons: number;
@@ -294,6 +315,20 @@ export async function seedSchoolOrganization(
     organizationId: SCHOOL_ORG_ID,
     userId: "user_sch_director",
     role: "director",
+  });
+
+  await upsertSchoolUser(db, {
+    id: "user_sch_press",
+    email: "press@umba-school.test",
+    passwordHash,
+    fullName: "Мария Сергеевна Продажница",
+    status: "active",
+  });
+  await upsertById(db, t.memberships, {
+    id: "mem_sch_press",
+    organizationId: SCHOOL_ORG_ID,
+    userId: "user_sch_press",
+    role: "press",
   });
 
   for (const teacher of teachers) {
@@ -609,16 +644,21 @@ export async function seedSchoolOrganization(
     db,
     SCHOOL_ORG_ID,
     now,
-    schedules,
-    { win1251Safe: options.win1251Safe }
+    schedules
   );
 
   await backfillLedgerFromAttendances(db, SCHOOL_ORG_ID);
+
+  const { ensureDefaultProducts } = await import(
+    "@/server/services/products-service"
+  );
+  await ensureDefaultProducts(db as never, SCHOOL_ORG_ID);
 
   return {
     directors: 1,
     teachers: teachers.length,
     students: students.length,
+    tariffQaStudents: 0,
     unassignedStudents: students.filter((s) => !s.teacherId).length,
     schedules: schedules.length,
     futureLessons: history.futureLessons,
@@ -761,9 +801,25 @@ export async function verifySchoolOrganization(
   const directors = memberships.filter((m: { role: string }) => m.role === "director").length;
   const teacherIds = new Set(teachers.map((x: { id: string }) => x.id));
   const studentIds = new Set(students.map((x: { id: string }) => x.id));
-  const unassigned = students.filter(
+  const coreStudents = students.filter((s: { id: string }) =>
+    isCoreSchoolStudentId(s.id)
+  );
+  const qaStudents = students.filter((s: { id: string }) =>
+    isSchoolTariffQaStudentId(s.id)
+  );
+  const unassigned = coreStudents.filter(
     (s: { primaryTeacherId: string | null }) => !s.primaryTeacherId
   ).length;
+  const coreTariffs = tariffs.filter(
+    (x: { id: string }) =>
+      x.id.startsWith("sch_tariff_") && !x.id.includes("qa")
+  );
+  const coreAssignments = assignments.filter((a: { id: string }) =>
+    a.id.startsWith("sch_sta_")
+  );
+  const corePayments = payments.filter((p: { id: string }) =>
+    p.id.startsWith("sch_pay_")
+  );
   const futureLessons = lessons.filter(
     (l: { startsAt: Date }) => l.startsAt.getTime() >= now.getTime()
   ).length;
@@ -790,14 +846,15 @@ export async function verifySchoolOrganization(
   const stats: SchoolSeedStats = {
     directors,
     teachers: teachers.length,
-    students: students.length,
+    students: coreStudents.length,
+    tariffQaStudents: qaStudents.length,
     unassignedStudents: unassigned,
     schedules: schedules.length,
     futureLessons,
     pastLessons,
-    tariffs: tariffs.length,
-    assignments: assignments.length,
-    payments: payments.length,
+    tariffs: coreTariffs.length,
+    assignments: coreAssignments.length,
+    payments: corePayments.length,
     tests: testRows.length,
     questions,
     topics: topicRows.length,
@@ -812,6 +869,18 @@ export async function verifySchoolOrganization(
   expectEq("directors", stats.directors, SCHOOL_SEED_EXPECTED.directors);
   expectEq("teachers", stats.teachers, SCHOOL_SEED_EXPECTED.teachers);
   expectEq("students", stats.students, SCHOOL_SEED_EXPECTED.students);
+  if (qaStudents.length > 0) {
+    expectEq(
+      "tariffQaStudents",
+      qaStudents.length,
+      SCHOOL_SEED_EXPECTED.tariffQaStudents
+    );
+    for (const id of SCHOOL_TARIFF_QA_STUDENT_IDS) {
+      if (!qaStudents.some((s: { id: string }) => s.id === id)) {
+        errors.push(`tariffQaStudents: нет ученика ${id}`);
+      }
+    }
+  }
   expectEq(
     "unassignedStudents",
     stats.unassignedStudents,
@@ -878,7 +947,8 @@ export async function verifySchoolOrganization(
     }
     if (
       lesson.status === "done" &&
-      lesson.startsAt.getTime() > now.getTime()
+      lesson.startsAt.getTime() > now.getTime() &&
+      !String(lesson.id).startsWith("l_test_tariff_")
     ) {
       errors.push(`занятие ${lesson.id}: проведено в будущем`);
     }

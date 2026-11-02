@@ -33,12 +33,11 @@ describe("cabinet middleware open-test flag", () => {
     expect(res.headers.get("location")).toContain("/login");
   });
 
-  it("open-test production allows cabinets without a session cookie", () => {
+  it("open-test flag still requires a session cookie", () => {
     process.env.NODE_ENV = "production";
     process.env.ALLOW_OPEN_TEST_LOGIN = "1";
     const res = middleware(cabinetRequest());
-    expect(res.headers.get("location")).toBeNull();
-    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toContain("/login");
   });
 
   it("ordinary production with a session cookie is allowed", () => {

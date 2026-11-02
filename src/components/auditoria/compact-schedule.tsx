@@ -18,28 +18,11 @@ import {
   classifyAuditoriaLesson,
   legendCategoryForLesson,
   upcomingWeekdaySlots,
-  type AuditoriaLegendCategory,
 } from "@/lib/auditoria-calendar";
 import type { Attendance, Lesson } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const legendClass: Record<AuditoriaLegendCategory, string> = {
-  present: "bg-emerald-500 text-white",
-  absent: "bg-amber-500 text-white",
-  future: "bg-[#3166F0] text-white",
-};
-
-const legendDot: Record<AuditoriaLegendCategory, string> = {
-  present: "bg-emerald-500",
-  absent: "bg-amber-500",
-  future: "bg-[#3166F0]",
-};
-
-const legendLabel: Record<AuditoriaLegendCategory, string> = {
-  present: "Был",
-  absent: "Не был",
-  future: "Будущее",
-};
+type CompactDayMark = "lesson" | "other";
 
 export function CompactScheduleCard({
   lessons,
@@ -62,16 +45,20 @@ export function CompactScheduleCard({
     [mine, studentId, now]
   );
   const byDay = useMemo(() => {
-    const map = new Map<string, AuditoriaLegendCategory[]>();
+    const map = new Map<string, CompactDayMark[]>();
     for (const lesson of mine) {
       const att = attendanceForStudent(attendances, lesson.id, studentId);
-      const cat = legendCategoryForLesson(
-        classifyAuditoriaLesson(lesson, att, now)
-      );
-      if (!cat) continue;
+      const classified = classifyAuditoriaLesson(lesson, att, now);
+      const legend = legendCategoryForLesson(classified);
+      const mark: CompactDayMark | null = legend
+        ? "lesson"
+        : classified === "cancelled"
+          ? "other"
+          : null;
+      if (!mark) continue;
       const key = parseIsoToLocalDateKey(lesson.startsAt);
       const list = map.get(key) ?? [];
-      list.push(cat);
+      list.push(mark);
       map.set(key, list);
     }
     return map;
@@ -81,11 +68,23 @@ export function CompactScheduleCard({
   const todayKey = dateKeyLocal(now);
 
   return (
-    <section className="overflow-x-hidden rounded-2xl border border-border/70 bg-card p-4">
-      <h2 className="font-display text-lg font-semibold tracking-tight">
-        Расписание занятий
-      </h2>
-      <p className="mt-0.5 text-xs text-muted-foreground">{APP_TIME_ZONE_LABEL}</p>
+    <section className="auditoria-home-card overflow-x-hidden">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-display text-xl font-semibold tracking-tight">
+          Расписание занятий
+        </h2>
+        <p className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-pastel-blue ring-1 ring-[#b7d4e8]" />
+            Занятие
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-pastel-beige ring-1 ring-[#e4d5c0]" />
+            Другое
+          </span>
+        </p>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">{APP_TIME_ZONE_LABEL}</p>
 
       {slots.length > 0 ? (
         <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
@@ -93,7 +92,7 @@ export function CompactScheduleCard({
             <span key={`${s.weekday}-${s.time}`}>
               <span className="font-medium">{s.weekday}</span>
               <span className="text-muted-foreground"> · </span>
-              <span className="tabular-nums text-[#3166F0]">{s.time}</span>
+              <span className="tabular-nums">{s.time}</span>
             </span>
           ))}
         </p>
@@ -108,22 +107,24 @@ export function CompactScheduleCard({
           type="button"
           size="xs"
           variant="ghost"
+          className="rounded-full"
           aria-label="Предыдущий месяц"
           onClick={() => setAnchor((a) => addMonths(a, -1))}
         >
-          ←
+          ‹
         </Button>
-        <p className="font-display text-sm font-semibold capitalize tracking-tight">
+        <p className="font-display text-base font-semibold capitalize tracking-tight">
           {monthTitleRu(anchor)}
         </p>
         <Button
           type="button"
           size="xs"
           variant="ghost"
+          className="rounded-full"
           aria-label="Следующий месяц"
           onClick={() => setAnchor((a) => addMonths(a, 1))}
         >
-          →
+          ›
         </Button>
       </div>
 
@@ -131,15 +132,16 @@ export function CompactScheduleCard({
         {WEEKDAY_LABELS_RU.map((d) => (
           <div
             key={d}
-            className="text-[0.65rem] font-semibold tracking-wide text-muted-foreground uppercase"
+            className="text-[0.7rem] font-semibold tracking-wide text-muted-foreground uppercase"
           >
             {d}
           </div>
         ))}
         {cells.map((cell) => {
-          const cats = cell.inMonth ? byDay.get(cell.key) ?? [] : [];
-          const unique = [...new Set(cats)];
-          const single = unique.length === 1 ? unique[0]! : null;
+          const marks = cell.inMonth ? byDay.get(cell.key) ?? [] : [];
+          const unique = [...new Set(marks)];
+          const hasLesson = unique.includes("lesson");
+          const hasOther = unique.includes("other");
           const isToday = cell.key === todayKey;
           return (
             <div
@@ -152,37 +154,22 @@ export function CompactScheduleCard({
               <span
                 className={cn(
                   "inline-flex size-7 items-center justify-center rounded-full text-xs tabular-nums",
-                  single && legendClass[single],
-                  !single && isToday && "ring-1 ring-inset ring-foreground/40",
+                  hasLesson && "bg-pastel-blue text-foreground",
+                  !hasLesson && hasOther && "bg-pastel-beige text-foreground",
+                  !hasLesson &&
+                    !hasOther &&
+                    isToday &&
+                    "ring-1 ring-inset ring-foreground/35",
                   !cell.inMonth && "text-muted-foreground"
                 )}
               >
                 {cell.dayNumber}
               </span>
-              {unique.length > 1 ? (
-                <span className="mt-0.5 flex gap-0.5">
-                  {unique.slice(0, 3).map((c) => (
-                    <span
-                      key={c}
-                      className={cn("size-1.5 rounded-full", legendDot[c])}
-                    />
-                  ))}
-                </span>
-              ) : null}
             </div>
           );
         })}
       </div>
-
-      <p className="mt-3 flex flex-wrap gap-3 text-[0.7rem] text-muted-foreground">
-        {(Object.keys(legendLabel) as AuditoriaLegendCategory[]).map((k) => (
-          <span key={k} className="inline-flex items-center gap-1">
-            <span className={cn("size-2 rounded-full", legendDot[k])} />
-            {legendLabel[k]}
-          </span>
-        ))}
-      </p>
-      <p className="mt-1 text-[0.65rem] text-muted-foreground">
+      <p className="mt-2 text-[0.65rem] text-muted-foreground">
         Отмена преподавателя не отмечается как «Не был».
       </p>
     </section>

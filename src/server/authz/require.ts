@@ -31,6 +31,10 @@ export async function requireStudentProfile(ctx: AuthContext): Promise<string> {
   return ctx.studentId;
 }
 
+export function requirePress(ctx: AuthContext): void {
+  requireRoles(ctx, ["press"]);
+}
+
 export async function loadAssignmentInOrg(
   db: AppDb,
   organizationId: string,

@@ -1,5 +1,6 @@
 "use client";
 
+import { questionTypeLabel } from "@/lib/tests/helpers";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -61,11 +62,18 @@ export function QuestionFields({
   }
 
   return (
-    <div className="space-y-3 rounded-xl border border-border/70 bg-background px-3.5 py-3">
+    <div
+      className={
+        taking
+          ? "space-y-4 rounded-3xl border border-[#d5e6f3] bg-[#f3f8fc] px-4 py-4 sm:px-5 sm:py-5"
+          : "space-y-3 rounded-xl border border-border/70 bg-background px-3.5 py-3"
+      }
+    >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
           Задание {index + 1}
           {question.maxScore != null ? ` · ${question.maxScore} б.` : ""}
+          {taking ? ` · ${questionTypeLabel[question.type]}` : ""}
         </p>
         {mode === "review" && answer?.isCorrect != null ? (
           <span
@@ -98,7 +106,13 @@ export function QuestionFields({
           />
         </div>
       ) : (
-        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+        <p
+          className={
+            taking
+              ? "font-display text-lg leading-snug font-semibold whitespace-pre-wrap sm:text-xl"
+              : "text-sm leading-relaxed whitespace-pre-wrap"
+          }
+        >
           {question.prompt || "Без текста"}
         </p>
       )}
@@ -306,11 +320,36 @@ function ChoiceBlock({
                   ×
                 </Button>
               </>
+            ) : taking ? (
+              <button
+                type="button"
+                aria-pressed={isSelected}
+                onClick={() => toggleOption(opt.id)}
+                className={cn(
+                  "flex min-h-12 w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left text-sm",
+                  isSelected
+                    ? "border-[#b7d4e8] bg-pastel-blue"
+                    : "border-black/10 bg-auditoria-surface hover:bg-pastel-blue/40"
+                )}
+              >
+                <span
+                  className={cn(
+                    "mt-0.5 inline-flex size-5 shrink-0 items-center justify-center border bg-auditoria-surface",
+                    multi ? "rounded-md" : "rounded-full",
+                    isSelected ? "border-[#8fb4cc]" : "border-black/20"
+                  )}
+                  aria-hidden
+                >
+                  {isSelected ? (
+                    <span className={cn("bg-[#5f7f96]", multi ? "size-2.5 rounded-sm" : "size-2.5 rounded-full")} />
+                  ) : null}
+                </span>
+                <span className="leading-relaxed">{opt.text || `Вариант ${i + 1}`}</span>
+              </button>
             ) : (
               <label
                 className={cn(
                   "flex w-full cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 text-sm",
-                  taking && "hover:bg-muted/40",
                   isSelected && "border-foreground/30 bg-muted/30",
                   showKey && isCorrect && "border-success/40 bg-success/8",
                   showKey && isSelected && !isCorrect && "border-destructive/40"
@@ -319,8 +358,7 @@ function ChoiceBlock({
                 {multi ? (
                   <Checkbox
                     checked={isSelected}
-                    disabled={!taking}
-                    onCheckedChange={() => toggleOption(opt.id)}
+                    disabled
                     className="mt-0.5"
                   />
                 ) : (
@@ -328,8 +366,8 @@ function ChoiceBlock({
                     type="radio"
                     name={`q-${question.id}`}
                     checked={isSelected}
-                    disabled={!taking}
-                    onChange={() => toggleOption(opt.id)}
+                    disabled
+                    readOnly
                     className="mt-1"
                   />
                 )}
@@ -436,14 +474,21 @@ function ShortAnswerBlock({
       ) : (
         <>
           {taking || answer?.textAnswer != null ? (
-            <Input
-              value={answer?.textAnswer ?? ""}
-              onChange={(e) => patchA({ textAnswer: e.target.value })}
-              readOnly={!taking}
-              placeholder={
-                isNumeric ? "Число" : "Краткий ответ"
-              }
-            />
+            <div className="space-y-1.5">
+              {taking ? (
+                <p className="text-sm text-muted-foreground">
+                  {isNumeric ? "Числовой ответ" : "Краткий ответ"}
+                </p>
+              ) : null}
+              <Input
+                value={answer?.textAnswer ?? ""}
+                onChange={(e) => patchA({ textAnswer: e.target.value })}
+                readOnly={!taking}
+                inputMode={isNumeric ? "decimal" : "text"}
+                className={taking ? "h-12 rounded-2xl bg-auditoria-surface text-base" : undefined}
+                placeholder={isNumeric ? "Например, 9.8" : "Краткий ответ"}
+              />
+            </div>
           ) : null}
           {showKey ? (
             <p className="text-xs text-muted-foreground">
@@ -492,12 +537,12 @@ function EssayBlock({
   return (
     <div className="space-y-2">
       <Textarea
-        rows={4}
+        rows={taking ? 6 : 4}
         value={answer?.textAnswer ?? ""}
         onChange={(e) => patchA({ textAnswer: e.target.value })}
         readOnly={!taking}
         placeholder={taking ? "Ваш развёрнутый ответ…" : "Ответ не дан"}
-        className={!taking ? "bg-muted/40" : undefined}
+        className={taking ? "min-h-32 rounded-2xl bg-auditoria-surface text-base" : "bg-muted/40"}
       />
       {reviewMode ? (
         <div className="grid gap-2 sm:grid-cols-2">
@@ -614,11 +659,19 @@ function MatchingBlock({
           {pairs.map((p) => (
             <li
               key={p.id}
-              className="flex flex-col gap-1.5 sm:flex-row sm:items-center"
+              className={cn(
+                "flex flex-col gap-2 sm:flex-row sm:items-center",
+                taking && "rounded-2xl border border-black/10 bg-auditoria-surface px-3 py-3"
+              )}
             >
-              <span className="min-w-[8rem] text-sm font-medium">{p.left}</span>
+              <span className="min-w-[8rem] flex-1 text-sm font-medium">{p.left}</span>
               <select
-                className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm sm:max-w-xs"
+                className={cn(
+                  "w-full px-2 text-sm sm:max-w-xs",
+                  taking
+                    ? "h-11 rounded-xl border border-black/10 bg-auditoria-surface"
+                    : "h-9 rounded-lg border-input bg-background"
+                )}
                 disabled={!taking}
                 value={matching[p.id] ?? ""}
                 onChange={(e) =>
@@ -735,9 +788,20 @@ function OrderingBlock({
             return (
               <li
                 key={id}
-                className="flex items-center gap-2 rounded-lg border border-border/70 px-2.5 py-1.5"
+                className={cn(
+                  "flex items-center gap-2 rounded-2xl border px-3 py-2.5",
+                  taking ? "border-black/10 bg-auditoria-surface" : "border-border/70"
+                )}
               >
-                <span className="w-5 text-xs text-muted-foreground">{i + 1}.</span>
+                <span
+                  className={
+                    taking
+                      ? "inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-pastel-blue text-xs"
+                      : "w-5 text-xs text-muted-foreground"
+                  }
+                >
+                  {taking ? i + 1 : `${i + 1}.`}
+                </span>
                 <span className="flex-1 text-sm">{item.text}</span>
                 {taking ? (
                   <div className="flex gap-0.5">

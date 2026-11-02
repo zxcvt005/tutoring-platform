@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 
+import type { MembershipRole } from "@/lib/auth/roles";
 import { unauthorized } from "@/server/errors";
 import { findValidSessionUser } from "@/server/auth/session";
 import {
@@ -10,7 +11,7 @@ import {
 } from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
 
-export type MembershipRole = "director" | "teacher" | "student";
+export type { MembershipRole };
 
 export type ImpersonationInfo = {
   active: true;

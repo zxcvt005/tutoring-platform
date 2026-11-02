@@ -11,6 +11,10 @@ import {
   findStudentScheduleConflict,
   uniqueStudentIds,
 } from "@/lib/schedule";
+import {
+  SLOT_STUDENT_LIMIT_ERROR,
+  wouldExceedSlotStudentLimit,
+} from "@/lib/teacher-slot";
 import type { AuthContext } from "@/server/authz/context";
 import {
   requireRoles,
@@ -90,6 +94,9 @@ export async function createLessonSchedule(
 
   const studentIds = uniqueStudentIds(input.studentIds);
   if (studentIds.length === 0) throw badRequest("Выберите ученика");
+  // Сохраняем текущее ограничение: одно занятие — один ученик.
+  // Параллельные одноместные уроки того же преподавателя в то же время
+  // образуют слот, который дополнительно ограничен MAX_SLOT_STUDENTS.
   if (studentIds.length > 1) {
     throw badRequest(
       "Занятие может быть только с одним учеником. Для параллельных уроков создайте отдельные записи расписания."
@@ -113,6 +120,28 @@ export async function createLessonSchedule(
   if (activeUntil && !(activeUntil > activeFrom)) {
     throw validationError("Дата окончания должна быть позже начала действия");
   }
+
+  const spec: RecurringScheduleSpec = {
+    weekdays,
+    startTime: input.startTime.trim(),
+    durationMin: input.durationMin,
+    activeFrom,
+    activeUntil,
+  };
+  const upcoming = listUpcomingOccurrences(spec, now);
+  const orgLessons = await loadOrgLessonsDomain(db, ctx.organizationId);
+  for (const occ of upcoming) {
+    if (
+      wouldExceedSlotStudentLimit(orgLessons, {
+        teacherId: input.teacherId,
+        startsAt: occ.startsAt.toISOString(),
+        studentIds,
+      })
+    ) {
+      throw badRequest(SLOT_STUDENT_LIMIT_ERROR);
+    }
+  }
+
   const id = newId("sch");
 
   await db.insert(lessonSchedules).values({
@@ -204,6 +233,15 @@ export async function materializeSchedule(
     const conflictHit = findStudentScheduleConflict(orgLessons, draft);
     if (conflictHit) {
       // Конфликт только у того же ученика. Параллельные уроки разных учеников разрешены.
+      continue;
+    }
+    if (
+      wouldExceedSlotStudentLimit(orgLessons, {
+        teacherId: sch.teacherId,
+        startsAt: occ.startsAt.toISOString(),
+        studentIds,
+      })
+    ) {
       continue;
     }
 

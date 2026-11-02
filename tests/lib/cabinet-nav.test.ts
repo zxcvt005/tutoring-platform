@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { cabinetHomeForRole } from "@/lib/auth/roles";
 import {
   auditoriaNavItems,
   direkciyaNavItems,
   kafedraNavItems,
+  pressaNavItems,
 } from "@/lib/cabinet-nav";
 
 describe("cabinet navigation", () => {
@@ -26,6 +28,60 @@ describe("cabinet navigation", () => {
     expect(kafedraNavItems.map((i) => i.label)).not.toContain("Результаты");
   });
 
+  it("adds Salaries to Direkciya", () => {
+    expect(direkciyaNavItems).toContainEqual({
+      href: "/direkciya/salaries",
+      label: "Зарплаты",
+    });
+  });
+
+  it("adds the knowledge base to Direkciya", () => {
+    expect(direkciyaNavItems).toContainEqual({
+      href: "/direkciya/knowledge",
+      label: "База знаний",
+    });
+  });
+
+  it("adds monthly feedback to teacher and press cabinets", () => {
+    expect(kafedraNavItems).toContainEqual({
+      href: "/kafedra/feedback",
+      label: "Обратная связь",
+    });
+    expect(pressaNavItems).toContainEqual({
+      href: "/pressa/feedback",
+      label: "Обратная связь",
+    });
+  });
+
+  it("adds mock exams to the teacher cabinet", () => {
+    expect(kafedraNavItems).toContainEqual({
+      href: "/kafedra/probniki",
+      label: "Пробники",
+    });
+  });
+
+  it("adds Calls to teacher and student cabinets", () => {
+    expect(kafedraNavItems).toContainEqual({
+      href: "/kafedra/calls",
+      label: "Звонки",
+    });
+    expect(auditoriaNavItems).toContainEqual({
+      href: "/auditoria/calls",
+      label: "Звонки",
+    });
+  });
+
+  it("adds Intensives to teacher and student cabinets", () => {
+    expect(kafedraNavItems).toContainEqual({
+      href: "/kafedra/intensivy",
+      label: "Интенсивы",
+    });
+    expect(auditoriaNavItems).toContainEqual({
+      href: "/auditoria/intensivy",
+      label: "Интенсивы",
+    });
+  });
+
   it("adds Theory to teacher and student cabinets", () => {
     expect(kafedraNavItems).toContainEqual({
       href: "/kafedra/theory",
@@ -35,5 +91,33 @@ describe("cabinet navigation", () => {
       href: "/auditoria/theory",
       label: "Теория",
     });
+  });
+
+  it("adds Оплата to Auditoria", () => {
+    expect(auditoriaNavItems).toContainEqual({
+      href: "/auditoria/pay",
+      label: "Оплата",
+    });
+  });
+
+  it("routes the press role to /pressa", () => {
+    expect(cabinetHomeForRole("press")).toBe("/pressa");
+    expect(cabinetHomeForRole("director")).toBe("/direkciya");
+  });
+
+  it("adds Pressa cabinet items without finance routes", () => {
+    expect(pressaNavItems).toEqual([
+      { href: "/pressa", label: "Обзор" },
+      { href: "/pressa/reminders", label: "Напоминания" },
+      { href: "/pressa/feedback", label: "Обратная связь" },
+      { href: "/pressa/ratings", label: "Отметки учеников" },
+      { href: "/pressa/students", label: "Ученики" },
+      { href: "/pressa/teachers", label: "Преподаватели" },
+      { href: "/pressa/trials", label: "Пробные уроки" },
+      { href: "/pressa/analytics", label: "Аналитика" },
+    ]);
+    expect(pressaNavItems.map((i) => i.href).join(" ")).not.toMatch(
+      /salaries|tariffs|payments/
+    );
   });
 });

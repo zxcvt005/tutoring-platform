@@ -23,12 +23,15 @@ export type IncomePaymentRow = {
   studentName: string;
   assignmentId: string;
   tariffName: string | null;
+  currentTariffName: string | null;
+  lessonsLimit: number | null;
   amount: number;
   status: PaymentRecordStatus;
   /** Дата для отображения: paidAt для paid, иначе createdAt */
   at: string;
   paidAt?: string;
   createdAt: string;
+  failureReason?: string | null;
 };
 
 export type MonthSummary = {
@@ -61,6 +64,8 @@ export type CurrentTariffRow = {
   urgencyLabel: string;
   /** Период считается истёкшим (дата или остаток занятий) */
   isExpired: boolean;
+  needsRenewal: boolean;
+  renewalHint: string | null;
 };
 
 export type TariffGroup = {
@@ -168,17 +173,32 @@ export function buildMonthSummaries(input: {
     status: PaymentRecordStatus;
     paidAt?: string | null;
     createdAt: string;
+    failureReason?: string | null;
   }>;
   students: Array<{ id: string; fullName: string; createdAt: string }>;
   assignments: Array<{
     id: string;
+    studentId?: string;
     tariffName?: string | null;
+    lessonsLimitSnapshot?: number | null;
+    status?: string;
+    paymentStatus?: string;
   }>;
 }): MonthSummary[] {
   const nameById = new Map(input.students.map((s) => [s.id, s.fullName]));
   const tariffByAsg = new Map(
     input.assignments.map((a) => [a.id, a.tariffName ?? null])
   );
+  const limitByAsg = new Map(
+    input.assignments.map((a) => [a.id, a.lessonsLimitSnapshot ?? null])
+  );
+  const currentNameByStudent = new Map<string, string>();
+  for (const a of input.assignments) {
+    if (!a.studentId) continue;
+    if (a.status === "active" && a.paymentStatus === "paid" && a.tariffName) {
+      currentNameByStudent.set(a.studentId, a.tariffName);
+    }
+  }
 
   const byMonth = new Map<IncomeMonthKey, IncomePaymentRow[]>();
 
@@ -192,11 +212,14 @@ export function buildMonthSummaries(input: {
       studentName: nameById.get(p.studentId) ?? p.studentId,
       assignmentId: p.assignmentId,
       tariffName: tariffByAsg.get(p.assignmentId) ?? null,
+      currentTariffName: currentNameByStudent.get(p.studentId) ?? null,
+      lessonsLimit: limitByAsg.get(p.assignmentId) ?? null,
       amount: p.amount,
       status: p.status,
       at: displayAt,
       paidAt: p.paidAt ?? undefined,
       createdAt: p.createdAt,
+      failureReason: p.failureReason ?? null,
     };
     const list = byMonth.get(key) ?? [];
     list.push(row);
@@ -310,7 +333,7 @@ export function pickCurrentPaidAssignment(
 }
 
 export function buildCurrentTariffOverview(input: {
-  students: Array<{ id: string; fullName: string }>;
+  students: Array<{ id: string; fullName: string; status?: string }>;
   assignments: StudentTariffAssignment[];
   now?: Date;
 }): CurrentTariffOverview {
@@ -323,13 +346,23 @@ export function buildCurrentTariffOverview(input: {
   const rows: CurrentTariffRow[] = [];
 
   for (const student of input.students) {
+    if (student.status === "archived") continue;
     const asg = pickCurrentPaidAssignment(input.assignments, student.id);
     if (!asg) continue;
     if (!asg.endsAt) continue;
 
+    const remaining = asg.lessonsRemaining ?? null;
     const exhausted =
       asg.packageStatus === "exhausted" ||
-      (asg.lessonsRemaining != null && asg.lessonsRemaining <= 0);
+      asg.packageStatus === "debt" ||
+      (remaining != null && remaining <= 0);
+    const needsRenewal = remaining != null && remaining <= 0;
+    const renewalHint =
+      remaining != null && remaining <= -1
+        ? "Занятие в долг — требуется продление"
+        : remaining === 0
+          ? "Тариф закончился. Продлите его, чтобы продолжить обучение без перерыва"
+          : null;
 
     const daysLeft = exhausted ? -1 : calendarDaysUntil(asg.endsAt, now);
     const { urgency, label, isExpired } = urgencyFromDays(daysLeft, exhausted);
@@ -341,11 +374,13 @@ export function buildCurrentTariffOverview(input: {
       tariffId: asg.tariffId,
       tariffName: asg.tariffName ?? "Тариф",
       endsAt: asg.endsAt,
-      lessonsRemaining: asg.lessonsRemaining ?? null,
+      lessonsRemaining: remaining,
       daysLeft: exhausted ? -1 : daysLeft,
       urgency,
       urgencyLabel: label,
       isExpired,
+      needsRenewal,
+      renewalHint,
     });
   }
 

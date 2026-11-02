@@ -9,7 +9,7 @@ export function chatMessagePreview(message: {
 }): string {
   if (message.deleted) return CHAT_DELETED_PLACEHOLDER;
   if (message.type === "system_event") {
-    return message.eventPayload?.title?.trim() || "Событие";
+    return "";
   }
   const text = message.body?.trim() ?? "";
   if (text) return text.length > 120 ? `${text.slice(0, 117)}…` : text;

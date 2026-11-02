@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import { LessonContentEditor } from "@/components/kafedra/lesson-content-editor";
 import { EmptyState } from "@/components/empty-state";
@@ -12,9 +13,12 @@ import {
   AttendanceStatusBadge,
   LessonStatusBadge,
 } from "@/components/status-badge";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
-import { formatInAppZone, startOfAppDay } from "@/lib/app-time";
+import { formatInAppZone, sameAppDay, startOfAppDay } from "@/lib/app-time";
 import { formatTime } from "@/lib/format";
+import { TrialPreviewDialog } from "@/components/schedule/trial-preview-dialog";
+import type { TrialLessonPublic } from "@/lib/trial-lessons";
 import {
   attendanceMarkFeedback,
   groupLessonsByAppDate,
@@ -25,7 +29,9 @@ import {
 } from "@/lib/kafedra-today";
 import { canCompleteAttendanceMark } from "@/lib/lesson-mark-requirements";
 import { useDemoStore } from "@/lib/store/demo-store";
+import { TariffBalanceNotice } from "@/components/tariff-balance-notice";
 import { currentAssignmentForStudent } from "@/lib/tariff-package";
+import { assignmentTariffAlert } from "@/lib/tariff-warnings";
 import type { Attendance, AttendanceStatus, Lesson } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +43,7 @@ export function KafedraDayHome() {
     upsertLesson,
     deleteLesson,
     setAttendance,
+    resetLessonConduct,
   } = useDemoStore();
   const teacherId = data.currentTeacherId;
   const teacher = data.teachers.find((t) => t.id === teacherId);
@@ -45,6 +52,10 @@ export function KafedraDayHome() {
 
   const [completeLesson, setCompleteLesson] = useState<Lesson | null>(null);
   const [editLesson, setEditLesson] = useState<Lesson | null>(null);
+  const [previewTrial, setPreviewTrial] = useState<TrialLessonPublic | null>(
+    null
+  );
+  const [resetLesson, setResetLesson] = useState<Lesson | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [markErrors, setMarkErrors] = useState<Record<string, string>>({});
   const [lastAttempt, setLastAttempt] = useState<
@@ -60,6 +71,17 @@ export function KafedraDayHome() {
   const overdueGroups = groupLessonsByAppDate(overdue);
 
   const slots = lessonsByStartTime(dayLessons);
+  const todayTrials = data.trialLessons
+    .filter(
+      (t) =>
+        t.teacherId === teacherId &&
+        t.lessonStatus !== "cancelled" &&
+        sameAppDay(t.startsAt, now)
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()
+    );
 
   const students = useMemo(
     () => studentsForTeacher(teacherId).filter((s) => s.status === "active"),
@@ -73,6 +95,7 @@ export function KafedraDayHome() {
     (a) =>
       a.teacherId === teacherId &&
       a.sourceKind !== "theory" &&
+      a.sourceKind !== "intensive" &&
       (a.status === "completed" || a.status === "overdue")
   ).length;
 
@@ -110,6 +133,20 @@ export function KafedraDayHome() {
             feedback.message ??
             "Не удалось сохранить отметку. Повторите действие.",
         }));
+      }
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function resetConduct(lesson: Lesson) {
+    const key = `reset:${lesson.id}`;
+    setBusyKey(key);
+    try {
+      const result = await resetLessonConduct(lesson.id);
+      if (result.ok) {
+        setResetLesson(null);
+        toast.success("Проведение занятия сброшено");
       }
     } finally {
       setBusyKey(null);
@@ -168,6 +205,31 @@ export function KafedraDayHome() {
         </div>
       ) : null}
 
+      {todayTrials.length > 0 ? (
+        <section className="panel space-y-2 p-4">
+          <h2 className="text-sm font-semibold">Пробные уроки сегодня</h2>
+          <ul className="divide-y divide-border/70">
+            {todayTrials.map((trial) => (
+              <li key={trial.id}>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-2 py-2 text-left hover:bg-muted/30"
+                  onClick={() => setPreviewTrial(trial)}
+                >
+                  <div>
+                    <p className="text-sm font-medium">{trial.prospectName}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatTime(trial.startsAt)}–{formatTime(trial.endsAt)} · пробный
+                    </p>
+                  </div>
+                  <span className="text-xs font-medium text-amber-800">Открыть</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       {overdue.length > 0 ? (
         <section className="space-y-3">
           <div className="rounded-xl border border-amber-400/50 bg-amber-50/70 px-4 py-3 dark:bg-amber-950/30">
@@ -202,6 +264,8 @@ export function KafedraDayHome() {
                     lastAttempt={lastAttempt}
                     onMark={mark}
                     onCancelTeacher={cancelByTeacher}
+                    onReset={() => setResetLesson(lesson)}
+                    resetBusy={busyKey === `reset:${lesson.id}`}
                     onEdit={() => setEditLesson(lesson)}
                     onTopics={() => setCompleteLesson(lesson)}
                   />
@@ -244,6 +308,8 @@ export function KafedraDayHome() {
                     lastAttempt={lastAttempt}
                     onMark={mark}
                     onCancelTeacher={cancelByTeacher}
+                    onReset={() => setResetLesson(lesson)}
+                    resetBusy={busyKey === `reset:${lesson.id}`}
                     onEdit={() => setEditLesson(lesson)}
                     onTopics={() => setCompleteLesson(lesson)}
                   />
@@ -279,6 +345,30 @@ export function KafedraDayHome() {
         onSave={(lesson) => upsertLesson(lesson)}
         onDelete={deleteLesson}
       />
+      <ConfirmDialog
+        open={!!resetLesson}
+        title="Сбросить проведение занятия?"
+        description="Отметки посещаемости, тема, домашнее задание этого занятия и связанные списания пакета и начисления будут отменены. Само занятие в расписании останется. Историю чата мы не стираем."
+        confirmLabel="Сбросить"
+        cancelLabel="Отмена"
+        busy={busyKey === `reset:${resetLesson?.id ?? ""}`}
+        busyLabel="Сброс…"
+        confirmVariant="destructive"
+        onOpenChange={(open) => {
+          if (!open && busyKey?.startsWith("reset:")) return;
+          if (!open) setResetLesson(null);
+        }}
+        onConfirm={() => {
+          if (resetLesson) void resetConduct(resetLesson);
+        }}
+      />
+      <TrialPreviewDialog
+        trial={previewTrial}
+        open={Boolean(previewTrial)}
+        onOpenChange={(open) => {
+          if (!open) setPreviewTrial(null);
+        }}
+      />
     </div>
   );
 }
@@ -296,6 +386,8 @@ function LessonCard({
   lastAttempt,
   onMark,
   onCancelTeacher,
+  onReset,
+  resetBusy,
   onEdit,
   onTopics,
 }: {
@@ -315,6 +407,8 @@ function LessonCard({
     status: AttendanceStatus
   ) => void;
   onCancelTeacher: (lesson: Lesson) => void;
+  onReset: () => void;
+  resetBusy: boolean;
   onEdit: () => void;
   onTopics: () => void;
 }) {
@@ -363,6 +457,16 @@ function LessonCard({
           <Button
             type="button"
             size="xs"
+            variant="outline"
+            className="h-6 rounded-full px-2 text-[0.7rem]"
+            disabled={resetBusy}
+            onClick={onReset}
+          >
+            Сбросить
+          </Button>
+          <Button
+            type="button"
+            size="xs"
             variant="ghost"
             className="h-6 rounded-full px-2 text-[0.7rem]"
             onClick={onEdit}
@@ -399,6 +503,9 @@ function LessonCard({
           const blockMark = waiting && !markReady.ok;
           const cancelBusy =
             busyKey === `cancel:${lesson.id}` || busyKey === key;
+          const debitBlocked =
+            !assignmentTariffAlert(asg).allowsDebit &&
+            !isFinalAttendanceStatus(att?.status);
           const errorText =
             markErrors[key] ?? markErrors[`cancel:${lesson.id}`];
           return (
@@ -416,6 +523,12 @@ function LessonCard({
                       ? ` · использовано ${asg.lessonsUsed}`
                       : ""}
                   </p>
+                  <TariffBalanceNotice
+                    remaining={asg?.lessonsRemaining}
+                    packageStatus={asg?.packageStatus}
+                    compact
+                    className="mt-1"
+                  />
                   {lesson.status === "cancelled" ? (
                     <p className="mt-1 text-xs font-medium text-sky-700 dark:text-sky-400">
                       Отменил преподаватель — занятие не списывается
@@ -438,7 +551,7 @@ function LessonCard({
                   <AttendanceControls
                     key={`${lesson.id}-${sid}-${att?.status ?? "none"}`}
                     current={att?.status}
-                    disabled={cancelBusy || blockMark}
+                    disabled={cancelBusy || blockMark || debitBlocked}
                     cancelDisabled={cancelBusy}
                     onMark={(status) => onMark(lesson, sid, status)}
                     onCancelTeacher={() => onCancelTeacher(lesson)}

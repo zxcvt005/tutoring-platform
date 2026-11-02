@@ -10,6 +10,18 @@ import {
   theoryStatusLabel,
   topicStatusLabel,
 } from "@/lib/format";
+import {
+  feedbackFillStatusLabel,
+  feedbackPressStatusLabel,
+  type FeedbackFillStatus,
+  type FeedbackPressStatus,
+} from "@/lib/monthly-feedback";
+import {
+  trialAgreementStatusLabel,
+  trialLessonStatusLabel,
+  type TrialAgreementStatus,
+  type TrialLessonStatus,
+} from "@/lib/trial-lessons";
 import type {
   AttendanceStatus,
   HomeworkAssignmentStatus,
@@ -68,6 +80,34 @@ export function TeacherStatusBadge({ status }: { status: TeacherStatus }) {
   const tone: Tone =
     status === "active" ? "success" : status === "inactive" ? "warn" : "muted";
   return <StatusPill label={teacherStatusLabel[status]} tone={tone} />;
+}
+
+export function TrialAgreementBadge({
+  status,
+}: {
+  status: TrialAgreementStatus;
+}) {
+  const tone: Tone =
+    status === "agreed"
+      ? "success"
+      : status === "not_agreed"
+        ? "danger"
+        : "neutral";
+  return <StatusPill label={trialAgreementStatusLabel[status]} tone={tone} />;
+}
+
+export function TrialLessonStatusBadge({
+  status,
+}: {
+  status: TrialLessonStatus;
+}) {
+  const tone: Tone =
+    status === "completed"
+      ? "success"
+      : status === "cancelled" || status === "no_show"
+        ? "danger"
+        : "warn";
+  return <StatusPill label={trialLessonStatusLabel[status]} tone={tone} />;
 }
 
 export function LessonStatusBadge({ status }: { status: LessonStatus }) {
@@ -161,4 +201,28 @@ export function HomeworkAssignmentStatusBadge({
       ? studentHomeworkStatusLabel[status]
       : homeworkAssignmentStatusLabel[status];
   return <StatusPill label={label} tone={tone} />;
+}
+
+export function FeedbackFillStatusBadge({
+  status,
+}: {
+  status: FeedbackFillStatus;
+}) {
+  const tone: Tone =
+    status === "submitted" ? "success" : status === "draft" ? "warn" : "muted";
+  return <StatusPill label={feedbackFillStatusLabel[status]} tone={tone} />;
+}
+
+export function FeedbackPressStatusBadge({
+  status,
+}: {
+  status: FeedbackPressStatus;
+}) {
+  const tone: Tone =
+    status === "processed"
+      ? "success"
+      : status === "in_progress"
+        ? "warn"
+        : "neutral";
+  return <StatusPill label={feedbackPressStatusLabel[status]} tone={tone} />;
 }

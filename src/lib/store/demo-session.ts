@@ -1,4 +1,72 @@
-export type CabinetRole = "director" | "teacher" | "student";
+import { roleFromCabinetPath, type MembershipRole } from "@/lib/auth/roles";
+
+export type CabinetRole = MembershipRole;
+
+/**
+ * Serializes overlapping demo boots so a stale apiDemoLogin cannot
+ * overwrite the cookie after the latest cabinet switch has finished.
+ */
+export function createSerialAsyncQueue() {
+  let tail: Promise<unknown> = Promise.resolve();
+  return function enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const run = tail.then(fn, fn);
+    tail = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  };
+}
+
+/** Tab-only: explicit «Выйти» must not be followed by silent demo auto-login. */
+export const DEMO_SKIP_AUTO_LOGIN_KEY = "tp.demo.skipAutoLogin";
+
+export function demoSessionStorage(): Pick<
+  Storage,
+  "getItem" | "setItem" | "removeItem"
+> | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function rememberDemoExplicitLogout(
+  storage: Pick<Storage, "setItem"> | null = demoSessionStorage()
+) {
+  storage?.setItem(DEMO_SKIP_AUTO_LOGIN_KEY, "1");
+}
+
+export function clearDemoSkipAutoLogin(
+  storage: Pick<Storage, "removeItem"> | null = demoSessionStorage()
+) {
+  storage?.removeItem(DEMO_SKIP_AUTO_LOGIN_KEY);
+}
+
+export function hasDemoSkipAutoLogin(
+  storage: Pick<Storage, "getItem"> | null = demoSessionStorage()
+): boolean {
+  return storage?.getItem(DEMO_SKIP_AUTO_LOGIN_KEY) === "1";
+}
+
+/** Public pages vs cabinet role — used so in-cabinet navigation does not re-login. */
+export function demoSessionBootKey(
+  pathname: string | null
+): "public" | MembershipRole {
+  if (
+    pathname === "/login" ||
+    pathname === "/setup" ||
+    pathname === "/" ||
+    pathname?.startsWith("/login") ||
+    pathname?.startsWith("/setup") ||
+    pathname?.startsWith("/register")
+  ) {
+    return "public";
+  }
+  return roleFromCabinetPath(pathname);
+}
 
 /**
  * Автологин в тестовый аккаунт по умолчанию — только если сессии нет.
@@ -7,8 +75,11 @@ export type CabinetRole = "director" | "teacher" | "student";
 export function shouldDefaultDemoLogin(input: {
   demoLoginEnabled: boolean;
   hasSession: boolean;
+  skipAutoLogin?: boolean;
 }): boolean {
-  return input.demoLoginEnabled && !input.hasSession;
+  return (
+    input.demoLoginEnabled && !input.hasSession && !input.skipAutoLogin
+  );
 }
 
 /**

@@ -37,9 +37,9 @@ export default function DirekciyaUsersPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
-  const [role, setRole] = useState<"director" | "teacher" | "student">(
-    "teacher"
-  );
+  const [role, setRole] = useState<
+    "director" | "teacher" | "student" | "press"
+  >("teacher");
 
   const reload = useCallback(async () => {
     try {
@@ -144,7 +144,12 @@ export default function DirekciyaUsersPage() {
           <Select
             value={role}
             onValueChange={(v) => {
-              if (v === "director" || v === "teacher" || v === "student") {
+              if (
+                v === "director" ||
+                v === "teacher" ||
+                v === "student" ||
+                v === "press"
+              ) {
                 setRole(v);
               }
             }}
@@ -152,8 +157,9 @@ export default function DirekciyaUsersPage() {
             <SelectTrigger>
               <SelectValue>
                 {(v) =>
-                  userRoleLabel[v as "director" | "teacher" | "student"] ??
-                  "Роль"
+                  userRoleLabel[
+                    v as "director" | "teacher" | "student" | "press"
+                  ] ?? "Роль"
                 }
               </SelectValue>
             </SelectTrigger>
@@ -161,6 +167,7 @@ export default function DirekciyaUsersPage() {
               <SelectItem value="director">Директор</SelectItem>
               <SelectItem value="teacher">Преподаватель</SelectItem>
               <SelectItem value="student">Ученик</SelectItem>
+              <SelectItem value="press">Пресса</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -186,15 +193,18 @@ export default function DirekciyaUsersPage() {
                 <td className="py-2 pr-3">{u.fullName}</td>
                 <td className="py-2 pr-3">{u.email}</td>
                 <td className="py-2 pr-3">
-                  {userRoleLabel[u.role as "director" | "teacher" | "student"] ??
-                    u.role}
+                  {userRoleLabel[
+                    u.role as "director" | "teacher" | "student" | "press"
+                  ] ?? u.role}
                 </td>
                 <td className="py-2 pr-3">
                   {userAccountStatusLabel[u.status] ?? u.status}
                 </td>
                 <td className="py-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    {u.role === "teacher" || u.role === "student" ? (
+                    {u.role === "teacher" ||
+                    u.role === "student" ||
+                    u.role === "press" ? (
                       <EnterCabinetButton userId={u.id} />
                     ) : null}
                     <Button

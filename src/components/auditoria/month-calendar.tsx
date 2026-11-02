@@ -134,11 +134,11 @@ export function AuditoriaMonthCalendar({
         </p>
       </div>
 
-      <div className="grid grid-cols-7 gap-px overflow-hidden rounded-2xl border border-border/70 bg-border/70">
+      <div className="grid grid-cols-7 gap-px overflow-hidden rounded-2xl border border-border/70 bg-border">
         {WEEKDAY_LABELS_RU.map((d) => (
           <div
             key={d}
-            className="bg-muted/40 px-1 py-2 text-center text-[0.65rem] font-semibold tracking-wide text-muted-foreground uppercase"
+            className="bg-muted px-1 py-2 text-center text-[0.65rem] font-semibold tracking-wide text-muted-foreground uppercase"
           >
             {d}
           </div>
@@ -152,9 +152,9 @@ export function AuditoriaMonthCalendar({
               onClick={() => setSelectedKey(cell.key)}
               className={cn(
                 "min-h-[4.5rem] bg-background p-1.5 text-left transition-colors sm:min-h-[5.5rem]",
-                !cell.inMonth && "bg-muted/20 text-muted-foreground/70",
+                !cell.inMonth && "bg-muted text-muted-foreground/70",
                 cell.isToday && "ring-1 ring-inset ring-[#3166F0]/60",
-                selectedKey === cell.key && "bg-[#3166F0]/8"
+                selectedKey === cell.key && "bg-accent"
               )}
             >
               <span
@@ -219,7 +219,7 @@ export function AuditoriaMonthCalendar({
       </p>
 
       {selectedKey ? (
-        <div className="rounded-2xl border border-border/70 p-3">
+        <div className="rounded-2xl border border-border/70 bg-auditoria-surface p-3">
           <p className="mb-2 text-sm font-medium">
             Занятия{" "}
             {formatInAppZone(fromAppDateTime(selectedKey, "12:00"), {
@@ -270,7 +270,7 @@ export function AuditoriaMonthCalendar({
         open={!!openLesson}
         onOpenChange={(o) => !o && setOpenLesson(null)}
       >
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="rounded-3xl border border-black/10 bg-auditoria-surface sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Занятие</DialogTitle>
           </DialogHeader>

@@ -317,4 +317,60 @@ describe("current tariff monitoring", () => {
     );
     expect(picked?.id).toBe("paid");
   });
+
+  it("marks remaining 0 and -1 as needing renewal and skips archived students", () => {
+    const now = fromAppWall(2026, 10, 22, 12, 0, 0);
+    const overview = buildCurrentTariffOverview({
+      students: [
+        { id: "s1", fullName: "Ноль" },
+        { id: "s2", fullName: "Долг" },
+        { id: "s3", fullName: "Архив", status: "archived" },
+        { id: "s4", fullName: "Запас" },
+      ],
+      assignments: [
+        asg({
+          id: "a1",
+          studentId: "s1",
+          tariffId: "t1",
+          endsAt: fromAppWall(2026, 12, 1).toISOString(),
+          lessonsRemaining: 0,
+          packageStatus: "exhausted",
+        }),
+        asg({
+          id: "a2",
+          studentId: "s2",
+          tariffId: "t1",
+          endsAt: fromAppWall(2026, 12, 1).toISOString(),
+          lessonsRemaining: -1,
+          packageStatus: "debt",
+        }),
+        asg({
+          id: "a3",
+          studentId: "s3",
+          tariffId: "t1",
+          endsAt: fromAppWall(2026, 12, 1).toISOString(),
+          lessonsRemaining: -1,
+          packageStatus: "debt",
+        }),
+        asg({
+          id: "a4",
+          studentId: "s4",
+          tariffId: "t1",
+          endsAt: fromAppWall(2026, 12, 1).toISOString(),
+          lessonsRemaining: 5,
+          packageStatus: "active",
+        }),
+      ],
+      now,
+    });
+    const zero = overview.attention.find((r) => r.studentId === "s1");
+    const debt = overview.attention.find((r) => r.studentId === "s2");
+    expect(zero?.needsRenewal).toBe(true);
+    expect(debt?.needsRenewal).toBe(true);
+    expect(overview.attention.some((r) => r.studentId === "s3")).toBe(false);
+    const ok = overview.byTariff
+      .flatMap((g) => g.students)
+      .find((r) => r.studentId === "s4");
+    expect(ok?.needsRenewal).toBe(false);
+  });
 });

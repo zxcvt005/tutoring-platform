@@ -1,105 +1,179 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import {
+  CalendarDays,
+  CheckCircle2,
+  ChevronDown,
+  Clock3,
+  LayoutGrid,
+} from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
-import { PageHeader } from "@/components/layout/page-header";
+import { HomeworkMotivationCard } from "@/components/homework/homework-motivation-card";
+import { HomeworkProgressRings } from "@/components/homework/homework-progress-rings";
+import { MockExamChartCard } from "@/components/mock-exams/mock-exam-chart-card";
+import { LearningLockedBanner } from "@/components/tariff-balance-notice";
+import { formatInAppZone } from "@/lib/app-time";
 import {
-  homeworkAssignedDateInfo,
-  isMissedHomework,
-  isNewHomework,
-  sortHomeworkForStudent,
+  homeworkBoardForStudent,
+  type HomeworkBoardFilter,
+  type HomeworkBoardKey,
 } from "@/lib/homework-list";
-import { studentHomeworkStats } from "@/lib/tests/attempts";
+import { isHomeworkHistoryView, studentLearningLock } from "@/lib/learning-lock";
+import { studentHomeworkRingStats } from "@/lib/tests/attempts";
 import { useDemoStore } from "@/lib/store/demo-store";
-import type { HomeworkAssignment, Lesson } from "@/lib/types";
+import type { HomeworkAssignment } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 function pctLabel(n: number | null | undefined) {
   return n == null ? "—" : `${n}%`;
 }
 
+function dueLabel(dueAt?: string) {
+  if (!dueAt) return "Без срока";
+  return `До ${formatInAppZone(dueAt, { day: "numeric", month: "short" })}`;
+}
+
+const filters: {
+  key: HomeworkBoardFilter;
+  label: string;
+  icon: typeof LayoutGrid;
+}[] = [
+  { key: "all", label: "Все задания", icon: LayoutGrid },
+  { key: "assigned", label: "Назначенные", icon: CalendarDays },
+  { key: "overdue", label: "Просроченные", icon: Clock3 },
+  { key: "completed", label: "Завершённые", icon: CheckCircle2 },
+];
+
 export function HomeworkWorkspace() {
   const { data, assignmentsForStudent, lessonsForStudent } = useDemoStore();
   const studentId = data.currentStudentId;
   const all = assignmentsForStudent(studentId);
   const lessons = lessonsForStudent(studentId);
+  const learning = studentLearningLock(data.tariffAssignments, studentId);
+  const [filter, setFilter] = useState<HomeworkBoardFilter>("all");
 
-  const stats = useMemo(() => studentHomeworkStats(all), [all]);
-  const { overdue, newItems, incomplete, completed } = useMemo(
-    () => sortHomeworkForStudent(all, lessons),
+  const stats = useMemo(() => studentHomeworkRingStats(all), [all]);
+  const board = useMemo(
+    () => homeworkBoardForStudent(all, lessons),
     [all, lessons]
   );
+  const counts: Record<HomeworkBoardFilter, number> = {
+    all: board.overdue.length + board.assigned.length + board.completed.length,
+    assigned: board.assigned.length,
+    overdue: board.overdue.length,
+    completed: board.completed.length,
+  };
+  const [open, setOpen] = useState(() => ({
+    overdue: true,
+    assigned: true,
+    completed: board.completed.length < 4,
+  }));
 
-  const sections = [
-    {
-      key: "overdue",
-      title: "Просроченные",
-      items: overdue,
-      accent: true as const,
-    },
-    { key: "new", title: "Новые", items: newItems, accent: false as const },
-    {
-      key: "incomplete",
-      title: "Незавершённые",
-      items: incomplete,
-      accent: false as const,
-    },
-    {
-      key: "completed",
-      title: "Завершённые",
-      items: completed,
-      accent: false as const,
-    },
-  ].filter((s) => s.items.length > 0);
+  const sections: {
+    key: HomeworkBoardKey;
+    title: string;
+    items: HomeworkAssignment[];
+  }[] = [
+    { key: "overdue", title: "Просроченные", items: board.overdue },
+    { key: "assigned", title: "Назначенные", items: board.assigned },
+    { key: "completed", title: "Завершённые", items: board.completed },
+  ];
+  const visible = sections.filter(
+    (section) => filter === "all" || filter === section.key
+  );
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        title="Домашние задания"
-        description="Назначенные тесты, попытки и результаты."
-      />
+    <div className="space-y-5">
+      {learning.locked ? (
+        <LearningLockedBanner message={learning.message} />
+      ) : null}
 
-      <div className="grid gap-2 sm:grid-cols-3">
-        <StatCard label="Выполнено" value={String(stats.completedCount)} />
-        <StatCard
-          label="Средний результат 1-й попытки"
-          value={pctLabel(stats.avgAttempt1)}
-        />
-        <StatCard
-          label="Средний результат 2-й попытки"
-          value={pctLabel(stats.avgAttempt2)}
+      <div className="grid items-start gap-4 lg:grid-cols-2">
+        <section className="auditoria-home-card flex flex-col">
+          <HomeworkProgressRings
+            embedded
+            stats={stats}
+            totalCount={counts.all}
+            className="w-full"
+          />
+          <HomeworkMotivationCard
+            percent={stats.finalPercent}
+            className="mt-8"
+          />
+        </section>
+        <MockExamChartCard
+          exams={data.mockExams}
+          results={data.mockExamResults}
+          studentId={studentId}
         />
       </div>
 
-      {all.length === 0 ? (
+      <div className="flex flex-wrap gap-2">
+        {filters.map((item) => {
+          const active = filter === item.key;
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              aria-pressed={active}
+              className={cn(
+                "inline-flex h-10 items-center gap-2 rounded-full border px-3 text-sm transition-colors motion-reduce:transition-none",
+                active
+                  ? "border-transparent bg-pastel-blue text-foreground"
+                  : "border-black/10 bg-auditoria-surface text-foreground/75 hover:bg-auditoria-surface",
+                !active && item.key === "overdue" && counts.overdue > 0
+                  ? "text-[#8a5a60]"
+                  : null,
+                !active && item.key === "completed" && counts.completed > 0
+                  ? "text-[#3f6b52]"
+                  : null
+              )}
+              onClick={() => setFilter(item.key)}
+            >
+              <Icon className="size-4" />
+              {item.label}
+              <span
+                className={cn(
+                  "min-w-5 rounded-full px-1.5 text-center text-xs tabular-nums",
+                  active ? "bg-auditoria-surface" : "bg-black/5"
+                )}
+              >
+                {counts[item.key]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {counts.all === 0 ? (
         <EmptyState
           title="Домашних заданий нет"
           description="Когда преподаватель назначит тест, он появится здесь."
         />
       ) : (
-        <div className="space-y-5">
-          {sections.map((section) => (
-            <section key={section.key} className="space-y-2">
-              {section.accent ? (
-                <div className="rounded-xl border border-destructive/40 bg-destructive/8 px-4 py-3">
-                  <p className="text-sm font-medium">{section.title}</p>
-                  <p className="text-xs text-muted-foreground">
-                    Не выполнено к следующему занятию — можно продолжить с
-                    сохранёнными ответами.
-                  </p>
-                </div>
-              ) : (
-                <h2 className="text-sm font-semibold">{section.title}</h2>
-              )}
-              <HomeworkList
-                items={section.items}
-                lessons={lessons}
-                homeworks={data.homeworks}
-                sections={data.topicSections}
-              />
-            </section>
+        <div className="space-y-4">
+          {visible.map((section) => (
+            <HomeworkSection
+              key={section.key}
+              title={section.title}
+              count={section.items.length}
+              tone={section.key}
+              open={open[section.key]}
+              onToggle={() =>
+                setOpen((prev) => ({
+                  ...prev,
+                  [section.key]: !prev[section.key],
+                }))
+              }
+              items={section.items}
+              homeworks={data.homeworks}
+              sections={data.topicSections}
+              locked={learning.locked}
+            />
           ))}
         </div>
       )}
@@ -107,63 +181,161 @@ export function HomeworkWorkspace() {
   );
 }
 
-function HomeworkList({
+function HomeworkSection({
+  title,
+  count,
+  tone,
+  open,
+  onToggle,
   items,
-  lessons,
   homeworks,
   sections,
+  locked,
 }: {
+  title: string;
+  count: number;
+  tone: HomeworkBoardKey;
+  open: boolean;
+  onToggle: () => void;
   items: HomeworkAssignment[];
-  lessons: Lesson[];
   homeworks: { id: string; title: string; sectionId?: string | null }[];
   sections: { id: string; title: string }[];
+  locked: boolean;
 }) {
   return (
-    <ul className="space-y-2">
-      {items.map((a) => {
-        const hw = homeworks.find((h) => h.id === a.homeworkId);
-        const title = a.testSnapshot?.title || hw?.title || "Тест";
-        const section = sections.find((s) => s.id === hw?.sectionId);
-        const assigned = homeworkAssignedDateInfo(a, lessons);
-        const missed = isMissedHomework(a);
-        const isNew = isNewHomework(a);
-        return (
-          <li key={a.id}>
-            <Link
-              href={`/auditoria/homework/${a.id}`}
-              className={cn(
-                "panel flex flex-col gap-1 p-3 hover:bg-muted/40 sm:flex-row sm:items-center sm:justify-between",
-                missed &&
-                  "border-destructive/50 bg-destructive/5 ring-1 ring-destructive/30",
-                isNew && "ring-1 ring-primary/40"
-              )}
-            >
-              <div className="min-w-0">
-                <p className="font-medium">{title}</p>
-                <p className="text-xs text-muted-foreground">
-                  {section?.title ? `${section.title} · ` : ""}
-                  {assigned.label}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs tabular-nums text-muted-foreground">
-                  1-я: {pctLabel(a.attempt1Percent)} · 2-я:{" "}
-                  {pctLabel(a.attempt2Percent)}
-                </span>
-              </div>
-            </Link>
-          </li>
-        );
-      })}
-    </ul>
+    <section
+      className={cn(
+        "overflow-hidden rounded-3xl border",
+        tone === "overdue" && "border-[#f2d7d9] bg-pastel-rose/45",
+        tone === "assigned" && "border-black/10 bg-auditoria-surface",
+        tone === "completed" && "border-[#d5eadc] bg-pastel-mint/40"
+      )}
+    >
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        <span className="font-display text-lg font-semibold tracking-tight">
+          {title}
+          <span className="text-muted-foreground"> · {count}</span>
+        </span>
+        <ChevronDown
+          className={cn(
+            "size-4 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none",
+            open && "rotate-180"
+          )}
+        />
+      </button>
+      <div
+        className={cn(
+          "grid transition-[grid-template-rows] duration-300 motion-reduce:transition-none",
+          open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        )}
+      >
+        <div className="overflow-hidden">
+          {count === 0 ? (
+            <p className="px-4 pb-4 text-sm text-muted-foreground">
+              В этой категории заданий нет.
+            </p>
+          ) : (
+            <ul className="space-y-2 px-3 pb-3">
+              {items.map((assignment) => (
+                <HomeworkRow
+                  key={assignment.id}
+                  assignment={assignment}
+                  tone={tone}
+                  homeworks={homeworks}
+                  sections={sections}
+                  locked={locked}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function HomeworkRow({
+  assignment,
+  tone,
+  homeworks,
+  sections,
+  locked,
+}: {
+  assignment: HomeworkAssignment;
+  tone: HomeworkBoardKey;
+  homeworks: { id: string; title: string; sectionId?: string | null }[];
+  sections: { id: string; title: string }[];
+  locked: boolean;
+}) {
+  const hw = homeworks.find((item) => item.id === assignment.homeworkId);
+  const title = assignment.testSnapshot?.title || hw?.title || "Тест";
+  const section = sections.find((item) => item.id === hw?.sectionId);
+  const allowOpen = !locked || isHomeworkHistoryView(assignment.status);
+  const action = tone === "completed" ? "Посмотреть" : "Перейти";
+  const meta =
+    tone === "overdue" ? (
+      <span className="inline-flex items-center gap-1 rounded-full bg-auditoria-surface px-2.5 py-1 text-xs text-[#8a5a60]">
+        <Clock3 className="size-3.5" />
+        Просрочено
+      </span>
+    ) : tone === "completed" ? (
+      <span className="inline-flex items-center gap-1 rounded-full bg-auditoria-surface px-2.5 py-1 text-xs text-[#3f6b52]">
+        <CheckCircle2 className="size-3.5" />
+        Выполнено
+      </span>
+    ) : (
+      <span className="inline-flex items-center gap-1 rounded-full bg-pastel-blue px-2.5 py-1 text-xs text-foreground/80">
+        <CalendarDays className="size-3.5" />
+        {dueLabel(assignment.dueAt)}
+      </span>
+    );
+
+  const body = (
+    <>
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-display text-base font-semibold tracking-tight">
+          {title}
+        </p>
+        <p className="truncate text-sm text-muted-foreground">
+          {section?.title ?? "Без раздела"}
+          {locked && !allowOpen ? " · недоступно до продления тарифа" : ""}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+        {meta}
+        <span className="text-sm tabular-nums text-muted-foreground">
+          1-я: {pctLabel(assignment.attempt1Percent)} · 2-я:{" "}
+          {pctLabel(assignment.attempt2Percent)}
+        </span>
+        <span className="inline-flex h-8 items-center rounded-full border border-black/10 bg-auditoria-surface px-3 text-sm">
+          {allowOpen ? `${action} →` : "Закрыто"}
+        </span>
+      </div>
+    </>
+  );
+
+  const className = cn(
+    "flex flex-col gap-3 rounded-2xl border px-3 py-3 transition-colors motion-reduce:transition-none sm:flex-row sm:items-center",
+    tone === "overdue" && "border-[#f2d7d9] bg-auditoria-surface hover:bg-auditoria-surface",
+    tone === "assigned" && "border-black/10 bg-auditoria-surface hover:bg-pastel-blue/40",
+    tone === "completed" && "border-[#d5eadc] bg-auditoria-surface hover:bg-auditoria-surface",
+    !allowOpen && "opacity-70"
+  );
+
   return (
-    <div className="panel px-3 py-2.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-display text-xl font-semibold tabular-nums">{value}</p>
-    </div>
+    <li>
+      {allowOpen ? (
+        <Link href={`/auditoria/homework/${assignment.id}`} className={className}>
+          {body}
+        </Link>
+      ) : (
+        <div className={className}>{body}</div>
+      )}
+    </li>
   );
 }

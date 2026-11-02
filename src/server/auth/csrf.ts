@@ -4,7 +4,8 @@ import {
   CSRF_COOKIE,
   CSRF_HEADER,
 } from "@/server/auth/constants";
-import { getAppBaseUrl, isProductionRuntime } from "@/server/auth/env";
+import { isProductionRuntime } from "@/server/auth/env";
+import { DEV_LAN_HTTPS_ORIGIN } from "@/lib/dev-lan-https";
 import { forbidden } from "@/server/errors";
 
 export { CSRF_COOKIE, CSRF_HEADER };
@@ -89,6 +90,8 @@ export function getAllowedOrigins(
       "http://localhost:43127",
       "http://127.0.0.1:3000",
       "http://localhost:3000",
+      // Точный origin HTTPS sidecar лаборатории. Не LAN-HTTP и не произвольные IP.
+      DEV_LAN_HTTPS_ORIGIN,
     ]) {
       set.add(local);
     }

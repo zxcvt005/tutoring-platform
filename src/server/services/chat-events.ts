@@ -20,6 +20,7 @@ export type ChatEventType =
   | "attendance_saved"
   | "lesson_cancelled"
   | "lesson_conducted"
+  | "lesson_restored"
   | "topic_set"
   | "homework_assigned"
   | "homework_completed"

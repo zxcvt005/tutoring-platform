@@ -24,7 +24,7 @@ export type CreateUserInput = {
   email: string;
   password: string;
   fullName: string;
-  role: "director" | "teacher" | "student";
+  role: "director" | "teacher" | "student" | "press";
   /** Привязать к существующему профилю преподавателя в org */
   teacherId?: string;
   /** Привязать к существующему профилю ученика в org */
