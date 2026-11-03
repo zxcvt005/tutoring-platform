@@ -18,7 +18,7 @@ import {
 } from "@/lib/teacher-slot";
 import { normalizeGrade } from "@/lib/student-contacts";
 import { restoredTestStatus } from "@/lib/tests/archive";
-import { computeMaxScore } from "@/lib/tests/helpers";
+import { computeMaxScore, questionHasBody } from "@/lib/tests/helpers";
 import type {
   AttendanceStatus,
   Homework,
@@ -1558,6 +1558,9 @@ export async function upsertHomework(
   const maxScore = computeMaxScore(questions) || hw.maxScore;
 
   const [existing] = await db.select().from(tests).where(eq(tests.id, id)).limit(1);
+  const previousQuestions = existing
+    ? ((existing.questionsPublic as TestQuestion[]) ?? [])
+    : [];
   const owner = await resolveLibraryOwner(db, ctx, hw, existing);
   const purpose = hw.purpose ?? existing?.purpose ?? "homework";
   const values = {
@@ -1589,6 +1592,21 @@ export async function upsertHomework(
       questionId,
       payload,
     });
+  }
+  const { collectOrphanQuestionImageKeys } = await import(
+    "@/server/services/test-question-image-service"
+  );
+  const { deleteTestQuestionObject } = await import(
+    "@/server/media/test-question-storage"
+  );
+  const orphanKeys = await collectOrphanQuestionImageKeys(
+    db,
+    ctx.organizationId,
+    previousQuestions,
+    questions
+  );
+  for (const key of orphanKeys) {
+    await deleteTestQuestionObject(key).catch(() => undefined);
   }
   return { id };
 }
@@ -1642,8 +1660,8 @@ export async function publishHomework(db: AppDb, ctx: AuthContext, id: string) {
   if (ctx.role === "teacher" && hw.teacherId !== ctx.teacherId) throw forbidden();
   const questions = (hw.questionsPublic as TestQuestion[]) ?? [];
   if (!questions.length) throw badRequest("Добавьте хотя бы одно задание");
-  if (questions.some((q) => !q.prompt?.trim())) {
-    throw badRequest("У всех заданий должен быть текст вопроса");
+  if (questions.some((q) => !questionHasBody(q))) {
+    throw badRequest("У каждого задания должен быть текст или изображение");
   }
   await db
     .update(tests)

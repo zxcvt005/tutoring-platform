@@ -198,6 +198,7 @@ function ReviewForm({
                   </p>
                 ) : null}
                 <QuestionFields
+                  testId={assignment.homeworkId}
                   question={q}
                   index={index}
                   mode="review"

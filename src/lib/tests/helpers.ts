@@ -1,4 +1,5 @@
 import { newId } from "@/lib/format";
+export { questionHasBody } from "@/lib/tests/question-image";
 import type {
   Homework,
   QuestionType,

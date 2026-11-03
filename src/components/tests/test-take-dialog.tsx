@@ -166,6 +166,7 @@ function TestTakeForm({
             return (
               <QuestionFields
                 key={q.id}
+                testId={assignment.homeworkId}
                 question={q}
                 index={index}
                 mode={canEdit ? "take" : "review"}

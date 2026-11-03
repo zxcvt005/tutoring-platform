@@ -7,7 +7,7 @@ import {
   type TheoryAllowedMime,
 } from "@/lib/theory/constants";
 import type { TheoryVideoProvider } from "@/lib/theory/video";
-import type { LibraryScope, MaterialOrigin } from "@/lib/types";
+import type { LibraryScope, MaterialOrigin, TestQuestion } from "@/lib/types";
 import type { AuthContext } from "@/server/authz/context";
 import { requireSchoolKnowledgeBase } from "@/server/authz/school-knowledge";
 import {
@@ -375,6 +375,16 @@ async function copyTestRecord(
     .limit(1);
   if (!source) throw badRequest("Тест для копирования не найден");
   const id = newId("hw");
+  const { copyTestQuestionImages } = await import(
+    "@/server/services/test-question-image-service"
+  );
+  const questionsPublic = await copyTestQuestionImages(
+    db,
+    owner.organizationId,
+    sourceId,
+    id,
+    cloneJson(source.questionsPublic ?? []) as TestQuestion[]
+  );
   await db.insert(tests).values({
     id,
     organizationId: owner.organizationId,
@@ -387,7 +397,7 @@ async function copyTestRecord(
     status: source.status,
     purpose: options?.purpose ?? source.purpose,
     maxScore: source.maxScore,
-    questionsPublic: cloneJson(source.questionsPublic ?? []),
+    questionsPublic,
     sortOrder: source.sortOrder,
     createdAt: new Date(),
     updatedAt: new Date(),

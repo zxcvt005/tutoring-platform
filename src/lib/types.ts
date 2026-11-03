@@ -59,6 +59,8 @@ export type TestQuestion = {
   type: QuestionType;
   prompt: string;
   maxScore: number;
+  /** Ключ объекта в S3/local (публичная часть вопроса). */
+  imageObjectKey?: string;
   explanation?: string;
   /** Варианты для single/multiple choice */
   options?: QuestionOption[];

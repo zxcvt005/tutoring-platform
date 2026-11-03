@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { newId } from "@/lib/format";
 import type { StudentAnswer, TestQuestion } from "@/lib/types";
+import { clipboardHasImageItem } from "@/lib/tests/question-image";
+import { QuestionImagePreview } from "@/components/tests/question-image-controls";
 import { cn } from "@/lib/utils";
 
 /** Режим: edit (учитель правит), take (ученик отвечает), review (просмотр с ключами) */
@@ -27,6 +29,8 @@ type Props = {
   onManualScoreChange?: (value: string) => void;
   teacherComment?: string;
   onTeacherCommentChange?: (value: string) => void;
+  /** ID теста для загрузки и показа изображений вопроса */
+  testId?: string;
 };
 
 export function QuestionFields({
@@ -41,6 +45,7 @@ export function QuestionFields({
   onManualScoreChange,
   teacherComment,
   onTeacherCommentChange,
+  testId,
 }: Props) {
   const editable = mode === "edit";
   const taking = mode === "take";
@@ -101,11 +106,42 @@ export function QuestionFields({
           <Textarea
             value={question.prompt}
             onChange={(e) => patchQ({ prompt: e.target.value })}
+            onPaste={(e) => {
+              if (!testId || !onQuestionChange) return;
+              const items = e.clipboardData?.items;
+              if (!clipboardHasImageItem(items)) return;
+              for (const item of items!) {
+                if (!item.type.startsWith("image/")) continue;
+                const file = item.getAsFile();
+                if (!file) continue;
+                e.preventDefault();
+                void (async () => {
+                  const { apiTestQuestionImageUpload } = await import(
+                    "@/lib/store/api-client"
+                  );
+                  const { toast } = await import("sonner");
+                  try {
+                    const result = await apiTestQuestionImageUpload(
+                      testId,
+                      question.id,
+                      file
+                    );
+                    patchQ({ imageObjectKey: result.imageObjectKey });
+                    toast.success("Изображение прикреплено");
+                  } catch (err) {
+                    toast.error(
+                      err instanceof Error ? err.message : "Не удалось вставить"
+                    );
+                  }
+                })();
+                return;
+              }
+            }}
             rows={2}
             placeholder="Вопрос или условие"
           />
         </div>
-      ) : (
+      ) : question.prompt?.trim() ? (
         <p
           className={
             taking
@@ -113,9 +149,23 @@ export function QuestionFields({
               : "text-sm leading-relaxed whitespace-pre-wrap"
           }
         >
-          {question.prompt || "Без текста"}
+          {question.prompt}
         </p>
-      )}
+      ) : null}
+
+      {testId ? (
+        <QuestionImagePreview
+          testId={testId}
+          questionId={question.id}
+          imageObjectKey={question.imageObjectKey}
+          editable={editable}
+          onImageChange={
+            editable
+              ? (imageObjectKey) => patchQ({ imageObjectKey })
+              : undefined
+          }
+        />
+      ) : null}
 
       {(question.type === "single_choice" ||
         question.type === "multiple_choice") && (

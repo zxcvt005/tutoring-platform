@@ -177,6 +177,42 @@ export async function apiBootstrap(): Promise<{
   return parseJson(res);
 }
 
+export async function apiTestQuestionImageUpload(
+  testId: string,
+  questionId: string,
+  file: File
+) {
+  const headers = await csrfOnlyHeaders();
+  const form = new FormData();
+  form.append("files", file);
+  const res = await fetch(
+    `/api/tests/${encodeURIComponent(testId)}/questions/${encodeURIComponent(questionId)}/image`,
+    {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: form,
+    }
+  );
+  return parseJson<{ imageObjectKey: string; mimeType: string }>(res);
+}
+
+export async function apiTestQuestionImageDelete(
+  testId: string,
+  questionId: string
+) {
+  const headers = await csrfOnlyHeaders();
+  const res = await fetch(
+    `/api/tests/${encodeURIComponent(testId)}/questions/${encodeURIComponent(questionId)}/image`,
+    {
+      method: "DELETE",
+      headers,
+      credentials: "include",
+    }
+  );
+  return parseJson<{ ok: true }>(res);
+}
+
 export async function apiTheoryUploadFile(materialId: string, file: File) {
   const headers = await csrfOnlyHeaders();
   const form = new FormData();

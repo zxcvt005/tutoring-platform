@@ -196,6 +196,7 @@ export function HomeworkTake({
         <TakeForm
           key={`${assignment.id}-attempt-${activeAttempt}`}
           assignmentId={assignment.id}
+          testId={assignment.homeworkId}
           workKind={assignment.sourceKind === "theory" ? "theory" : "homework"}
           title={title}
           questions={questions}
@@ -223,6 +224,7 @@ export function HomeworkTake({
         <TakeForm
           key={`${assignment.id}-results`}
           assignmentId={assignment.id}
+          testId={assignment.homeworkId}
           workKind={assignment.sourceKind === "theory" ? "theory" : "homework"}
           title={title}
           questions={questions}
@@ -328,6 +330,7 @@ function FirstAttemptSummary({
 
 function TakeForm({
   assignmentId,
+  testId,
   workKind,
   title,
   questions,
@@ -350,6 +353,7 @@ function TakeForm({
   backLabel = "Домашние задания",
 }: {
   assignmentId: string;
+  testId: string;
   workKind: "homework" | "theory";
   title: string;
   questions: TestQuestion[];
@@ -579,6 +583,7 @@ function TakeForm({
           {current ? (
             <div className="space-y-3">
               <QuestionFields
+                testId={testId}
                 question={current}
                 index={index}
                 mode="take"
@@ -689,6 +694,7 @@ function TakeForm({
                       : outcomeLabel[st]}
                   </p>
                   <QuestionFields
+                    testId={testId}
                     question={q}
                     index={i}
                     mode="review"

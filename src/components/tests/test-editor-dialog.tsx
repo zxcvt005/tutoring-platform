@@ -22,9 +22,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { newId } from "@/lib/format";
 import {
   computeMaxScore,
   createEmptyQuestion,
+  questionHasBody,
   questionTypeLabel,
 } from "@/lib/tests/helpers";
 import { useDemoStore } from "@/lib/store/demo-store";
@@ -132,7 +134,11 @@ function TestEditorForm({
 }) {
   const { upsertHomework, publishHomework, sectionsForTeacher } = useDemoStore();
   const sections = sectionsForTeacher(teacherId);
-  const [form, setForm] = useState<FormState>(() => toForm(homework ?? undefined));
+  const [form, setForm] = useState<FormState>(() => {
+    const next = toForm(homework ?? undefined);
+    if (!next.id) next.id = newId("hw");
+    return next;
+  });
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(
     sectionId ?? homework?.sectionId ?? null
   );
@@ -188,8 +194,8 @@ function TestEditorForm({
         toast.error("Добавьте хотя бы одно задание");
         return;
       }
-      if (form.questions.some((q) => !q.prompt.trim())) {
-        toast.error("У всех заданий должен быть текст вопроса");
+      if (form.questions.some((q) => !questionHasBody(q))) {
+        toast.error("У каждого задания должен быть текст или изображение");
         return;
       }
     }
@@ -368,6 +374,7 @@ function TestEditorForm({
                     </div>
                   </div>
                   <QuestionFields
+                    testId={form.id}
                     question={q}
                     index={index}
                     mode="edit"
@@ -427,6 +434,7 @@ function TestEditorForm({
             {form.questions.map((q, index) => (
               <QuestionFields
                 key={q.id}
+                testId={form.id}
                 question={q}
                 index={index}
                 mode="preview"
