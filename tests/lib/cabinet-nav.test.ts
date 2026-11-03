@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { cabinetHomeForRole } from "@/lib/auth/roles";
 import {
+  assistentNavItems,
   auditoriaNavItems,
   direkciyaNavItems,
   kafedraNavItems,
@@ -103,6 +104,13 @@ describe("cabinet navigation", () => {
   it("routes the press role to /pressa", () => {
     expect(cabinetHomeForRole("press")).toBe("/pressa");
     expect(cabinetHomeForRole("director")).toBe("/direkciya");
+  });
+
+  it("routes the assistant role to /assistent with knowledge-only nav", () => {
+    expect(cabinetHomeForRole("assistant")).toBe("/assistent");
+    expect(assistentNavItems).toEqual([
+      { href: "/assistent/knowledge", label: "База знаний" },
+    ]);
   });
 
   it("adds Pressa cabinet items without finance routes", () => {

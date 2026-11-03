@@ -1,6 +1,11 @@
 import { cn } from "@/lib/utils";
 
-type SidebarRole = "direkciya" | "kafedra" | "auditoria" | "pressa";
+type SidebarRole =
+  | "direkciya"
+  | "kafedra"
+  | "auditoria"
+  | "pressa"
+  | "assistent";
 
 /** Карточка «Кабинет / название / переключатель ролей» только не у Аудитории. */
 export function showSidebarCabinetChrome(role: SidebarRole) {

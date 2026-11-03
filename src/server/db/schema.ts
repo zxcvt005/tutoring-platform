@@ -69,7 +69,7 @@ export const memberships = pgTable("memberships", {
   index("memberships_user_idx").on(t.userId),
   check(
     "memberships_role_check",
-    sql`${t.role} in ('director', 'teacher', 'student', 'press')`
+    sql`${t.role} in ('director', 'teacher', 'student', 'press', 'assistant')`
   ),
 ]);
 

@@ -121,7 +121,7 @@ export async function assertDirectorSeesTeacher(
   ctx: AuthContext,
   teacherId: string
 ) {
-  requireRoles(ctx, ["director"]);
+  requireRoles(ctx, ["director", "assistant"]);
   const [row] = await db
     .select({ id: teachers.id })
     .from(teachers)

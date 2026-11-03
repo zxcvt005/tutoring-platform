@@ -32,5 +32,6 @@ export const config = {
     "/kafedra/:path*",
     "/auditoria/:path*",
     "/pressa/:path*",
+    "/assistent/:path*",
   ],
 };

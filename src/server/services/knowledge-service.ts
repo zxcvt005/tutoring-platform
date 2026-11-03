@@ -9,7 +9,7 @@ import {
 import type { TheoryVideoProvider } from "@/lib/theory/video";
 import type { LibraryScope, MaterialOrigin } from "@/lib/types";
 import type { AuthContext } from "@/server/authz/context";
-import { requireRoles } from "@/server/authz/require";
+import { requireSchoolKnowledgeBase } from "@/server/authz/school-knowledge";
 import {
   materialOrigins,
   organizations,
@@ -624,7 +624,7 @@ export async function transferKnowledge(
     phase?: "plan" | "commit";
   }
 ): Promise<TransferResult> {
-  requireRoles(ctx, ["director"]);
+  requireSchoolKnowledgeBase(ctx);
   const phase = input.phase === "plan" ? "plan" : "commit";
   const duplicatePolicy = input.duplicatePolicy === "create" ? "create" : "skip";
   const items = (input.items ?? []).filter((item) => item?.id && item?.kind);
@@ -779,7 +779,7 @@ export async function saveToSchoolLibrary(
   ctx: AuthContext,
   input: { kind: KnowledgeKind; id: string }
 ): Promise<SaveToSchoolResult> {
-  requireRoles(ctx, ["director"]);
+  requireSchoolKnowledgeBase(ctx);
   const kind = input.kind;
   const id = String(input.id ?? "").trim();
   if (!id) throw badRequest("Укажите материал");
@@ -857,7 +857,7 @@ function withOrigin(
 }
 
 export async function listKnowledgeBase(db: AppDb, ctx: AuthContext) {
-  requireRoles(ctx, ["director"]);
+  requireSchoolKnowledgeBase(ctx);
   const orgId = ctx.organizationId;
   const [theoryRows, testRows, topicRows, teacherRows, origins] = await Promise.all([
     db.select().from(theoryMaterials).where(eq(theoryMaterials.organizationId, orgId)),

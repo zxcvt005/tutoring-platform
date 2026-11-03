@@ -30,6 +30,7 @@ import type { CabinetRole } from "@/components/layout/cabinet-shell";
 import { BrandMark } from "@/components/landing/brand-mark";
 import { Button } from "@/components/ui/button";
 import {
+  assistentNavItems,
   auditoriaNavItems,
   direkciyaNavItems,
   kafedraNavItems,
@@ -85,6 +86,7 @@ const iconsByHref: Record<string, NavItem["icon"]> = {
   "/pressa/teachers": Users,
   "/pressa/trials": CalendarDays,
   "/pressa/analytics": ClipboardList,
+  "/assistent/knowledge": BookOpen,
 };
 
 function withIcons(
@@ -100,12 +102,14 @@ const direkciyaNav = withIcons(direkciyaNavItems);
 const kafedraNav = withIcons(kafedraNavItems);
 const auditoriaNav = withIcons(auditoriaNavItems);
 const pressaNav = withIcons(pressaNavItems);
+const assistentNav = withIcons(assistentNavItems);
 
 const titles: Record<CabinetRole, string> = {
   direkciya: "Дирекция",
   kafedra: "Кафедра",
   auditoria: "Аудитория",
   pressa: "Пресса",
+  assistent: "Ассистент",
 };
 
 const accentClass: Record<CabinetRole, string> = {
@@ -113,6 +117,7 @@ const accentClass: Record<CabinetRole, string> = {
   kafedra: "surface-sand",
   auditoria: "surface-mint",
   pressa: "surface-sky",
+  assistent: "surface-sky",
 };
 
 function withNavBase(href: string, navBasePath?: string): string {
@@ -141,7 +146,9 @@ function NavLinks({
         ? "/kafedra"
         : role === "pressa"
           ? "/pressa"
-          : navBasePath || "/auditoria";
+          : role === "assistent"
+            ? "/assistent/knowledge"
+            : navBasePath || "/auditoria";
 
   const auditoria = role === "auditoria";
 
@@ -221,7 +228,9 @@ export function AppSidebar({
         ? kafedraNav
         : role === "pressa"
           ? pressaNav
-          : auditoriaNav;
+          : role === "assistent"
+            ? assistentNav
+            : auditoriaNav;
   const title = titles[role];
   const showChrome = showSidebarCabinetChrome(role);
 

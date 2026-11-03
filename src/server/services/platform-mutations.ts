@@ -32,6 +32,10 @@ import type {
   Topic,
   TopicSection,
 } from "@/lib/types";
+import {
+  canManageSchoolKnowledgeBase,
+  isOrgKnowledgeStaff,
+} from "@/lib/auth/school-knowledge";
 import type { AuthContext } from "@/server/authz/context";
 import {
   assertDirectorSeesTeacher,
@@ -1264,7 +1268,12 @@ async function resolveLibraryOwner(
   } | null
 ): Promise<{ teacherId: string | null; libraryScope: LibraryScope }> {
   if (existing && existing.organizationId !== ctx.organizationId) throw forbidden();
-  if (existing?.libraryScope === "school" && ctx.role !== "director") throw forbidden();
+  if (
+    existing?.libraryScope === "school" &&
+    !canManageSchoolKnowledgeBase(ctx.role)
+  ) {
+    throw forbidden();
+  }
   const requested: LibraryScope =
     input.libraryScope === "school" ? "school" : "teacher";
   const scope: LibraryScope = existing
@@ -1274,7 +1283,7 @@ async function resolveLibraryOwner(
     throw badRequest("Нельзя сменить владельца материала");
   }
   if (scope === "school") {
-    if (ctx.role !== "director") throw forbidden();
+    if (!canManageSchoolKnowledgeBase(ctx.role)) throw forbidden();
     return { teacherId: null, libraryScope: "school" };
   }
   if (ctx.role === "teacher") {
@@ -1283,7 +1292,7 @@ async function resolveLibraryOwner(
     if (existing && existing.teacherId !== teacherId) throw forbidden();
     return { teacherId, libraryScope: "teacher" };
   }
-  requireRoles(ctx, ["director"]);
+  requireRoles(ctx, ["director", "assistant"]);
   const teacherId = existing?.teacherId ?? input.teacherId ?? "";
   if (!teacherId) throw badRequest("Укажите преподавателя");
   await assertDirectorSeesTeacher(db, ctx, teacherId);
@@ -1299,7 +1308,7 @@ export async function upsertTopicSection(
     sortOrder?: number;
   }
 ) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   if (ctx.role === "teacher") {
     const tid = await requireTeacherProfile(ctx);
     if (section.teacherId !== tid) throw forbidden();
@@ -1344,7 +1353,7 @@ export async function deleteTopicSection(
   id: string,
   moveTopicsTo: string | null
 ) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   const [section] = await db
     .select()
     .from(topicSections)
@@ -1378,7 +1387,7 @@ export async function reorderTopicSections(
   teacherId: string,
   orderedIds: string[]
 ) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   if (ctx.role === "teacher" && teacherId !== ctx.teacherId) throw forbidden();
   for (let i = 0; i < orderedIds.length; i++) {
     await db
@@ -1404,7 +1413,7 @@ export async function upsertTopic(
     sortOrder?: number;
   }
 ) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   const title = topic.title.trim();
   if (!title) throw badRequest("Укажите название темы");
   const description = (topic.description ?? "").trim();
@@ -1462,14 +1471,14 @@ export async function upsertTopic(
 }
 
 export async function deleteTopic(db: AppDb, ctx: AuthContext, id: string) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   const [row] = await db.select().from(topics).where(eq(topics.id, id)).limit(1);
   if (!row || row.organizationId !== ctx.organizationId) throw notFound();
   if (row.libraryScope === "school") {
-    if (ctx.role !== "director") throw forbidden();
+    if (!canManageSchoolKnowledgeBase(ctx.role)) throw forbidden();
   } else if (ctx.role === "teacher" && row.teacherId !== ctx.teacherId) {
     throw forbidden();
-  } else if (ctx.role === "director" && row.teacherId) {
+  } else if (isOrgKnowledgeStaff(ctx.role) && row.teacherId) {
     await assertDirectorSeesTeacher(db, ctx, row.teacherId);
   }
   await db
@@ -1490,7 +1499,7 @@ export async function moveTopic(
   sectionId: string | null,
   sortOrder?: number
 ) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   const [topic] = await db.select().from(topics).where(eq(topics.id, topicId)).limit(1);
   if (!topic || topic.organizationId !== ctx.organizationId) throw notFound();
   if (ctx.role === "teacher" && topic.teacherId !== ctx.teacherId) throw forbidden();
@@ -1520,7 +1529,7 @@ export async function reorderTopics(
   sectionId: string | null,
   orderedIds: string[]
 ) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   if (ctx.role === "teacher" && teacherId !== ctx.teacherId) throw forbidden();
   for (let i = 0; i < orderedIds.length; i++) {
     await db
@@ -1542,7 +1551,7 @@ export async function upsertHomework(
   ctx: AuthContext,
   hw: Omit<Homework, "id"> & { id?: string }
 ) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   const id = hw.id ?? newId("hw");
   const questions = (hw.questions ?? []) as TestQuestion[];
   const { publicQuestions, answerKeys } = splitQuestions(questions);
@@ -1585,14 +1594,14 @@ export async function upsertHomework(
 }
 
 export async function deleteHomework(db: AppDb, ctx: AuthContext, id: string) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   const [row] = await db.select().from(tests).where(eq(tests.id, id)).limit(1);
   if (!row || row.organizationId !== ctx.organizationId) throw notFound();
   if (row.libraryScope === "school") {
-    if (ctx.role !== "director") throw forbidden();
+    if (!canManageSchoolKnowledgeBase(ctx.role)) throw forbidden();
   } else if (ctx.role === "teacher" && row.teacherId !== ctx.teacherId) {
     throw forbidden();
-  } else if (ctx.role === "director" && row.teacherId) {
+  } else if (isOrgKnowledgeStaff(ctx.role) && row.teacherId) {
     await assertDirectorSeesTeacher(db, ctx, row.teacherId);
   }
   await db
@@ -1603,14 +1612,14 @@ export async function deleteHomework(db: AppDb, ctx: AuthContext, id: string) {
 }
 
 export async function restoreHomework(db: AppDb, ctx: AuthContext, id: string) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   const [row] = await db.select().from(tests).where(eq(tests.id, id)).limit(1);
   if (!row || row.organizationId !== ctx.organizationId) throw notFound();
   if (row.libraryScope === "school") {
-    if (ctx.role !== "director") throw forbidden();
+    if (!canManageSchoolKnowledgeBase(ctx.role)) throw forbidden();
   } else if (ctx.role === "teacher" && row.teacherId !== ctx.teacherId) {
     throw forbidden();
-  } else if (ctx.role === "director" && row.teacherId) {
+  } else if (isOrgKnowledgeStaff(ctx.role) && row.teacherId) {
     await assertDirectorSeesTeacher(db, ctx, row.teacherId);
   }
   if (row.status !== "archived") {
@@ -1627,7 +1636,7 @@ export async function restoreHomework(db: AppDb, ctx: AuthContext, id: string) {
 }
 
 export async function publishHomework(db: AppDb, ctx: AuthContext, id: string) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   const [hw] = await db.select().from(tests).where(eq(tests.id, id)).limit(1);
   if (!hw || hw.organizationId !== ctx.organizationId) throw notFound();
   if (ctx.role === "teacher" && hw.teacherId !== ctx.teacherId) throw forbidden();

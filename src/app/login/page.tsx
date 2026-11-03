@@ -36,7 +36,16 @@ function LoginForm() {
         if (me && (me as { role?: string }).role) {
           router.replace(
             cabinetHomeForRole(
-              (me as { role: "director" | "teacher" | "student" | "press" }).role
+              (
+                me as {
+                  role:
+                    | "director"
+                    | "teacher"
+                    | "student"
+                    | "press"
+                    | "assistant";
+                }
+              ).role
             )
           );
         }
@@ -54,7 +63,12 @@ function LoginForm() {
       const result = await apiLogin(email, password);
       const next = search.get("next");
       const home = cabinetHomeForRole(
-        result.role as "director" | "teacher" | "student" | "press"
+        result.role as
+          | "director"
+          | "teacher"
+          | "student"
+          | "press"
+          | "assistant"
       );
       if (
         next &&
@@ -63,7 +77,8 @@ function LoginForm() {
         ((result.role === "director" && next.startsWith("/direkciya")) ||
           (result.role === "teacher" && next.startsWith("/kafedra")) ||
           (result.role === "student" && next.startsWith("/auditoria")) ||
-          (result.role === "press" && next.startsWith("/pressa")))
+          (result.role === "press" && next.startsWith("/pressa")) ||
+          (result.role === "assistant" && next.startsWith("/assistent")))
       ) {
         router.replace(next);
       } else {

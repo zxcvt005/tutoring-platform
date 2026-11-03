@@ -13,6 +13,10 @@ import type {
   TheoryFile,
   TheoryStatus,
 } from "@/lib/types";
+import {
+  canManageSchoolKnowledgeBase,
+  isOrgKnowledgeStaff,
+} from "@/lib/auth/school-knowledge";
 import type { AuthContext } from "@/server/authz/context";
 import {
   assertTeacherOwnsStudent,
@@ -106,7 +110,7 @@ async function assertCanManage(
   row: typeof intensives.$inferSelect
 ) {
   if (row.libraryScope === "school") {
-    if (ctx.role !== "director") throw forbidden();
+    if (!canManageSchoolKnowledgeBase(ctx.role)) throw forbidden();
     return;
   }
   if (ctx.role === "teacher") {
@@ -114,7 +118,7 @@ async function assertCanManage(
     if (row.teacherId !== teacherId) throw forbidden();
     return;
   }
-  if (ctx.role === "director") return;
+  if (isOrgKnowledgeStaff(ctx.role)) return;
   throw forbidden();
 }
 
@@ -295,7 +299,7 @@ export async function upsertIntensive(
     publish?: boolean;
   }
 ) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   const id = input.id ?? newId("int");
   const [existing] = await db
     .select()
@@ -303,7 +307,12 @@ export async function upsertIntensive(
     .where(eq(intensives.id, id))
     .limit(1);
   if (existing && existing.organizationId !== ctx.organizationId) throw forbidden();
-  if (existing?.libraryScope === "school" && ctx.role !== "director") throw forbidden();
+  if (
+    existing?.libraryScope === "school" &&
+    !canManageSchoolKnowledgeBase(ctx.role)
+  ) {
+    throw forbidden();
+  }
 
   const requestedScope: LibraryScope =
     input.libraryScope === "school" ? "school" : "teacher";
@@ -316,7 +325,7 @@ export async function upsertIntensive(
 
   let teacherId: string | null = null;
   if (scope === "school") {
-    if (ctx.role !== "director") throw forbidden();
+    if (!canManageSchoolKnowledgeBase(ctx.role)) throw forbidden();
   } else if (ctx.role === "teacher") {
     teacherId = await requireTeacherProfile(ctx);
     if (existing && existing.teacherId !== teacherId) throw forbidden();
@@ -433,7 +442,7 @@ export async function upsertIntensive(
 }
 
 export async function deleteIntensive(db: AppDb, ctx: AuthContext, id: string) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   const row = await loadIntensive(db, ctx, id);
   await assertCanManage(db, ctx, row);
   const [assigned] = await db
@@ -578,7 +587,7 @@ export async function uploadIntensiveFile(
   intensiveId: string,
   file: { bytes: Buffer; filename: string }
 ) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   const row = await loadIntensive(db, ctx, intensiveId);
   await assertCanManage(db, ctx, row);
   let mime: string;
@@ -621,7 +630,7 @@ export async function removeIntensiveDraftFile(
   intensiveId: string,
   fileId: string
 ) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   const row = await loadIntensive(db, ctx, intensiveId);
   await assertCanManage(db, ctx, row);
   const [file] = await db
@@ -664,7 +673,7 @@ export async function getIntensiveFileForViewer(
     throw notFound("Файл не найден");
   }
   const material = await loadIntensive(db, ctx, file.intensiveId);
-  if (ctx.role === "director") {
+  if (isOrgKnowledgeStaff(ctx.role)) {
     await assertCanManage(db, ctx, material);
   } else if (ctx.role === "teacher") {
     const teacherId = await requireTeacherProfile(ctx);
@@ -745,7 +754,7 @@ export async function listIntensivesForBootstrap(
     assignmentRows = assignmentRows.filter((row) => row.studentId === ctx.studentId);
     const ids = new Set(assignmentRows.map((row) => row.intensiveId));
     materialRows = materialRows.filter((row) => ids.has(row.id));
-  } else if (ctx.role !== "director") {
+  } else if (!canManageSchoolKnowledgeBase(ctx.role)) {
     return { intensives: [], intensiveAssignments: [] };
   }
 
@@ -862,7 +871,7 @@ export async function listIntensivesForBootstrap(
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       files:
-        ctx.role === "teacher" || ctx.role === "director"
+        ctx.role === "teacher" || isOrgKnowledgeStaff(ctx.role)
           ? files.map(toFileView)
           : undefined,
     };

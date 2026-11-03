@@ -383,7 +383,12 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         if (meRole && meRole !== role) {
           router.replace(
             cabinetHomeForRole(
-              meRole as "director" | "teacher" | "student" | "press"
+              meRole as
+                | "director"
+                | "teacher"
+                | "student"
+                | "press"
+                | "assistant"
             )
           );
           return;

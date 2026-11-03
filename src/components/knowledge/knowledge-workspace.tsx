@@ -22,6 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { canManageSchoolKnowledgeBase } from "@/lib/auth/school-knowledge";
 import { formatDate } from "@/lib/format";
 import { isCatalogHomeworkPurpose } from "@/lib/homework/source-kind";
 import { apiPlatform } from "@/lib/store/api-client";
@@ -80,7 +81,11 @@ function originText(
   return `${from} «${origin.sourceTitle}»${author} · ${when}${gone}`;
 }
 
-export function KnowledgeWorkspace() {
+export function KnowledgeWorkspace({
+  knowledgeBasePath = "/direkciya/knowledge",
+}: {
+  knowledgeBasePath?: string;
+}) {
   const {
     auth,
     data,
@@ -169,10 +174,10 @@ export function KnowledgeWorkspace() {
     });
   }, [schoolItems, query, showArchived, sort]);
 
-  if (auth && auth.role !== "director") {
+  if (auth && !canManageSchoolKnowledgeBase(auth.role)) {
     return (
       <p className="text-sm text-muted-foreground">
-        База знаний доступна только дирекции.
+        База знаний доступна только дирекции и ассистентам.
       </p>
     );
   }
@@ -222,11 +227,11 @@ export function KnowledgeWorkspace() {
     setBlock("school");
     setKind(kind);
     if (kind === "intensive") {
-      router.push(`/direkciya/knowledge/intensives/${id}`);
+      router.push(`${knowledgeBasePath}/intensives/${id}`);
       return;
     }
     if (kind === "theory") {
-      router.push(`/direkciya/knowledge/theory/${id}`);
+      router.push(`${knowledgeBasePath}/theory/${id}`);
       return;
     }
     if (kind === "test") {
@@ -403,14 +408,14 @@ export function KnowledgeWorkspace() {
               )}
               {kind === "intensive" ? (
                 <Link
-                  href="/direkciya/knowledge/intensives/new"
+                  href={`${knowledgeBasePath}/intensives/new`}
                   className={buttonVariants()}
                 >
                   Новый интенсив
                 </Link>
               ) : kind === "theory" ? (
                 <Link
-                  href="/direkciya/knowledge/theory/new"
+                  href={`${knowledgeBasePath}/theory/new`}
                   className={buttonVariants()}
                 >
                   Новая теория
@@ -505,14 +510,14 @@ export function KnowledgeWorkspace() {
                         <div className="flex flex-wrap justify-end gap-1">
                           {kind === "intensive" ? (
                             <Link
-                              href={`/direkciya/knowledge/intensives/${item.id}`}
+                              href={`${knowledgeBasePath}/intensives/${item.id}`}
                               className={cn(buttonVariants({ size: "xs", variant: "outline" }))}
                             >
                               Открыть
                             </Link>
                           ) : kind === "theory" ? (
                             <Link
-                              href={`/direkciya/knowledge/theory/${item.id}`}
+                              href={`${knowledgeBasePath}/theory/${item.id}`}
                               className={cn(buttonVariants({ size: "xs", variant: "outline" }))}
                             >
                               Открыть
@@ -562,6 +567,7 @@ export function KnowledgeWorkspace() {
         </div>
       ) : (
         <TeacherDevelopments
+          knowledgeBasePath={knowledgeBasePath}
           teachers={data.teachers}
           theories={data.theories}
           tests={data.homeworks}
@@ -715,6 +721,7 @@ export function KnowledgeWorkspace() {
 }
 
 function TeacherDevelopments({
+  knowledgeBasePath,
   teachers,
   theories,
   tests,
@@ -731,6 +738,7 @@ function TeacherDevelopments({
   onSave,
   onDelete,
 }: {
+  knowledgeBasePath: string;
   teachers: { id: string; fullName: string; status: string }[];
   theories: TheoryMaterial[];
   tests: Homework[];
@@ -818,6 +826,7 @@ function TeacherDevelopments({
                       ))}
                     </div>
                     <MaterialGroups
+                      knowledgeBasePath={knowledgeBasePath}
                       kind={teacherKind}
                       theories={ownTheories}
                       tests={ownTests}
@@ -842,6 +851,7 @@ function TeacherDevelopments({
 }
 
 function MaterialGroups({
+  knowledgeBasePath,
   kind,
   theories,
   tests,
@@ -854,6 +864,7 @@ function MaterialGroups({
   onSave,
   onDelete,
 }: {
+  knowledgeBasePath: string;
   kind: Kind;
   theories: TheoryMaterial[];
   tests: Homework[];
@@ -891,6 +902,7 @@ function MaterialGroups({
   return (
     <div className="space-y-3">
       <Group
+        knowledgeBasePath={knowledgeBasePath}
         title="Собственные разработки"
         kind={kind}
         items={own}
@@ -901,6 +913,7 @@ function MaterialGroups({
         onDelete={onDelete}
       />
       <Group
+        knowledgeBasePath={knowledgeBasePath}
         title="Копии из базы знаний и других источников"
         kind={kind}
         items={copies}
@@ -915,6 +928,7 @@ function MaterialGroups({
 }
 
 function Group({
+  knowledgeBasePath,
   title,
   kind,
   items,
@@ -924,6 +938,7 @@ function Group({
   onSave,
   onDelete,
 }: {
+  knowledgeBasePath: string;
   title: string;
   kind: Kind;
   items: (TheoryMaterial | Homework | Topic)[];
@@ -958,7 +973,7 @@ function Group({
               <div className="flex gap-1">
                 {kind === "theory" ? (
                   <Link
-                    href={`/direkciya/knowledge/theory/${item.id}`}
+                    href={`${knowledgeBasePath}/theory/${item.id}`}
                     className={cn(buttonVariants({ size: "xs", variant: "outline" }))}
                   >
                     Открыть

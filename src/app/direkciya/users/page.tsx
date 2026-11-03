@@ -38,7 +38,7 @@ export default function DirekciyaUsersPage() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [role, setRole] = useState<
-    "director" | "teacher" | "student" | "press"
+    "director" | "teacher" | "student" | "press" | "assistant"
   >("teacher");
 
   const reload = useCallback(async () => {
@@ -148,7 +148,8 @@ export default function DirekciyaUsersPage() {
                 v === "director" ||
                 v === "teacher" ||
                 v === "student" ||
-                v === "press"
+                v === "press" ||
+                v === "assistant"
               ) {
                 setRole(v);
               }
@@ -158,7 +159,12 @@ export default function DirekciyaUsersPage() {
               <SelectValue>
                 {(v) =>
                   userRoleLabel[
-                    v as "director" | "teacher" | "student" | "press"
+                    v as
+                      | "director"
+                      | "teacher"
+                      | "student"
+                      | "press"
+                      | "assistant"
                   ] ?? "Роль"
                 }
               </SelectValue>
@@ -168,6 +174,7 @@ export default function DirekciyaUsersPage() {
               <SelectItem value="teacher">Преподаватель</SelectItem>
               <SelectItem value="student">Ученик</SelectItem>
               <SelectItem value="press">Пресса</SelectItem>
+              <SelectItem value="assistant">Ассистент</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -194,7 +201,12 @@ export default function DirekciyaUsersPage() {
                 <td className="py-2 pr-3">{u.email}</td>
                 <td className="py-2 pr-3">
                   {userRoleLabel[
-                    u.role as "director" | "teacher" | "student" | "press"
+                    u.role as
+                      | "director"
+                      | "teacher"
+                      | "student"
+                      | "press"
+                      | "assistant"
                   ] ?? u.role}
                 </td>
                 <td className="py-2 pr-3">

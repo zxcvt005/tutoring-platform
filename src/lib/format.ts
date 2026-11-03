@@ -67,13 +67,14 @@ export const studentArchiveReasonLabel: Record<StudentArchiveReason, string> = {
 };
 
 export const userRoleLabel: Record<
-  "director" | "teacher" | "student" | "press",
+  "director" | "teacher" | "student" | "press" | "assistant",
   string
 > = {
   director: "Директор",
   teacher: "Преподаватель",
   student: "Ученик",
   press: "Пресса",
+  assistant: "Ассистент",
 };
 
 export const userAccountStatusLabel: Record<string, string> = {

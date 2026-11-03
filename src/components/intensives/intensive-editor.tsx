@@ -26,6 +26,7 @@ import {
   intensiveTestRunStatus,
   moveIntensiveTest,
 } from "@/lib/intensives/progress";
+import { isOrgKnowledgeStaff } from "@/lib/auth/school-knowledge";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { parseVideoLink } from "@/lib/theory/video";
 import type { HomeworkAssignment, IntensiveAssignment } from "@/lib/types";
@@ -438,7 +439,7 @@ function AssignedTests({
   const [selected, setSelected] = useState<IntensiveAssignment | null>(null);
   const rows = data.intensiveAssignments.filter((item) => {
     if (item.intensiveId !== intensiveId) return false;
-    if (auth?.role === "director") return true;
+    if (auth?.role && isOrgKnowledgeStaff(auth.role)) return true;
     return item.teacherId === data.currentTeacherId;
   });
   const current = selected

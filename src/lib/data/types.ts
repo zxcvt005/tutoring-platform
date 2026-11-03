@@ -11,7 +11,7 @@ export type SessionUser = {
   email: string;
   fullName: string;
   organizationId: string;
-  role: "director" | "teacher" | "student" | "press";
+  role: "director" | "teacher" | "student" | "press" | "assistant";
   teacherId: string | null;
   studentId: string | null;
 };

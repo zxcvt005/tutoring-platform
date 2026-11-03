@@ -17,7 +17,12 @@ import type {
   TheoryMaterial,
   TheoryStatus,
 } from "@/lib/types";
+import {
+  canManageSchoolKnowledgeBase,
+  isOrgKnowledgeStaff,
+} from "@/lib/auth/school-knowledge";
 import type { AuthContext } from "@/server/authz/context";
+import { requireSchoolKnowledgeBase } from "@/server/authz/school-knowledge";
 import {
   assertDirectorSeesTeacher,
   assertTeacherOwnsStudent,
@@ -105,10 +110,10 @@ async function assertCanManageTheory(
   material: { teacherId: string | null; libraryScope: string }
 ) {
   if (material.libraryScope === "school" || material.teacherId == null) {
-    requireRoles(ctx, ["director"]);
+    requireSchoolKnowledgeBase(ctx);
     return;
   }
-  if (ctx.role === "director") {
+  if (isOrgKnowledgeStaff(ctx.role)) {
     await assertDirectorSeesTeacher(db, ctx, material.teacherId);
     return;
   }
@@ -271,7 +276,7 @@ export async function upsertTheory(
     libraryScope?: LibraryScope;
   }
 ) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   const id = input.id ?? newId("thm");
   const [existing] = await db
     .select()
@@ -279,7 +284,12 @@ export async function upsertTheory(
     .where(eq(theoryMaterials.id, id))
     .limit(1);
   if (existing && existing.organizationId !== ctx.organizationId) throw forbidden();
-  if (existing?.libraryScope === "school" && ctx.role !== "director") throw forbidden();
+  if (
+    existing?.libraryScope === "school" &&
+    !canManageSchoolKnowledgeBase(ctx.role)
+  ) {
+    throw forbidden();
+  }
 
   const requestedScope: LibraryScope =
     input.libraryScope === "school" ? "school" : "teacher";
@@ -292,7 +302,7 @@ export async function upsertTheory(
 
   let teacherId: string | null = null;
   if (scope === "school") {
-    if (ctx.role !== "director") throw forbidden();
+    if (!canManageSchoolKnowledgeBase(ctx.role)) throw forbidden();
     teacherId = null;
   } else if (ctx.role === "teacher") {
     teacherId = await requireTeacherProfile(ctx);
@@ -443,7 +453,7 @@ export async function upsertTheory(
 }
 
 export async function deleteTheory(db: AppDb, ctx: AuthContext, id: string) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   const material = await loadMaterialInOrg(db, ctx, id);
   await assertCanManageTheory(db, ctx, material);
   const [assigned] = await db
@@ -712,7 +722,7 @@ export async function uploadTheoryFile(
   materialId: string,
   file: { bytes: Buffer; filename: string }
 ) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   const material = await loadMaterialInOrg(db, ctx, materialId);
   await assertCanManageTheory(db, ctx, material);
   const mime = sniffTheoryFile(file.bytes, file.filename);
@@ -747,7 +757,7 @@ export async function removeTheoryDraftFile(
   materialId: string,
   fileId: string
 ) {
-  requireRoles(ctx, ["teacher", "director"]);
+  requireRoles(ctx, ["teacher", "director", "assistant"]);
   const material = await loadMaterialInOrg(db, ctx, materialId);
   await assertCanManageTheory(db, ctx, material);
   const [file] = await db
@@ -785,7 +795,7 @@ export async function getTheoryFileForViewer(
     throw notFound("Файл не найден");
   }
   const material = await loadMaterialInOrg(db, ctx, file.materialId);
-  if (ctx.role === "teacher" || ctx.role === "director") {
+  if (ctx.role === "teacher" || isOrgKnowledgeStaff(ctx.role)) {
     await assertCanManageTheory(db, ctx, material);
   } else if (ctx.role === "student") {
     if (!ctx.studentId) throw forbidden();
@@ -866,7 +876,7 @@ export async function listTheoryMaterialsForBootstrap(
     .select()
     .from(theoryMaterials)
     .where(eq(theoryMaterials.organizationId, ctx.organizationId));
-  if (ctx.role !== "director") {
+  if (!canManageSchoolKnowledgeBase(ctx.role)) {
     materialRows = materialRows.filter((m) => m.libraryScope !== "school");
   }
 
@@ -952,7 +962,7 @@ export async function listTheoryMaterialsForBootstrap(
       completedCount: completedCount.get(m.id) ?? 0,
       awaitingReviewCount: awaitingCount.get(m.id) ?? 0,
       files:
-        ctx.role === "teacher" || ctx.role === "director"
+        ctx.role === "teacher" || isOrgKnowledgeStaff(ctx.role)
           ? files.map(toFileView)
           : undefined,
     });

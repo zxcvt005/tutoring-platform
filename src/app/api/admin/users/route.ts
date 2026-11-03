@@ -17,7 +17,7 @@ const createSchema = z.object({
   email: z.string().email().max(320),
   password: z.string().min(10).max(200),
   fullName: z.string().min(1).max(200),
-  role: z.enum(["director", "teacher", "student", "press"]),
+  role: z.enum(["director", "teacher", "student", "press", "assistant"]),
   teacherId: z.string().optional(),
   studentId: z.string().optional(),
   phone: z.string().max(40).optional(),

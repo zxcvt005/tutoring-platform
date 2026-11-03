@@ -1,5 +1,6 @@
 import { eq, inArray } from "drizzle-orm";
 
+import { canManageSchoolKnowledgeBase } from "@/lib/auth/school-knowledge";
 import type { AuthContext } from "@/server/authz/context";
 import {
   assignmentAnswers,
@@ -115,7 +116,7 @@ export async function buildBootstrap(
     .from(tests)
     .where(eq(tests.organizationId, orgId));
 
-  if (ctx.role !== "director") {
+  if (!canManageSchoolKnowledgeBase(ctx.role)) {
     topicRows = topicRows.filter((row) => row.libraryScope !== "school");
     testRows = testRows.filter((row) => row.libraryScope !== "school");
   }
@@ -158,6 +159,12 @@ export async function buildBootstrap(
     sectionRows = sectionRows.filter((s) => s.teacherId === myTeacherId);
   }
 
+  if (ctx.role === "assistant") {
+    studentRows = [];
+    lessonRows = [];
+    assignmentRows = [];
+  }
+
   const lessonIds = lessonRows.map((l) => l.id);
   const lsAll =
     lessonIds.length > 0
@@ -181,7 +188,8 @@ export async function buildBootstrap(
           .where(inArray(attendances.lessonId, lessonIds))
       : [];
 
-  const includeKeys = ctx.role === "director" || ctx.role === "teacher";
+  const includeKeys =
+    canManageSchoolKnowledgeBase(ctx.role) || ctx.role === "teacher";
   const testIds = testRows.map((t) => t.id);
   const keyRows =
     includeKeys && testIds.length > 0
@@ -421,8 +429,14 @@ export async function buildBootstrap(
     email: t.email ?? undefined,
     startedAt: t.startedAt?.toISOString(),
     status: t.status as Teacher["status"],
-    lessonPrice: ctx.role === "press" ? undefined : n(t.lessonPrice),
-    teacherPay: ctx.role === "press" ? undefined : n(t.teacherPay),
+    lessonPrice:
+      ctx.role === "press" || ctx.role === "assistant"
+        ? undefined
+        : n(t.lessonPrice),
+    teacherPay:
+      ctx.role === "press" || ctx.role === "assistant"
+        ? undefined
+        : n(t.teacherPay),
     defaultDurationMin: t.defaultDurationMin ?? undefined,
     workDays: (t.workDays as number[]) ?? undefined,
     workIntervals: t.workIntervals ?? undefined,
@@ -659,7 +673,10 @@ export async function buildBootstrap(
   const { listTrialLessonsForSchedule } = await import(
     "@/server/services/trial-lessons-service"
   );
-  const trialLessonsForSchedule = await listTrialLessonsForSchedule(db, ctx);
+  const trialLessonsForSchedule =
+    ctx.role === "assistant"
+      ? []
+      : await listTrialLessonsForSchedule(db, ctx);
 
   const { listTheoryMaterialsForBootstrap } = await import(
     "@/server/services/theory-service"
@@ -712,8 +729,8 @@ export async function buildBootstrap(
       };
     });
 
-  return {
-    version: 6,
+  const payload = {
+    version: 6 as const,
     teachers: mappedTeachers,
     students: mappedStudents,
     lessons: mappedLessons,
@@ -738,6 +755,31 @@ export async function buildBootstrap(
     direkciyaTeacherId: currentTeacherId,
     currentStudentId,
   };
+
+  if (ctx.role === "assistant") {
+    return {
+      ...payload,
+      students: [],
+      lessons: [],
+      trialLessons: [],
+      attendances: [],
+      homeworkAssignments: [],
+      theoryAssignments: [],
+      intensiveAssignments: [],
+      mockExams: [],
+      mockExamResults: [],
+      tariffs: [],
+      tariffAssignments: [],
+      payments: [],
+      products: [],
+      availableProductSlugs: [],
+      currentTeacherId: "",
+      direkciyaTeacherId: "",
+      currentStudentId: "",
+    };
+  }
+
+  return payload;
 }
 
 /** Узкий хелпер — проверка org на сущности */

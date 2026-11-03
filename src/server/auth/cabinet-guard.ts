@@ -14,6 +14,7 @@ const CABINET_ROLE = {
   kafedra: "teacher",
   auditoria: "student",
   pressa: "press",
+  assistent: "assistant",
 } as const;
 
 export type CabinetKey = keyof typeof CABINET_ROLE;

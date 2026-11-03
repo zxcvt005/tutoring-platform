@@ -20,7 +20,7 @@ export type ImpersonationAuth = {
 
 export type BootstrapAuth = {
   userId: string;
-  role: "director" | "teacher" | "student" | "press";
+  role: "director" | "teacher" | "student" | "press" | "assistant";
   organizationId: string;
   teacherId: string | null;
   studentId: string | null;
@@ -33,7 +33,7 @@ export { cabinetHomeForRole };
 
 export type DemoAccountOption = {
   id: string;
-  role: "director" | "teacher" | "student" | "press";
+  role: "director" | "teacher" | "student" | "press" | "assistant";
   fullName: string;
   email: string;
   teacherId?: string;
@@ -104,7 +104,7 @@ export async function apiLogin(email: string, password: string) {
   const result = await parseJson<{
     user: { id: string; email: string; fullName: string };
     organizationId: string;
-    role: "director" | "teacher" | "student" | "press";
+    role: "director" | "teacher" | "student" | "press" | "assistant";
     teacherId: string | null;
     studentId: string | null;
   }>(res);
@@ -127,7 +127,7 @@ export async function apiLogout() {
 }
 
 export async function apiDemoLogin(input: {
-  role: "director" | "teacher" | "student" | "press";
+  role: "director" | "teacher" | "student" | "press" | "assistant";
   teacherId?: string;
   studentId?: string;
   email?: string;
@@ -142,7 +142,7 @@ export async function apiDemoLogin(input: {
   const result = await parseJson<{
     user: { id: string; email: string; fullName: string };
     organizationId: string;
-    role: "director" | "teacher" | "student" | "press";
+    role: "director" | "teacher" | "student" | "press" | "assistant";
     teacherId: string | null;
     studentId: string | null;
   }>(res);
@@ -259,7 +259,7 @@ export async function apiAdminCreateUser(body: {
   email: string;
   password: string;
   fullName: string;
-  role: "director" | "teacher" | "student" | "press";
+  role: "director" | "teacher" | "student" | "press" | "assistant";
   teacherId?: string;
   studentId?: string;
 }) {
@@ -347,7 +347,7 @@ export async function apiStartImpersonation(body: {
   });
   clearCsrfCache();
   return parseJson<{
-    role: "director" | "teacher" | "student" | "press";
+    role: "director" | "teacher" | "student" | "press" | "assistant";
     redirectTo: string;
     impersonation: ImpersonationAuth | null;
   }>(res);
@@ -551,7 +551,7 @@ export async function apiStopImpersonation() {
   });
   clearCsrfCache();
   return parseJson<{
-    role: "director" | "teacher" | "student" | "press";
+    role: "director" | "teacher" | "student" | "press" | "assistant";
     redirectTo: string;
   }>(res);
 }

@@ -28,13 +28,19 @@ import {
 import { useDemoStore } from "@/lib/store/demo-store";
 import { cn } from "@/lib/utils";
 
-export type CabinetRole = "direkciya" | "kafedra" | "auditoria" | "pressa";
+export type CabinetRole =
+  | "direkciya"
+  | "kafedra"
+  | "auditoria"
+  | "pressa"
+  | "assistent";
 
 const titles: Record<CabinetRole, string> = {
   direkciya: "Дирекция",
   kafedra: "Кафедра",
   auditoria: "Аудитория",
   pressa: "Пресса",
+  assistent: "Ассистент",
 };
 
 export function CabinetShell({
