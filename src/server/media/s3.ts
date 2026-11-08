@@ -1,5 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 
+import { serviceUnavailable } from "@/server/errors";
+
 export type S3Config = {
   endpoint: string;
   region: string;
@@ -111,39 +113,73 @@ async function signedFetch(
   });
 }
 
+async function signedFetchSafe(
+  config: S3Config,
+  method: "GET" | "PUT" | "DELETE",
+  key: string,
+  body?: Buffer,
+  extraHeaders?: Record<string, string>
+): Promise<Response> {
+  try {
+    return await signedFetch(config, method, key, body, extraHeaders);
+  } catch (err) {
+    console.error("S3 request failed", {
+      method,
+      // ключ без секретов; endpoint/host не логируем с credentials
+      keyPrefix: key.split("/")[0] ?? "",
+      name: err instanceof Error ? err.name : typeof err,
+    });
+    throw serviceUnavailable(
+      "Не удалось связаться с файловым хранилищем S3. Проверьте S3_ENDPOINT и доступность бакета."
+    );
+  }
+}
+
 export async function s3Put(
   config: S3Config,
   key: string,
   bytes: Buffer,
   contentType: string
 ): Promise<void> {
-  const res = await signedFetch(config, "PUT", key, bytes, {
+  const res = await signedFetchSafe(config, "PUT", key, bytes, {
     "content-type": contentType,
   });
   if (!res.ok) {
     await res.body?.cancel().catch(() => undefined);
-    throw new Error(`Не удалось записать файл в хранилище (${res.status}).`);
+    console.error("S3 PUT rejected", { status: res.status, keyPrefix: key.split("/")[0] ?? "" });
+    throw serviceUnavailable(
+      `Не удалось записать файл в хранилище (HTTP ${res.status}). Проверьте права ключа S3 на запись в бакет.`
+    );
   }
 }
 
 export async function s3Get(config: S3Config, key: string): Promise<Buffer> {
-  const res = await signedFetch(config, "GET", key);
+  const res = await signedFetchSafe(config, "GET", key);
   if (res.status === 404) {
     await res.body?.cancel().catch(() => undefined);
     throw Object.assign(new Error("not_found"), { code: "not_found" });
   }
   if (!res.ok) {
     await res.body?.cancel().catch(() => undefined);
-    throw new Error(`Не удалось прочитать файл из хранилища (${res.status}).`);
+    console.error("S3 GET rejected", { status: res.status, keyPrefix: key.split("/")[0] ?? "" });
+    throw serviceUnavailable(
+      `Не удалось прочитать файл из хранилища (HTTP ${res.status}).`
+    );
   }
   const buf = Buffer.from(await res.arrayBuffer());
   return buf;
 }
 
 export async function s3Delete(config: S3Config, key: string): Promise<void> {
-  const res = await signedFetch(config, "DELETE", key);
+  const res = await signedFetchSafe(config, "DELETE", key);
   if (!res.ok && res.status !== 404) {
     await res.body?.cancel().catch(() => undefined);
-    throw new Error(`Не удалось удалить файл из хранилища (${res.status}).`);
+    console.error("S3 DELETE rejected", {
+      status: res.status,
+      keyPrefix: key.split("/")[0] ?? "",
+    });
+    throw serviceUnavailable(
+      `Не удалось удалить файл из хранилища (HTTP ${res.status}).`
+    );
   }
 }

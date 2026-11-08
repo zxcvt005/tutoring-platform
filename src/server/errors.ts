@@ -24,10 +24,14 @@ const DB_UNAVAILABLE_CODES = new Set([
   "08006",
 ]);
 
-/** Ошибки недоступности PostgreSQL / сети к БД (без секретов в сообщении). */
-export function isDatabaseUnavailableError(err: unknown): boolean {
+function readErrorParts(err: unknown): {
+  code: string;
+  message: string;
+  cause?: unknown;
+  errors?: unknown[];
+} {
   if (!err || typeof err !== "object") {
-    return /ECONNREFUSED|ENOTFOUND|ECONNRESET|too many clients/i.test(String(err));
+    return { code: "", message: String(err) };
   }
   const anyErr = err as {
     code?: string;
@@ -36,8 +40,20 @@ export function isDatabaseUnavailableError(err: unknown): boolean {
     cause?: unknown;
     errors?: unknown[];
   };
-  const code = String(anyErr.code ?? anyErr.errno ?? "");
-  const message = String(anyErr.message ?? "");
+  return {
+    code: String(anyErr.code ?? anyErr.errno ?? ""),
+    message: String(anyErr.message ?? ""),
+    cause: anyErr.cause,
+    errors: Array.isArray(anyErr.errors) ? anyErr.errors : undefined,
+  };
+}
+
+/** Ошибки недоступности PostgreSQL / сети к БД (без секретов в сообщении). */
+export function isDatabaseUnavailableError(err: unknown): boolean {
+  if (!err || typeof err !== "object") {
+    return /ECONNREFUSED|ENOTFOUND|ECONNRESET|too many clients/i.test(String(err));
+  }
+  const { code, message, cause, errors } = readErrorParts(err);
   if (DB_UNAVAILABLE_CODES.has(code)) {
     return true;
   }
@@ -48,11 +64,51 @@ export function isDatabaseUnavailableError(err: unknown): boolean {
   ) {
     return true;
   }
-  if (anyErr.cause) return isDatabaseUnavailableError(anyErr.cause);
-  if (Array.isArray(anyErr.errors)) {
-    return anyErr.errors.some((e) => isDatabaseUnavailableError(e));
+  if (cause) return isDatabaseUnavailableError(cause);
+  if (errors) {
+    return errors.some((e) => isDatabaseUnavailableError(e));
   }
   return false;
+}
+
+/**
+ * PostgreSQL 42P01 — relation does not exist (миграция не применена).
+ * Без утечки connection string / секретов.
+ */
+export function isMissingRelationError(
+  err: unknown,
+  relationName?: string
+): boolean {
+  const walk = (value: unknown): boolean => {
+    if (!value) return false;
+    const { code, message, cause, errors } = readErrorParts(value);
+    const missing =
+      code === "42P01" ||
+      /relation ["'].+["'] does not exist/i.test(message) ||
+      /таблица .+ не существует/i.test(message);
+    if (!missing) {
+      if (cause && walk(cause)) return true;
+      if (errors?.some((e) => walk(e))) return true;
+      return false;
+    }
+    if (!relationName) return true;
+    return message.toLowerCase().includes(relationName.toLowerCase());
+  };
+  return walk(err);
+}
+
+export function missingRelation(
+  relationName: string,
+  migrationHint?: string
+) {
+  const hint = migrationHint
+    ? ` Примените миграцию ${migrationHint} (\`npm run db:migrate\`).`
+    : " Примените недостающие миграции (`npm run db:migrate`).";
+  return new ApiError(
+    503,
+    "service_unavailable",
+    `В базе нет таблицы «${relationName}».${hint}`
+  );
 }
 
 function logServerError(err: unknown) {
@@ -72,6 +128,10 @@ export function databaseUnavailable(
   message = "PostgreSQL недоступен или отклонил подключение. Если база уже запущена, перезапустите локальный сервер (npm run start:local:keep) и обновите страницу."
 ) {
   return new ApiError(503, "service_unavailable", message);
+}
+
+export function serviceUnavailable(message: string, details?: unknown) {
+  return new ApiError(503, "service_unavailable", message, details);
 }
 
 export class ApiError extends Error {
@@ -134,6 +194,22 @@ export function toErrorBody(err: unknown): { status: number; body: ErrorBody } {
           code: err.code,
           message: err.message,
           details: err.details,
+        },
+      },
+    };
+  }
+  if (isMissingRelationError(err, "account_invitations")) {
+    logServerError(err);
+    const mapped = missingRelation(
+      "account_invitations",
+      "0034_account_invitations"
+    );
+    return {
+      status: mapped.status,
+      body: {
+        error: {
+          code: mapped.code,
+          message: mapped.message,
         },
       },
     };

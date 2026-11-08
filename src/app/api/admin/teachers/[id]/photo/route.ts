@@ -4,7 +4,13 @@ import { assertMutatingRequest } from "@/server/auth/csrf";
 import { requireRoles } from "@/server/authz/require";
 import { getDb } from "@/server/db/runtime";
 import { teachers } from "@/server/db/schema";
-import { jsonError, jsonOk, notFound, validationError } from "@/server/errors";
+import {
+  ApiError,
+  jsonError,
+  jsonOk,
+  notFound,
+  validationError,
+} from "@/server/errors";
 import { requireAuth } from "@/server/http/request";
 import {
   deleteUpload,
@@ -40,6 +46,9 @@ export async function POST(
     if (!(file instanceof File)) {
       throw validationError("Прикрепите файл фотографии");
     }
+    if (file.size <= 0) {
+      throw validationError("Пустой файл фотографии");
+    }
     const buf = Buffer.from(await file.arrayBuffer());
     const key = await saveTeacherPhoto(
       id,
@@ -56,6 +65,12 @@ export async function POST(
 
     return jsonOk({ photoKey: key, photoUrl: publicMediaUrl(key) });
   } catch (err) {
+    // ApiError уже размечен; остальное логирует jsonError/toErrorBody.
+    if (!(err instanceof ApiError)) {
+      console.error("teacher photo upload failed", {
+        name: err instanceof Error ? err.name : typeof err,
+      });
+    }
     return jsonError(err);
   }
 }

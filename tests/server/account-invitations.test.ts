@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { and, eq, isNull } from "drizzle-orm";
 
+import { GET as getInvitations, POST as postInvitations } from "@/app/api/admin/invitations/route";
 import { cabinetHomeForRole } from "@/lib/auth/roles";
+import { CSRF_COOKIE, CSRF_HEADER } from "@/server/auth/constants";
+import { SESSION_COOKIE } from "@/server/auth/session";
 import { resolveAuthContext } from "@/server/authz/context";
 import { accountInvitations, teachers, users } from "@/server/db/schema";
 import { loginWithPassword } from "@/server/services/auth-service";
@@ -291,6 +294,74 @@ describe("account invitations", () => {
       .where(eq(users.email, "role.locked@example.com"))
       .limit(1);
     expect(memUser).toBeTruthy();
+  });
+
+  it("returns a migration hint when account_invitations table is missing", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await asDirector(t.db);
+    const profile = await upsertTeacher(t.db, director, {
+      fullName: "Missing Table Teacher",
+      subjects: [],
+      status: "active",
+    });
+
+    const { sql } = await import("drizzle-orm");
+    await t.db.execute(sql`drop table if exists account_invitations cascade`);
+
+    const { session } = await loginWithPassword(t.db, {
+      email: "director@demo.local",
+      password: DEMO_PASSWORD,
+    });
+    const res = await getInvitations(
+      new Request(
+        `http://localhost/api/admin/invitations?teacherId=${encodeURIComponent(profile.id)}`,
+        {
+          headers: {
+            cookie: `${SESSION_COOKIE}=${session.rawToken}`,
+          },
+        }
+      )
+    );
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: { message: string; code: string } };
+    expect(body.error.code).toBe("service_unavailable");
+    expect(body.error.message).toMatch(/0034_account_invitations/);
+    expect(body.error.message).not.toBe("Внутренняя ошибка сервера");
+  });
+
+  it("creates an invitation through the admin HTTP API", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await asDirector(t.db);
+    const profile = await upsertTeacher(t.db, director, {
+      fullName: "Http Invite Teacher",
+      subjects: [],
+      status: "active",
+    });
+    const { session } = await loginWithPassword(t.db, {
+      email: "director@demo.local",
+      password: DEMO_PASSWORD,
+    });
+    const res = await postInvitations(
+      new Request("http://localhost/api/admin/invitations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: `${SESSION_COOKIE}=${session.rawToken}; ${CSRF_COOKIE}=csrf-test`,
+          [CSRF_HEADER]: "csrf-test",
+          origin: "http://localhost:43127",
+        },
+        body: JSON.stringify({ teacherId: profile.id }),
+      })
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      accessStatus: string;
+      inviteUrl: string;
+    };
+    expect(body.accessStatus).toBe("invited");
+    expect(body.inviteUrl).toMatch(/\/invite\//);
   });
 
   it("handles parallel accept of the same invite", async () => {
