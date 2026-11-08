@@ -11,6 +11,7 @@ import {
   type InvitationAccessStatus,
 } from "@/lib/store/api-client";
 import { formatDateTime } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 const STATUS_LABEL: Record<InvitationAccessStatus, string> = {
   unregistered: "Не зарегистрирован",
@@ -30,16 +31,31 @@ export function ProfileAccessPanel({
   teacherId,
   studentId,
   accountEmail,
+  hasAccount,
+  className,
 }: {
   teacherId?: string;
   studentId?: string;
   /** Из bootstrap, пока статус не загрузился */
   accountEmail?: string | null;
+  /** true, если профиль уже связан с users.id */
+  hasAccount?: boolean;
+  className?: string;
 }) {
-  const [data, setData] = useState<InvitationAccessPayload | null>(null);
+  const bootstrapActivated = Boolean(hasAccount || accountEmail);
+  const [data, setData] = useState<InvitationAccessPayload | null>(
+    bootstrapActivated
+      ? {
+          accessStatus: "activated",
+          accountEmail: accountEmail ?? null,
+          invitation: null,
+        }
+      : null
+  );
   const [lastInviteUrl, setLastInviteUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(!bootstrapActivated);
   const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
@@ -51,9 +67,23 @@ export function ProfileAccessPanel({
         setLastInviteUrl(null);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось загрузить доступ");
+      setError(
+        err instanceof Error ? err.message : "Не удалось загрузить доступ"
+      );
+      // При ошибке API всё равно показываем действие по bootstrap-состоянию.
+      if (!bootstrapActivated) {
+        setData((prev) =>
+          prev ?? {
+            accessStatus: "unregistered",
+            accountEmail: null,
+            invitation: null,
+          }
+        );
+      }
+    } finally {
+      setLoading(false);
     }
-  }, [teacherId, studentId]);
+  }, [teacherId, studentId, bootstrapActivated]);
 
   useEffect(() => {
     void load();
@@ -102,27 +132,47 @@ export function ProfileAccessPanel({
     }
   }
 
-  const status = data?.accessStatus;
+  const status: InvitationAccessStatus =
+    data?.accessStatus ??
+    (bootstrapActivated ? "activated" : "unregistered");
   const email =
     data?.accountEmail ??
     (status === "activated" ? accountEmail : null) ??
     null;
 
   return (
-    <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-4">
-      <div>
+    <section
+      className={cn(
+        "space-y-3 rounded-2xl border border-border bg-background p-4 shadow-sm",
+        className
+      )}
+      aria-label="Доступ в кабинет"
+    >
+      <div className="space-y-1">
         <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
           Доступ в кабинет
         </p>
-        <p className="mt-1 text-sm font-medium">
-          {status ? STATUS_LABEL[status] : "Загрузка…"}
+        <p className="text-sm font-semibold">
+          {STATUS_LABEL[status]}
+          {loading && status === "unregistered" ? (
+            <span className="ml-2 font-normal text-muted-foreground">
+              · обновление…
+            </span>
+          ) : null}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {status === "activated"
+            ? "Пользователь может войти в свой кабинет."
+            : status === "invited"
+              ? "Передайте персональную ссылку. Она действует 7 дней и только один раз."
+              : "Создайте одноразовую ссылку, чтобы человек зарегистрировал вход сам."}
         </p>
       </div>
 
       {email ? (
         <p className="text-sm">
           <span className="text-muted-foreground">Почта входа: </span>
-          {email}
+          <span className="font-medium">{email}</span>
         </p>
       ) : null}
 
@@ -134,11 +184,11 @@ export function ProfileAccessPanel({
 
       {lastInviteUrl ? (
         <div className="space-y-2">
-          <p className="break-all rounded-lg bg-background/80 px-3 py-2 font-mono text-xs">
+          <p className="break-all rounded-xl border border-dashed border-border bg-muted/30 px-3 py-2 font-mono text-xs leading-relaxed">
             {lastInviteUrl}
           </p>
           <p className="text-xs text-muted-foreground">
-            Ссылка показывается один раз. Сохраните её до передачи.
+            Ссылка показывается один раз. Скопируйте её до закрытия страницы.
           </p>
         </div>
       ) : null}
@@ -149,45 +199,47 @@ export function ProfileAccessPanel({
         </p>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        {status === "unregistered" || status === "invited" ? (
+      {status !== "activated" ? (
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <Button
             type="button"
             size="sm"
-            className="rounded-xl"
+            className="h-10 w-full rounded-xl sm:w-auto"
             disabled={busy}
             onClick={() => void createInvite()}
           >
-            {status === "invited"
-              ? "Создать новую ссылку"
-              : "Создать ссылку-приглашение"}
+            {busy
+              ? "Создание…"
+              : status === "invited"
+                ? "Создать новую ссылку"
+                : "Создать ссылку-приглашение"}
           </Button>
-        ) : null}
-        {lastInviteUrl ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="rounded-xl"
-            disabled={busy}
-            onClick={() => void copyLink()}
-          >
-            {copied ? "Скопировано" : "Копировать ссылку"}
-          </Button>
-        ) : null}
-        {status === "invited" && data?.invitation ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="rounded-xl"
-            disabled={busy}
-            onClick={() => void revokeInvite()}
-          >
-            Отозвать
-          </Button>
-        ) : null}
-      </div>
-    </div>
+          {lastInviteUrl ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+              disabled={busy}
+              onClick={() => void copyLink()}
+            >
+              {copied ? "Скопировано" : "Копировать ссылку"}
+            </Button>
+          ) : null}
+          {status === "invited" && data?.invitation ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+              disabled={busy}
+              onClick={() => void revokeInvite()}
+            >
+              Отозвать
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
   );
 }

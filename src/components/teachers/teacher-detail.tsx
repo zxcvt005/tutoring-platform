@@ -110,6 +110,12 @@ export function TeacherDetail({ teacherId }: { teacherId: string }) {
         }
       />
 
+      <ProfileAccessPanel
+        teacherId={teacher.id}
+        accountEmail={teacher.accountEmail}
+        hasAccount={Boolean(teacher.userId)}
+      />
+
       <section className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <div className="panel space-y-4 p-5">
           <div className="flex items-center gap-3">
@@ -183,10 +189,6 @@ export function TeacherDetail({ teacherId }: { teacherId: string }) {
               {teacher.adminNotes}
             </p>
           ) : null}
-          <ProfileAccessPanel
-            teacherId={teacher.id}
-            accountEmail={teacher.accountEmail}
-          />
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">

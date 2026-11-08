@@ -128,6 +128,14 @@ export function StudentDetail({
         }
       />
 
+      {mode === "direkciya" ? (
+        <ProfileAccessPanel
+          studentId={student.id}
+          accountEmail={student.accountEmail}
+          hasAccount={Boolean(student.userId)}
+        />
+      ) : null}
+
       <section className="grid gap-4 lg:grid-cols-3">
         <div className="panel space-y-3 p-5 lg:col-span-1">
           <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
@@ -212,10 +220,6 @@ export function StudentDetail({
                     </p>
                   </div>
                 ) : null}
-                <ProfileAccessPanel
-                  studentId={student.id}
-                  accountEmail={student.accountEmail}
-                />
               </>
             ) : null}
             {mode === "direkciya" && student.notes ? (

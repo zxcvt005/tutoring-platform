@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { EnterCabinetButton } from "@/components/admin/enter-cabinet-button";
+import { ProfileAccessPanel } from "@/components/admin/profile-access-panel";
 import { EmptyState } from "@/components/empty-state";
 import { FilterBar } from "@/components/layout/filter-bar";
 import { PageHeader } from "@/components/layout/page-header";
@@ -944,6 +945,17 @@ export function StudentsByTeacher({
                 placeholder="Внутренние заметки администрации"
               />
             </div>
+            {form.id && mode === "direkciya" ? (
+              <ProfileAccessPanel
+                studentId={form.id}
+                accountEmail={
+                  data.students.find((s) => s.id === form.id)?.accountEmail
+                }
+                hasAccount={Boolean(
+                  data.students.find((s) => s.id === form.id)?.userId
+                )}
+              />
+            ) : null}
           </div>
           <DialogFooter className="gap-2 sm:justify-between">
             {form.id && mode === "direkciya" ? (

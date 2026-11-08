@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { EnterCabinetButton } from "@/components/admin/enter-cabinet-button";
+import { ProfileAccessPanel } from "@/components/admin/profile-access-panel";
 import { EmptyState } from "@/components/empty-state";
 import { FilterBar } from "@/components/layout/filter-bar";
 import { PageHeader } from "@/components/layout/page-header";
@@ -534,6 +535,19 @@ export function TeachersWorkspace() {
                 }
               />
             </div>
+            {form.id ? (
+              <div className="sm:col-span-2">
+                <ProfileAccessPanel
+                  teacherId={form.id}
+                  accountEmail={
+                    data.teachers.find((t) => t.id === form.id)?.accountEmail
+                  }
+                  hasAccount={Boolean(
+                    data.teachers.find((t) => t.id === form.id)?.userId
+                  )}
+                />
+              </div>
+            ) : null}
           </div>
           <DialogFooter className="gap-2 sm:justify-between">
             {form.id ? (
