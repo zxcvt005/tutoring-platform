@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { notFound } from "next/navigation";
 
 import { EnterCabinetButton } from "@/components/admin/enter-cabinet-button";
+import { ProfileAccessPanel } from "@/components/admin/profile-access-panel";
 import { PageHeader } from "@/components/layout/page-header";
 import {
   HomeworkAssignmentStatusBadge,
@@ -211,6 +212,10 @@ export function StudentDetail({
                     </p>
                   </div>
                 ) : null}
+                <ProfileAccessPanel
+                  studentId={student.id}
+                  accountEmail={student.accountEmail}
+                />
               </>
             ) : null}
             {mode === "direkciya" && student.notes ? (

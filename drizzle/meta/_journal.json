@@ -239,6 +239,13 @@
       "when": 1795600000000,
       "tag": "0033_error_practice_bank",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795700000000,
+      "tag": "0034_account_invitations",
+      "breakpoints": true
     }
   ]
 }

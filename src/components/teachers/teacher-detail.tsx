@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { EnterCabinetButton } from "@/components/admin/enter-cabinet-button";
+import { ProfileAccessPanel } from "@/components/admin/profile-access-panel";
 import { PageHeader } from "@/components/layout/page-header";
 import {
   HomeworkAssignmentStatusBadge,
@@ -182,6 +183,10 @@ export function TeacherDetail({ teacherId }: { teacherId: string }) {
               {teacher.adminNotes}
             </p>
           ) : null}
+          <ProfileAccessPanel
+            teacherId={teacher.id}
+            accountEmail={teacher.accountEmail}
+          />
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">

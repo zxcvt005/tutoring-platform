@@ -185,6 +185,59 @@ export const students = pgTable("students", {
   ),
 ]);
 
+/**
+ * Одноразовые приглашения в кабинет для заранее созданных профилей.
+ * В URL — сырой токен; в БД — sha256(token). Роль фиксируется kind, не клиентом.
+ */
+export const accountInvitations = pgTable(
+  "account_invitations",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** teacher | student — определяет membership.role при принятии */
+    kind: text("kind").notNull(),
+    teacherId: text("teacher_id").references(() => teachers.id, {
+      onDelete: "cascade",
+    }),
+    studentId: text("student_id").references(() => students.id, {
+      onDelete: "cascade",
+    }),
+    tokenHash: text("token_hash").notNull(),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    usedByUserId: text("used_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("account_invitations_token_hash_uidx").on(t.tokenHash),
+    index("account_invitations_org_idx").on(t.organizationId),
+    index("account_invitations_teacher_idx").on(t.teacherId),
+    index("account_invitations_student_idx").on(t.studentId),
+    check(
+      "account_invitations_kind_check",
+      sql`${t.kind} in ('teacher', 'student')`
+    ),
+    check(
+      "account_invitations_target_check",
+      sql`(
+        (${t.kind} = 'teacher' and ${t.teacherId} is not null and ${t.studentId} is null)
+        or
+        (${t.kind} = 'student' and ${t.studentId} is not null and ${t.teacherId} is null)
+      )`
+    ),
+  ]
+);
+
 export const topicSections = pgTable("topic_sections", {
   id: text("id").primaryKey(),
   organizationId: text("organization_id")
@@ -2592,6 +2645,7 @@ export const schema = {
   sessions,
   teachers,
   students,
+  accountInvitations,
   topicSections,
   topics,
   tests,

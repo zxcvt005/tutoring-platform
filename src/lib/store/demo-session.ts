@@ -62,6 +62,7 @@ export function demoSessionBootKey(
     pathname?.startsWith("/login") ||
     pathname?.startsWith("/setup") ||
     pathname?.startsWith("/register") ||
+    pathname?.startsWith("/invite") ||
     pathname?.startsWith("/demo")
   ) {
     return "public";

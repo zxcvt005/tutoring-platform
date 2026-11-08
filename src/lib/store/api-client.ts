@@ -369,6 +369,98 @@ export async function apiRegisterStudent(body: {
   }>(res);
 }
 
+export type InvitationAccessStatus =
+  | "unregistered"
+  | "invited"
+  | "activated";
+
+export type InvitationAccessPayload = {
+  accessStatus: InvitationAccessStatus;
+  accountEmail: string | null;
+  invitation: {
+    id: string;
+    expiresAt: string;
+    createdAt: string;
+  } | null;
+  inviteUrl?: string;
+};
+
+export type PublicInvitationPayload = {
+  status: "pending" | "used" | "revoked" | "expired";
+  kind: "teacher" | "student";
+  organizationName: string;
+  inviteeName: string;
+  cabinetLabel: "Кафедра" | "Аудитория";
+};
+
+export async function apiGetInvitationAccess(query: {
+  teacherId?: string;
+  studentId?: string;
+}) {
+  const params = new URLSearchParams();
+  if (query.teacherId) params.set("teacherId", query.teacherId);
+  if (query.studentId) params.set("studentId", query.studentId);
+  const res = await fetch(`/api/admin/invitations?${params}`, {
+    credentials: "include",
+  });
+  return parseJson<InvitationAccessPayload>(res);
+}
+
+export async function apiCreateInvitation(body: {
+  teacherId?: string;
+  studentId?: string;
+}) {
+  const headers = await mutatingHeaders();
+  const res = await fetch("/api/admin/invitations", {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  return parseJson<InvitationAccessPayload>(res);
+}
+
+export async function apiRevokeInvitation(invitationId: string) {
+  const headers = await mutatingHeaders();
+  const res = await fetch(`/api/admin/invitations/${invitationId}/revoke`, {
+    method: "POST",
+    headers,
+    credentials: "include",
+  });
+  return parseJson<InvitationAccessPayload>(res);
+}
+
+export async function apiGetPublicInvitation(token: string) {
+  const res = await fetch(
+    `/api/auth/invitations/${encodeURIComponent(token)}`,
+    { credentials: "include" }
+  );
+  return parseJson<PublicInvitationPayload>(res);
+}
+
+export async function apiAcceptInvitation(
+  token: string,
+  body: { email: string; password: string; passwordConfirm: string }
+) {
+  const headers = await mutatingHeaders();
+  const res = await fetch(
+    `/api/auth/invitations/${encodeURIComponent(token)}/accept`,
+    {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: JSON.stringify(body),
+    }
+  );
+  clearCsrfCache();
+  return parseJson<{
+    user: { id: string; email: string; fullName: string };
+    role: "teacher" | "student";
+    teacherId: string | null;
+    studentId: string | null;
+  }>(res);
+}
+
 export async function apiStartImpersonation(body: {
   userId?: string;
   teacherId?: string;
