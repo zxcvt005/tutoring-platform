@@ -699,6 +699,7 @@ function TakeForm({
                     index={i}
                     mode="review"
                     revealKey={reveal && st !== "pending_review"}
+                    showExplanation={reveal && st !== "pending_review"}
                     answer={a2 ?? a1}
                   />
                   {a1 && a2 ? (

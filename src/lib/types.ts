@@ -61,6 +61,11 @@ export type TestQuestion = {
   maxScore: number;
   /** Ключ объекта в S3/local (публичная часть вопроса). */
   imageObjectKey?: string;
+  /**
+   * Необязательный номер задания в КИМ ЕГЭ по физике.
+   * Хранится в публичной части вопроса и в снимке назначения.
+   */
+  kimNumber?: number;
   explanation?: string;
   /** Варианты для single/multiple choice */
   options?: QuestionOption[];

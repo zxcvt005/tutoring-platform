@@ -2429,6 +2429,162 @@ export const intensiveAssignmentTests = pgTable(
   ]
 );
 
+/**
+ * Активный банк ошибок ученика. Одна активная карточка на исходный questionId.
+ * Снимок вопроса защищает от правок шаблона преподавателем.
+ */
+export const studentErrorBank = pgTable(
+  "student_error_bank",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    studentId: text("student_id")
+      .notNull()
+      .references(() => students.id, { onDelete: "cascade" }),
+    sourceAssignmentId: text("source_assignment_id").references(
+      () => testAssignments.id,
+      { onDelete: "set null" }
+    ),
+    sourceTestId: text("source_test_id").references(() => tests.id, {
+      onDelete: "set null",
+    }),
+    sourceQuestionId: text("source_question_id").notNull(),
+    /** Полный снимок: публичная часть + answerKey + kimNumber. */
+    questionSnapshot: jsonb("question_snapshot")
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    kimNumber: integer("kim_number"),
+    firstErrorAt: timestamp("first_error_at", { withTimezone: true }).notNull(),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }).notNull(),
+    incorrectAttemptsCount: integer("incorrect_attempts_count")
+      .notNull()
+      .default(1),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+    /** waiting | available | mastered */
+    status: text("status").notNull().default("waiting"),
+    masteredAt: timestamp("mastered_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    index("seb_student_status_idx").on(t.studentId, t.status),
+    index("seb_student_available_idx").on(t.studentId, t.availableAt),
+    index("seb_org_idx").on(t.organizationId),
+    index("seb_kim_idx").on(t.studentId, t.kimNumber),
+    uniqueIndex("seb_active_question_uidx")
+      .on(t.studentId, t.sourceQuestionId)
+      .where(sql`${t.status} in ('waiting', 'available')`),
+    check(
+      "seb_status_check",
+      sql`${t.status} in ('waiting', 'available', 'mastered')`
+    ),
+    check("seb_incorrect_check", sql`${t.incorrectAttemptsCount} >= 1`),
+  ]
+);
+
+/** История событий банка ошибок (не удаляется при master). */
+export const studentErrorBankEvents = pgTable(
+  "student_error_bank_events",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    studentId: text("student_id")
+      .notNull()
+      .references(() => students.id, { onDelete: "cascade" }),
+    errorBankId: text("error_bank_id").references(() => studentErrorBank.id, {
+      onDelete: "set null",
+    }),
+    sourceQuestionId: text("source_question_id").notNull(),
+    /** recorded | repeated | available | mastered | reopened */
+    eventType: text("event_type").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("sebe_student_created_idx").on(t.studentId, t.createdAt),
+    index("sebe_bank_idx").on(t.errorBankId),
+    check(
+      "sebe_type_check",
+      sql`${t.eventType} in ('recorded', 'repeated', 'available', 'mastered', 'reopened')`
+    ),
+  ]
+);
+
+export const errorPracticeSessions = pgTable(
+  "error_practice_sessions",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    studentId: text("student_id")
+      .notNull()
+      .references(() => students.id, { onDelete: "cascade" }),
+    /** random | kim */
+    mode: text("mode").notNull(),
+    kimNumber: integer("kim_number"),
+    /** active | completed */
+    status: text("status").notNull().default("active"),
+    questionCount: integer("question_count").notNull(),
+    correctCount: integer("correct_count").notNull().default(0),
+    incorrectCount: integer("incorrect_count").notNull().default(0),
+    percent: numeric("percent", { precision: 6, scale: 2 }),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    index("eps_student_idx").on(t.studentId, t.status),
+    index("eps_org_idx").on(t.organizationId),
+    uniqueIndex("eps_one_active_uidx")
+      .on(t.studentId)
+      .where(sql`${t.status} = 'active'`),
+    check("eps_mode_check", sql`${t.mode} in ('random', 'kim')`),
+    check("eps_status_check", sql`${t.status} in ('active', 'completed')`),
+    check("eps_count_check", sql`${t.questionCount} > 0`),
+  ]
+);
+
+export const errorPracticeSessionItems = pgTable(
+  "error_practice_session_items",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => errorPracticeSessions.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    /** bank | pool */
+    sourceKind: text("source_kind").notNull(),
+    errorBankId: text("error_bank_id").references(() => studentErrorBank.id, {
+      onDelete: "set null",
+    }),
+    sourceQuestionId: text("source_question_id").notNull(),
+    sourceTestId: text("source_test_id"),
+    sourceAssignmentId: text("source_assignment_id"),
+    questionSnapshot: jsonb("question_snapshot")
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    kimNumber: integer("kim_number"),
+    answerPayload: jsonb("answer_payload").$type<Record<string, unknown>>(),
+    isCorrect: boolean("is_correct"),
+    answeredAt: timestamp("answered_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("epsi_session_position_uidx").on(t.sessionId, t.position),
+    index("epsi_session_idx").on(t.sessionId),
+    check("epsi_source_check", sql`${t.sourceKind} in ('bank', 'pool')`),
+    check("epsi_position_check", sql`${t.position} >= 0`),
+  ]
+);
+
 export const schema = {
   organizations,
   users,
@@ -2505,4 +2661,8 @@ export const schema = {
   intensiveVersionTests,
   intensiveAssignments,
   intensiveAssignmentTests,
+  studentErrorBank,
+  studentErrorBankEvents,
+  errorPracticeSessions,
+  errorPracticeSessionItems,
 };

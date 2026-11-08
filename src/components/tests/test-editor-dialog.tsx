@@ -327,6 +327,8 @@ function TestEditorForm({
                         next.prompt = q.prompt;
                         next.maxScore = q.maxScore;
                         next.explanation = q.explanation;
+                        next.kimNumber = q.kimNumber;
+                        next.imageObjectKey = q.imageObjectKey;
                         updateQuestion(index, next);
                       }}
                     >

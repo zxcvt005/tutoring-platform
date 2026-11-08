@@ -709,3 +709,34 @@ export async function apiFormulaTrainer<T = unknown>(
   });
   return parseJson(res);
 }
+
+export async function apiErrorPracticeGet<T = unknown>(
+  action: string,
+  params?: Record<string, string | undefined>
+): Promise<T> {
+  const search = new URLSearchParams();
+  search.set("action", action);
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value) search.set(key, value);
+    }
+  }
+  const res = await fetch(`/api/error-practice?${search.toString()}`, {
+    credentials: "include",
+  });
+  return parseJson(res);
+}
+
+export async function apiErrorPractice<T = unknown>(
+  action: string,
+  payload?: unknown
+): Promise<T> {
+  const headers = await mutatingHeaders();
+  const res = await fetch("/api/error-practice", {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: JSON.stringify({ action, payload }),
+  });
+  return parseJson(res);
+}

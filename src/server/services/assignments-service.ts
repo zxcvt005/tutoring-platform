@@ -37,6 +37,7 @@ import {
 import type { AppDb } from "@/server/db/types";
 import { recordChatSystemEventSafe } from "@/server/services/chat-events";
 import { badRequest, conflict, forbidden, notFound } from "@/server/errors";
+import { recordIncorrectAnswers } from "@/server/services/error-bank-service";
 import {
   mergeQuestionsWithKeys,
   stripQuestionKeys,
@@ -658,6 +659,18 @@ export async function submitAssignment(
   }
   await syncTheoryAfterTest(db, assignment, status);
 
+  // Банк ошибок: неверность в этой попытке (без заднего числа по старым ДЗ).
+  await recordIncorrectAnswers(db, {
+    organizationId: ctx.organizationId,
+    studentId: assignment.studentId,
+    sourceAssignmentId: assignmentId,
+    sourceTestId: assignment.testId,
+    questions,
+    answers: graded.answers,
+    attemptNumber,
+    reason: "submit",
+  });
+
   return {
     ok: true as const,
     status,
@@ -780,6 +793,26 @@ export async function reviewAssignment(
     });
   }
   await syncTheoryAfterTest(db, assignment, next.status);
+
+  // Только ответы, которые стали неверными именно на этой проверке
+  // (например essay после ручной оценки). Уже зафиксированные автоошибки
+  // не пересоздают события и не сбрасывают 7-дневный таймер.
+  const newlyIncorrect = latest.filter((answer) => {
+    if (answer.isCorrect !== false) return false;
+    const before = currentAnswers.find((row) => row.questionId === answer.questionId);
+    return before?.isCorrect !== false;
+  });
+  if (newlyIncorrect.length > 0) {
+    await recordIncorrectAnswers(db, {
+      organizationId: ctx.organizationId,
+      studentId: assignment.studentId,
+      sourceAssignmentId: assignmentId,
+      sourceTestId: assignment.testId,
+      questions,
+      answers: newlyIncorrect,
+      reason: "review",
+    });
+  }
 
   return {
     ok: true as const,

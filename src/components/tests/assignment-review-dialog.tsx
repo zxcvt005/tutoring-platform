@@ -204,6 +204,7 @@ function ReviewForm({
                   mode="review"
                   answer={answer}
                   revealKey
+                  showExplanation
                   manualScore={isEssay ? manual[q.id] : undefined}
                   onManualScoreChange={
                     isEssay

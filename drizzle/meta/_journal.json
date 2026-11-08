@@ -232,6 +232,13 @@
       "when": 1795500000000,
       "tag": "0032_assistant_cabinet",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795600000000,
+      "tag": "0033_error_practice_bank",
+      "breakpoints": true
     }
   ]
 }

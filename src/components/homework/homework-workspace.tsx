@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Clock3,
   LayoutGrid,
+  Target,
 } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
@@ -50,6 +51,7 @@ const filters: {
 
 export function HomeworkWorkspace() {
   const { data, assignmentsForStudent, lessonsForStudent } = useDemoStore();
+  const href = useStudentCabinetHref();
   const studentId = data.currentStudentId;
   const all = assignmentsForStudent(studentId);
   const lessons = lessonsForStudent(studentId);
@@ -111,6 +113,26 @@ export function HomeworkWorkspace() {
           studentId={studentId}
         />
       </div>
+
+      <section className="auditoria-home-card flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-2xl bg-pastel-beige text-foreground/80">
+            <Target className="size-5" />
+          </span>
+          <div>
+            <h2 className="font-display text-lg font-semibold">Отработка ошибок</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Персональный банк заданий, в которых были ошибки.
+            </p>
+          </div>
+        </div>
+        <Link
+          href={href("/homework/errors")}
+          className="inline-flex h-10 items-center rounded-full bg-pastel-beige px-4 text-sm"
+        >
+          Открыть
+        </Link>
+      </section>
 
       <div className="flex flex-wrap gap-2">
         {filters.map((item) => {

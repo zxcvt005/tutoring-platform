@@ -6,7 +6,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ExplanationPanel } from "@/components/tests/explanation-panel";
+import { RichTextWithMath } from "@/components/math/rich-text-with-math";
 import { newId } from "@/lib/format";
+import {
+  formatKimNumber,
+  KIM_NUMBER_OPTIONS,
+  normalizeKimNumber,
+} from "@/lib/math/rich-text-math";
 import type { StudentAnswer, TestQuestion } from "@/lib/types";
 import { clipboardHasImageItem } from "@/lib/tests/question-image";
 import { QuestionImagePreview } from "@/components/tests/question-image-controls";
@@ -22,8 +29,13 @@ type Props = {
   answer?: StudentAnswer;
   onAnswerChange?: (answer: StudentAnswer) => void;
   onQuestionChange?: (question: TestQuestion) => void;
-  /** В review: показывать правильные ответы и пояснения */
+  /** В review: показывать правильные ответы */
   revealKey?: boolean;
+  /**
+   * Показать кнопку «Посмотреть разбор».
+   * В обычном ДЗ — только на странице результатов; во время попыток — false.
+   */
+  showExplanation?: boolean;
   /** Ручная оценка essay */
   manualScore?: string;
   onManualScoreChange?: (value: string) => void;
@@ -41,6 +53,7 @@ export function QuestionFields({
   onAnswerChange,
   onQuestionChange,
   revealKey = false,
+  showExplanation = false,
   manualScore,
   onManualScoreChange,
   teacherComment,
@@ -50,6 +63,8 @@ export function QuestionFields({
   const editable = mode === "edit";
   const taking = mode === "take";
   const showKey = revealKey || mode === "preview";
+  const showExplanationPanel =
+    showExplanation || (mode === "preview" && !editable);
 
   function patchQ(partial: Partial<TestQuestion>) {
     onQuestionChange?.({ ...question, ...partial });
@@ -77,6 +92,7 @@ export function QuestionFields({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
           Задание {index + 1}
+          {question.kimNumber != null ? ` · ${formatKimNumber(question.kimNumber)}` : ""}
           {question.maxScore != null ? ` · ${question.maxScore} б.` : ""}
           {taking ? ` · ${questionTypeLabel[question.type]}` : ""}
         </p>
@@ -245,25 +261,47 @@ export function QuestionFields({
               }
             />
           </div>
+          <div className="space-y-1.5">
+            <Label>Номер в КИМ</Label>
+            <select
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none"
+              value={question.kimNumber ?? ""}
+              onChange={(e) => {
+                const next = normalizeKimNumber(e.target.value);
+                patchQ({ kimNumber: next });
+              }}
+              aria-label="Номер в КИМ"
+            >
+              <option value="">Не указан</option>
+              {KIM_NUMBER_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {formatKimNumber(n)}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="space-y-1.5 sm:col-span-2">
-            <Label>Пояснение к решению</Label>
+            <Label>Разбор</Label>
             <Textarea
               value={question.explanation ?? ""}
               onChange={(e) =>
                 patchQ({ explanation: e.target.value || undefined })
               }
-              rows={2}
-              placeholder="Покажется ученику после проверки"
+              rows={5}
+              placeholder={"Текст и формулы LaTeX: \\(inline\\) или \\[блочная\\]"}
             />
+            <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+              <p className="mb-1 text-xs font-medium text-muted-foreground">
+                Предпросмотр разбора
+              </p>
+              <RichTextWithMath text={question.explanation} />
+            </div>
           </div>
         </div>
       ) : null}
 
-      {showKey && question.explanation ? (
-        <div className="rounded-lg bg-muted/50 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-          <span className="font-medium text-foreground">Пояснение: </span>
-          {question.explanation}
-        </div>
+      {showExplanationPanel ? (
+        <ExplanationPanel explanation={question.explanation} />
       ) : null}
 
       {mode === "review" && answer?.teacherComment ? (

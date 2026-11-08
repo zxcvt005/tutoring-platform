@@ -8,7 +8,13 @@ import {
 } from "@/lib/tests/question-image";
 import type { AuthContext } from "@/server/authz/context";
 import { assertDirectorSeesTeacher, requireRoles } from "@/server/authz/require";
-import { testAssignments, tests } from "@/server/db/schema";
+import {
+  errorPracticeSessionItems,
+  errorPracticeSessions,
+  studentErrorBank,
+  testAssignments,
+  tests,
+} from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
 import { badRequest, forbidden, notFound } from "@/server/errors";
 import {
@@ -48,7 +54,8 @@ async function assertCanManageTest(db: AppDb, ctx: AuthContext, testId: string) 
 async function studentCanViewTest(
   db: AppDb,
   ctx: AuthContext,
-  testId: string
+  testId: string,
+  questionId?: string
 ): Promise<boolean> {
   if (ctx.role !== "student" || !ctx.studentId) return false;
   const [row] = await db
@@ -62,7 +69,38 @@ async function studentCanViewTest(
       )
     )
     .limit(1);
-  return Boolean(row);
+  if (row) return true;
+  if (!questionId) return false;
+
+  const [bank] = await db
+    .select({ id: studentErrorBank.id })
+    .from(studentErrorBank)
+    .where(
+      and(
+        eq(studentErrorBank.studentId, ctx.studentId),
+        eq(studentErrorBank.sourceTestId, testId),
+        eq(studentErrorBank.sourceQuestionId, questionId)
+      )
+    )
+    .limit(1);
+  if (bank) return true;
+
+  const [practice] = await db
+    .select({ id: errorPracticeSessionItems.id })
+    .from(errorPracticeSessionItems)
+    .innerJoin(
+      errorPracticeSessions,
+      eq(errorPracticeSessions.id, errorPracticeSessionItems.sessionId)
+    )
+    .where(
+      and(
+        eq(errorPracticeSessions.studentId, ctx.studentId),
+        eq(errorPracticeSessionItems.sourceTestId, testId),
+        eq(errorPracticeSessionItems.sourceQuestionId, questionId)
+      )
+    )
+    .limit(1);
+  return Boolean(practice);
 }
 
 async function teacherCanViewTest(
@@ -87,6 +125,13 @@ async function teacherCanViewTest(
   return Boolean(assigned);
 }
 
+function mimeFromObjectKey(key: string): QuestionImageMime {
+  const ext = key.split(".").pop()?.toLowerCase();
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  return "image/jpeg";
+}
+
 async function resolveQuestionImageKey(
   db: AppDb,
   ctx: AuthContext,
@@ -95,8 +140,7 @@ async function resolveQuestionImageKey(
 ): Promise<{ key: string; mime: QuestionImageMime }> {
   const row = await loadTest(db, ctx.organizationId, testId);
   const question = questionsFromRow(row).find((q) => q.id === questionId);
-  const key = question?.imageObjectKey?.trim();
-  if (!key) throw notFound("Изображение не найдено");
+  let key = question?.imageObjectKey?.trim() || "";
 
   let allowed = false;
   try {
@@ -107,21 +151,53 @@ async function resolveQuestionImageKey(
   }
   if (!allowed) {
     const canView =
-      (await studentCanViewTest(db, ctx, testId)) ||
+      (await studentCanViewTest(db, ctx, testId, questionId)) ||
       (await teacherCanViewTest(db, ctx, testId)) ||
       (ctx.role === "director" && row.organizationId === ctx.organizationId) ||
       (ctx.role === "assistant" && row.organizationId === ctx.organizationId);
     if (!canView) throw forbidden();
   }
 
-  const ext = key.split(".").pop()?.toLowerCase();
-  const mime: QuestionImageMime =
-    ext === "png"
-      ? "image/png"
-      : ext === "webp"
-        ? "image/webp"
-        : "image/jpeg";
-  return { key, mime };
+  // Если преподаватель убрал картинку из живого шаблона, берём ключ из снимка
+  // банка/сессии отработки — доступ по-прежнему через защищённый GET.
+  if (!key && ctx.role === "student" && ctx.studentId) {
+    const { resolveErrorBankImageObjectKey } = await import(
+      "@/server/services/error-bank-service"
+    );
+    key =
+      (await resolveErrorBankImageObjectKey(
+        db,
+        ctx.studentId,
+        testId,
+        questionId
+      )) ?? "";
+    if (!key) {
+      const [practice] = await db
+        .select({
+          questionSnapshot: errorPracticeSessionItems.questionSnapshot,
+        })
+        .from(errorPracticeSessionItems)
+        .innerJoin(
+          errorPracticeSessions,
+          eq(errorPracticeSessions.id, errorPracticeSessionItems.sessionId)
+        )
+        .where(
+          and(
+            eq(errorPracticeSessions.studentId, ctx.studentId),
+            eq(errorPracticeSessionItems.sourceTestId, testId),
+            eq(errorPracticeSessionItems.sourceQuestionId, questionId)
+          )
+        )
+        .limit(1);
+      const snap = practice?.questionSnapshot as
+        | { question?: { imageObjectKey?: string } }
+        | undefined;
+      key = snap?.question?.imageObjectKey?.trim() || "";
+    }
+  }
+
+  if (!key) throw notFound("Изображение не найдено");
+  return { key, mime: mimeFromObjectKey(key) };
 }
 
 export async function uploadTestQuestionImage(
