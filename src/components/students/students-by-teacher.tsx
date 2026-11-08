@@ -770,12 +770,13 @@ export function StudentsByTeacher({
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
+          <DialogHeader className="shrink-0 border-b px-4 py-3 pr-12">
             <DialogTitle>
               {form.id ? "Редактировать ученика" : "Новый ученик"}
             </DialogTitle>
           </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           <div className="grid gap-3">
             <div className="space-y-1.5">
               <Label>ФИО</Label>
@@ -945,7 +946,9 @@ export function StudentsByTeacher({
                 placeholder="Внутренние заметки администрации"
               />
             </div>
-            {form.id && mode === "direkciya" ? (
+          </div>
+          {form.id && mode === "direkciya" ? (
+            <div className="mt-4" data-testid="student-edit-access-panel">
               <ProfileAccessPanel
                 studentId={form.id}
                 accountEmail={
@@ -955,9 +958,10 @@ export function StudentsByTeacher({
                   data.students.find((s) => s.id === form.id)?.userId
                 )}
               />
-            ) : null}
+            </div>
+          ) : null}
           </div>
-          <DialogFooter className="gap-2 sm:justify-between">
+          <DialogFooter className="mx-0 mb-0 shrink-0 gap-2 rounded-none sm:justify-between">
             {form.id && mode === "direkciya" ? (
               <Button
                 type="button"

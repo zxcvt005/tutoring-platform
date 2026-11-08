@@ -368,12 +368,13 @@ export function TeachersWorkspace() {
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+          <DialogHeader className="shrink-0 border-b px-4 py-3 pr-12">
             <DialogTitle>
               {form.id ? "Редактировать преподавателя" : "Новый преподаватель"}
             </DialogTitle>
           </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5 sm:col-span-2">
               <Label>ФИО</Label>
@@ -535,21 +536,25 @@ export function TeachersWorkspace() {
                 }
               />
             </div>
-            {form.id ? (
-              <div className="sm:col-span-2">
-                <ProfileAccessPanel
-                  teacherId={form.id}
-                  accountEmail={
-                    data.teachers.find((t) => t.id === form.id)?.accountEmail
-                  }
-                  hasAccount={Boolean(
-                    data.teachers.find((t) => t.id === form.id)?.userId
-                  )}
-                />
-              </div>
-            ) : null}
           </div>
-          <DialogFooter className="gap-2 sm:justify-between">
+          {form.id ? (
+            <div
+              className="mt-4"
+              data-testid="teacher-edit-access-panel"
+            >
+              <ProfileAccessPanel
+                teacherId={form.id}
+                accountEmail={
+                  data.teachers.find((t) => t.id === form.id)?.accountEmail
+                }
+                hasAccount={Boolean(
+                  data.teachers.find((t) => t.id === form.id)?.userId
+                )}
+              />
+            </div>
+          ) : null}
+          </div>
+          <DialogFooter className="mx-0 mb-0 shrink-0 gap-2 rounded-none sm:justify-between">
             {form.id ? (
               <Button
                 type="button"

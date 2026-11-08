@@ -9,11 +9,11 @@ import {
   uploadTestQuestionImage,
 } from "@/server/services/test-question-image-service";
 
-type Params = { params: Promise<{ testId: string; questionId: string }> };
+type Params = { params: Promise<{ id: string; questionId: string }> };
 
 export async function GET(request: Request, { params }: Params) {
   try {
-    const { testId, questionId } = await params;
+    const { id: testId, questionId } = await params;
     const ctx = await requireAuth(request);
     const db = getDb();
     const file = await getTestQuestionImage(db, ctx, testId, questionId);
@@ -36,7 +36,7 @@ export async function POST(request: Request, { params }: Params) {
     if (!isMultipart(request)) {
       throw validationError("Ожидалась загрузка изображения");
     }
-    const { testId, questionId } = await params;
+    const { id: testId, questionId } = await params;
     const ctx = await requireAuth(request);
     const form = await request.formData();
     const files = await filesFromFormData(form);
@@ -60,7 +60,7 @@ export async function POST(request: Request, { params }: Params) {
 export async function DELETE(request: Request, { params }: Params) {
   try {
     assertMutatingRequest(request);
-    const { testId, questionId } = await params;
+    const { id: testId, questionId } = await params;
     const ctx = await requireAuth(request);
     const db = getDb();
     const result = await deleteTestQuestionImage(db, ctx, testId, questionId);

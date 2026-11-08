@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { DELETE, GET } from "@/app/api/tests/[testId]/questions/[questionId]/image/route";
+import { DELETE, GET } from "@/app/api/tests/[id]/questions/[questionId]/image/route";
 import { CSRF_COOKIE, CSRF_HEADER } from "@/server/auth/constants";
 import { SESSION_COOKIE } from "@/server/auth/session";
 import { resolveAuthContext } from "@/server/authz/context";
@@ -204,7 +204,7 @@ describe("test question images", () => {
         `http://localhost:3000/api/tests/${saved.id}/questions/q_img/image`,
         { method: "DELETE", headers: mutatingHeaders(sessionToken) }
       ),
-      { params: Promise.resolve({ testId: saved.id, questionId: "q_img" }) }
+      { params: Promise.resolve({ id: saved.id, questionId: "q_img" }) }
     );
     expect(res.status).toBe(200);
     await expect(getTestQuestionObject(uploaded2.imageObjectKey)).rejects.toMatchObject({
@@ -292,7 +292,7 @@ describe("test question images", () => {
         `http://localhost:3000/api/tests/${saved.id}/questions/q_img/image`,
         { headers: { cookie: `${SESSION_COOKIE}=${encodeURIComponent(sessionToken)}` } }
       ),
-      { params: Promise.resolve({ testId: saved.id, questionId: "q_img" }) }
+      { params: Promise.resolve({ id: saved.id, questionId: "q_img" }) }
     );
     expect(res.status).toBe(403);
   });

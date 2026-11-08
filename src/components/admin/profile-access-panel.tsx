@@ -147,6 +147,7 @@ export function ProfileAccessPanel({
         className
       )}
       aria-label="Доступ в кабинет"
+      data-testid="profile-access-panel"
     >
       <div className="space-y-1">
         <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
