@@ -17,10 +17,14 @@
 ## Рекомендуемая схема Timeweb
 
 1. **Managed PostgreSQL** (UTF-8).
-2. **App / Node** — `npm ci` (или `npm install`) → `npm run build` → `npm start`.
+2. **App / Node (SSR)** — в панели App Platform:
+   - **Команда сборки:** `npm ci && npm run build`
+   - **Команда запуска:** `npm start`
 3. HTTPS-домен → укажите его в `APP_BASE_URL`.
 
-**Важно:** `@tailwindcss/postcss`, `tailwindcss` и `typescript` находятся в `dependencies`, чтобы сборка работала при `npm ci --omit=dev` / `NODE_ENV=production` во время install. Не удаляйте их из dependencies.
+`npm ci` быстрее и детерминированнее, чем `npm install`, при наличии `package-lock.json`. Ставьте **полный** набор зависимостей (включая `devDependencies`): `next build` нуждается в них. **Не** используйте `npm ci --omit=dev` — сборка падает без CSS из `shadcn` (`@import "shadcn/tailwind.css"` в `globals.css`) и без части `@types/*`.
+
+**Важно:** `shadcn`, `@tailwindcss/postcss`, `tailwindcss` и `typescript` должны оставаться в `dependencies` (нужны на этапе Production build). Не удаляйте их из dependencies.
 
 **Миграции и первый директор:** `npm run db:migrate` и `npm run auth:bootstrap-admin` запускают `node scripts/*.mjs`. Им нужны только пакеты из `dependencies` (`drizzle-orm`, `postgres`, `bcryptjs`). Пакет `tsx` — devDependency и в production-контейнере отсутствует. Это ожидаемо: ставить его в работающий контейнер не нужно.
 

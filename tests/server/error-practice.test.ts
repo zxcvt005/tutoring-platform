@@ -59,7 +59,9 @@ describe("error bank and practice", () => {
       explanation: "По второму закону Ньютона \\(F=ma\\).",
     };
 
-    const now = new Date("2026-11-01T12:00:00.000Z");
+    // Относительно «сейчас»: фиксированная дата в прошлом делает availableAt
+    // уже просроченным для getErrorBankSummary → refresh → availableCount=1.
+    const now = new Date();
     await recordIncorrectAnswers(t.db, {
       organizationId: student.organizationId,
       studentId: student.studentId!,
