@@ -134,7 +134,7 @@ describe("teacher photo upload", () => {
     setChatObjectStoreForTests({
       async put() {
         throw serviceUnavailable(
-          "Не удалось записать файл в хранилище (HTTP 403). Проверьте права ключа S3 на запись в бакет."
+          "Бакет S3 не найден или URL хранилища неверный (HTTP 404 / NoSuchBucket). Проверьте S3_BUCKET и S3_ENDPOINT (origin без имени бакета), а также path-style (`S3_FORCE_PATH_STYLE=1`). HTTP 404 здесь не означает отказ ACL."
         );
       },
       async get() {
@@ -169,7 +169,8 @@ describe("teacher photo upload", () => {
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: { message: string; code: string } };
     expect(body.error.code).toBe("service_unavailable");
-    expect(body.error.message).toMatch(/HTTP 403/);
+    expect(body.error.message).toMatch(/NoSuchBucket|не найден/i);
+    expect(body.error.message).not.toMatch(/Проверьте права ключа/i);
     expect(body.error.message).not.toBe("Внутренняя ошибка сервера");
   });
 });

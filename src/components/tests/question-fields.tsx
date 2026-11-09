@@ -43,6 +43,8 @@ type Props = {
   onTeacherCommentChange?: (value: string) => void;
   /** ID теста для загрузки и показа изображений вопроса */
   testId?: string;
+  /** Перед upload — сохранить черновик теста (см. QuestionImagePreview). */
+  ensureTestReady?: () => Promise<string>;
 };
 
 export function QuestionFields({
@@ -59,6 +61,7 @@ export function QuestionFields({
   teacherComment,
   onTeacherCommentChange,
   testId,
+  ensureTestReady,
 }: Props) {
   const editable = mode === "edit";
   const taking = mode === "take";
@@ -137,8 +140,11 @@ export function QuestionFields({
                   );
                   const { toast } = await import("sonner");
                   try {
+                    const readyTestId = ensureTestReady
+                      ? await ensureTestReady()
+                      : testId;
                     const result = await apiTestQuestionImageUpload(
-                      testId,
+                      readyTestId,
                       question.id,
                       file
                     );
@@ -175,6 +181,7 @@ export function QuestionFields({
           questionId={question.id}
           imageObjectKey={question.imageObjectKey}
           editable={editable}
+          ensureTestReady={editable ? ensureTestReady : undefined}
           onImageChange={
             editable
               ? (imageObjectKey) => patchQ({ imageObjectKey })

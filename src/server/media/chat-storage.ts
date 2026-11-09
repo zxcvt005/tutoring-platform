@@ -2,7 +2,13 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { badRequest, notFound } from "@/server/errors";
-import { s3Delete, s3Get, s3Put, type S3Config } from "@/server/media/s3";
+import {
+  normalizeS3Endpoint,
+  s3Delete,
+  s3Get,
+  s3Put,
+  type S3Config,
+} from "@/server/media/s3";
 
 export type ChatObjectStore = {
   put(key: string, bytes: Buffer, contentType: string): Promise<void>;
@@ -40,13 +46,24 @@ function readS3ConfigFrom(
   const secretAccessKey = env.S3_SECRET_ACCESS_KEY?.trim();
   const endpoint = env.S3_ENDPOINT?.trim();
   if (!bucket || !accessKeyId || !secretAccessKey || !endpoint) return null;
+  // Timeweb и совместимые S3: path-style по умолчанию (`https://s3…/bucket/key`).
+  // Virtual-hosted (`bucket.s3…`) часто даёт 404/NoSuchBucket на приватных бакетах.
+  const forceRaw = env.S3_FORCE_PATH_STYLE?.trim().toLowerCase();
+  const forcePathStyle = !(forceRaw === "0" || forceRaw === "false");
+  const { origin, discardedPathSegments } = normalizeS3Endpoint(endpoint);
+  if (discardedPathSegments > 0) {
+    console.error(
+      "S3_ENDPOINT contains a path; using origin only. Put the bucket name in S3_BUCKET.",
+      { discardedPathSegments, endpointHost: new URL(origin).host }
+    );
+  }
   return {
-    endpoint,
+    endpoint: origin,
     region: env.S3_REGION?.trim() || "ru-1",
     bucket,
     accessKeyId,
     secretAccessKey,
-    forcePathStyle: env.S3_FORCE_PATH_STYLE !== "0",
+    forcePathStyle,
   };
 }
 

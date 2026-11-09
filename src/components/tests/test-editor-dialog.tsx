@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { QuestionFields } from "@/components/tests/question-fields";
@@ -139,9 +139,13 @@ function TestEditorForm({
     if (!next.id) next.id = newId("hw");
     return next;
   });
+  const formRef = useRef(form);
+  formRef.current = form;
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(
     sectionId ?? homework?.sectionId ?? null
   );
+  const selectedSectionIdRef = useRef(selectedSectionId);
+  selectedSectionIdRef.current = selectedSectionId;
   const [preview, setPreview] = useState(false);
   const [addType, setAddType] = useState<QuestionType>("single_choice");
   const [busy, setBusy] = useState(false);
@@ -150,6 +154,40 @@ function TestEditorForm({
     () => computeMaxScore(form.questions),
     [form.questions]
   );
+
+  /**
+   * Загрузка картинки идёт в API по testId из БД. Редактор сразу выдаёт
+   * клиентский id, но строка в `tests` появляется только после upsert —
+   * иначе POST image отвечает «Тест не найден».
+   */
+  const ensureTestReady = useCallback(async () => {
+    const current = formRef.current;
+    const title = current.title.trim() || "Черновик теста";
+    const questions = current.questions;
+    const saved = await upsertHomework({
+      id: current.id,
+      topicId: topicId || null,
+      sectionId:
+        purpose === "homework" ? selectedSectionIdRef.current || null : null,
+      teacherId,
+      libraryScope,
+      title,
+      description: current.description.trim() || undefined,
+      status: current.status === "published" ? "published" : "draft",
+      purpose,
+      questions,
+      maxScore: computeMaxScore(questions),
+    });
+    if (!saved.ok || !saved.id) {
+      throw new Error("Не удалось сохранить черновик теста перед загрузкой изображения");
+    }
+    setForm((prev) => ({
+      ...prev,
+      id: saved.id,
+      title: prev.title.trim() ? prev.title : title,
+    }));
+    return saved.id;
+  }, [upsertHomework, topicId, purpose, teacherId, libraryScope]);
 
   function updateQuestion(index: number, q: TestQuestion) {
     setForm((prev) => {
@@ -380,6 +418,7 @@ function TestEditorForm({
                     question={q}
                     index={index}
                     mode="edit"
+                    ensureTestReady={ensureTestReady}
                     onQuestionChange={(nq) => updateQuestion(index, nq)}
                   />
                 </div>

@@ -11,6 +11,19 @@ export type S3Config = {
   forcePathStyle: boolean;
 };
 
+export type S3ObjectTarget = {
+  url: URL;
+  canonicalPath: string;
+  host: string;
+  forcePathStyle: boolean;
+};
+
+type S3ErrorInfo = {
+  status: number;
+  code: string;
+  message: string;
+};
+
 function sha256Hex(data: Buffer | string): string {
   return createHash("sha256").update(data).digest("hex");
 }
@@ -44,19 +57,114 @@ function signingKey(secret: string, dateStamp: string, region: string): Buffer {
   return hmac(kService, "aws4_request");
 }
 
-function objectUrl(config: S3Config, key: string): { url: URL; canonicalPath: string } {
-  const endpoint = new URL(config.endpoint);
+/**
+ * S3_ENDPOINT должен быть origin без bucket/path.
+ * Частая ошибка: `https://s3.twcstorage.ru/<bucket>` → лишний сегмент и NoSuchBucket.
+ */
+export function normalizeS3Endpoint(raw: string): {
+  origin: string;
+  discardedPathSegments: number;
+} {
+  const url = new URL(raw.trim());
+  const discardedPathSegments = url.pathname
+    .split("/")
+    .filter((part) => part.length > 0).length;
+  return { origin: url.origin, discardedPathSegments };
+}
+
+/** Собирает URL Put/Get/Delete без секретов — для тестов и диагностики. */
+export function buildS3ObjectTarget(
+  config: Pick<S3Config, "endpoint" | "bucket" | "forcePathStyle">,
+  key: string
+): S3ObjectTarget {
+  const { origin } = normalizeS3Endpoint(config.endpoint);
+  const endpoint = new URL(origin);
   if (config.forcePathStyle) {
-    const url = new URL(
-      `${endpoint.origin}/${encodeRfc3986(config.bucket)}/${encodeKey(key)}`
-    );
+    const canonicalPath = `/${encodeRfc3986(config.bucket)}/${encodeKey(key)}`;
+    const url = new URL(`${endpoint.origin}${canonicalPath}`);
     return {
       url,
-      canonicalPath: `/${encodeRfc3986(config.bucket)}/${encodeKey(key)}`,
+      canonicalPath,
+      host: url.host,
+      forcePathStyle: true,
     };
   }
-  const url = new URL(`${endpoint.protocol}//${config.bucket}.${endpoint.host}/${encodeKey(key)}`);
-  return { url, canonicalPath: `/${encodeKey(key)}` };
+  const url = new URL(
+    `${endpoint.protocol}//${config.bucket}.${endpoint.host}/${encodeKey(key)}`
+  );
+  return {
+    url,
+    canonicalPath: `/${encodeKey(key)}`,
+    host: url.host,
+    forcePathStyle: false,
+  };
+}
+
+function objectUrl(config: S3Config, key: string): S3ObjectTarget {
+  return buildS3ObjectTarget(config, key);
+}
+
+export function parseS3ErrorBody(body: string, status: number): S3ErrorInfo {
+  const code =
+    body.match(/<Code>\s*([^<]+?)\s*<\/Code>/i)?.[1]?.trim() ||
+    (status === 404 ? "HTTP_404" : `HTTP_${status}`);
+  const message =
+    body.match(/<Message>\s*([^<]+?)\s*<\/Message>/i)?.[1]?.trim() || "";
+  return { status, code, message };
+}
+
+export function describeS3WriteFailure(info: S3ErrorInfo): string {
+  const code = info.code.toLowerCase();
+  if (
+    code === "nosuchbucket" ||
+    (info.status === 404 && (code === "http_404" || code === "nosuchkey"))
+  ) {
+    // PutObject почти никогда не означает «нет прав»: 404 = бакет/URL, не ACL.
+    return "Бакет S3 не найден или URL хранилища неверный (HTTP 404 / NoSuchBucket). Проверьте S3_BUCKET и S3_ENDPOINT (origin без имени бакета), а также path-style (`S3_FORCE_PATH_STYLE=1`). HTTP 404 здесь не означает отказ ACL.";
+  }
+  if (
+    code === "accessdenied" ||
+    code === "allaccessdisabled" ||
+    info.status === 403
+  ) {
+    return "Доступ к бакету S3 запрещён (AccessDenied). Проверьте права ключа на запись в бакет.";
+  }
+  if (
+    code === "invalidaccesskeyid" ||
+    code === "signaturedoesnotmatch" ||
+    code === "expiredtoken"
+  ) {
+    return "S3 отклонил ключи доступа или подпись. Проверьте S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY и S3_REGION.";
+  }
+  if (code === "permanentredirect" || code === "temporaryredirect") {
+    return "S3 требует другой endpoint/регион (Redirect). Проверьте S3_ENDPOINT и S3_REGION.";
+  }
+  return `Не удалось записать файл в хранилище (HTTP ${info.status}${info.code ? `, ${info.code}` : ""}).`;
+}
+
+async function readS3Error(res: Response): Promise<S3ErrorInfo> {
+  const body = await res.text().catch(() => "");
+  return parseS3ErrorBody(body, res.status);
+}
+
+function logS3Rejection(
+  method: string,
+  key: string,
+  config: S3Config,
+  info: S3ErrorInfo
+) {
+  const { origin, discardedPathSegments } = normalizeS3Endpoint(config.endpoint);
+  console.error("S3 request rejected", {
+    method,
+    status: info.status,
+    code: info.code,
+    keyPrefix: key.split("/")[0] ?? "",
+    forcePathStyle: config.forcePathStyle,
+    endpointHost: new URL(origin).host,
+    region: config.region,
+    bucketLength: config.bucket.length,
+    endpointPathSegmentsDiscarded: discardedPathSegments,
+  });
 }
 
 async function signedFetch(
@@ -125,7 +233,6 @@ async function signedFetchSafe(
   } catch (err) {
     console.error("S3 request failed", {
       method,
-      // ключ без секретов; endpoint/host не логируем с credentials
       keyPrefix: key.split("/")[0] ?? "",
       name: err instanceof Error ? err.name : typeof err,
     });
@@ -141,29 +248,38 @@ export async function s3Put(
   bytes: Buffer,
   contentType: string
 ): Promise<void> {
+  const { discardedPathSegments } = normalizeS3Endpoint(config.endpoint);
+  if (discardedPathSegments > 0) {
+    console.error("S3_ENDPOINT includes a path; bucket must be S3_BUCKET only", {
+      discardedPathSegments,
+      endpointHost: new URL(config.endpoint.trim()).host,
+    });
+  }
   const res = await signedFetchSafe(config, "PUT", key, bytes, {
     "content-type": contentType,
   });
   if (!res.ok) {
-    await res.body?.cancel().catch(() => undefined);
-    console.error("S3 PUT rejected", { status: res.status, keyPrefix: key.split("/")[0] ?? "" });
-    throw serviceUnavailable(
-      `Не удалось записать файл в хранилище (HTTP ${res.status}). Проверьте права ключа S3 на запись в бакет.`
-    );
+    const info = await readS3Error(res);
+    logS3Rejection("PUT", key, config, info);
+    throw serviceUnavailable(describeS3WriteFailure(info));
   }
 }
 
 export async function s3Get(config: S3Config, key: string): Promise<Buffer> {
   const res = await signedFetchSafe(config, "GET", key);
   if (res.status === 404) {
-    await res.body?.cancel().catch(() => undefined);
+    const info = await readS3Error(res);
+    if (info.code.toLowerCase() === "nosuchbucket") {
+      logS3Rejection("GET", key, config, info);
+      throw serviceUnavailable(describeS3WriteFailure(info));
+    }
     throw Object.assign(new Error("not_found"), { code: "not_found" });
   }
   if (!res.ok) {
-    await res.body?.cancel().catch(() => undefined);
-    console.error("S3 GET rejected", { status: res.status, keyPrefix: key.split("/")[0] ?? "" });
+    const info = await readS3Error(res);
+    logS3Rejection("GET", key, config, info);
     throw serviceUnavailable(
-      `Не удалось прочитать файл из хранилища (HTTP ${res.status}).`
+      `Не удалось прочитать файл из хранилища (HTTP ${info.status}${info.code ? `, ${info.code}` : ""}).`
     );
   }
   const buf = Buffer.from(await res.arrayBuffer());
@@ -173,13 +289,10 @@ export async function s3Get(config: S3Config, key: string): Promise<Buffer> {
 export async function s3Delete(config: S3Config, key: string): Promise<void> {
   const res = await signedFetchSafe(config, "DELETE", key);
   if (!res.ok && res.status !== 404) {
-    await res.body?.cancel().catch(() => undefined);
-    console.error("S3 DELETE rejected", {
-      status: res.status,
-      keyPrefix: key.split("/")[0] ?? "",
-    });
+    const info = await readS3Error(res);
+    logS3Rejection("DELETE", key, config, info);
     throw serviceUnavailable(
-      `Не удалось удалить файл из хранилища (HTTP ${res.status}).`
+      `Не удалось удалить файл из хранилища (HTTP ${info.status}${info.code ? `, ${info.code}` : ""}).`
     );
   }
 }

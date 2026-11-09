@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ export function QuestionImagePreview({
   imageObjectKey,
   editable,
   onImageChange,
+  ensureTestReady,
   className,
 }: {
   testId: string;
@@ -33,20 +34,41 @@ export function QuestionImagePreview({
   imageObjectKey?: string;
   editable?: boolean;
   onImageChange?: (key: string | undefined) => void;
+  /**
+   * Перед upload/delete сохраняет черновик теста в БД и возвращает актуальный testId.
+   * Нужен, когда редактор ещё не делал upsert (клиентский id без строки в tests).
+   */
+  ensureTestReady?: () => Promise<string>;
   className?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
+  const [resolvedTestId, setResolvedTestId] = useState(testId);
+  useEffect(() => {
+    setResolvedTestId(testId);
+  }, [testId]);
   const src = imageObjectKey
-    ? testQuestionImageUrl(testId, questionId)
+    ? testQuestionImageUrl(resolvedTestId, questionId)
     : undefined;
+
+  async function resolveTestId(): Promise<string> {
+    if (!ensureTestReady) return testId;
+    const readyId = await ensureTestReady();
+    setResolvedTestId(readyId);
+    return readyId;
+  }
 
   async function attachFile(file: File) {
     if (!editable || !onImageChange) return;
     setBusy(true);
     try {
-      const result = await apiTestQuestionImageUpload(testId, questionId, file);
+      const readyTestId = await resolveTestId();
+      const result = await apiTestQuestionImageUpload(
+        readyTestId,
+        questionId,
+        file
+      );
       onImageChange(result.imageObjectKey);
       toast.success("Изображение прикреплено");
     } catch (err) {
@@ -90,7 +112,8 @@ export function QuestionImagePreview({
     if (!editable || !onImageChange || !imageObjectKey) return;
     setBusy(true);
     try {
-      await apiTestQuestionImageDelete(testId, questionId);
+      const readyTestId = await resolveTestId();
+      await apiTestQuestionImageDelete(readyTestId, questionId);
       onImageChange(undefined);
       toast.success("Изображение удалено");
     } catch (err) {

@@ -3,7 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { DELETE, GET } from "@/app/api/tests/[id]/questions/[questionId]/image/route";
+import {
+  DELETE,
+  GET,
+  POST,
+} from "@/app/api/tests/[id]/questions/[questionId]/image/route";
 import { CSRF_COOKIE, CSRF_HEADER } from "@/server/auth/constants";
 import { SESSION_COOKIE } from "@/server/auth/session";
 import { resolveAuthContext } from "@/server/authz/context";
@@ -239,6 +243,101 @@ describe("test question images", () => {
       status: 404,
     });
     await expect(getTestQuestionObject(second.imageObjectKey)).resolves.toBeDefined();
+  });
+
+  it("returns Тест не найден for a client-only id that was never saved", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const { ctx: teacher, sessionToken } = await asRole(t.db, "anna@example.com");
+    await expect(
+      uploadTestQuestionImage(t.db, teacher, "hw_never_saved", "q_img", {
+        bytes: pngBytes(9),
+        filename: "x.png",
+      })
+    ).rejects.toMatchObject({
+      status: 404,
+      message: expect.stringMatching(/тест не найден/i),
+    });
+
+    const form = new FormData();
+    form.append(
+      "files",
+      new File([pngBytes(9)], "x.png", { type: "image/png" })
+    );
+    const res = await POST(
+      new Request(
+        "http://localhost:3000/api/tests/hw_never_saved/questions/q_img/image",
+        {
+          method: "POST",
+          headers: mutatingHeaders(sessionToken),
+          body: form,
+        }
+      ),
+      {
+        params: Promise.resolve({
+          id: "hw_never_saved",
+          questionId: "q_img",
+        }),
+      }
+    );
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/тест не найден/i);
+  });
+
+  it("uploads via HTTP with the real testId and questionId then serves the image", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const { ctx: teacher, sessionToken } = await asRole(t.db, "anna@example.com");
+    const saved = await draftHomework(t.db, teacher, "q_http");
+    const form = new FormData();
+    form.append(
+      "files",
+      new File([pngBytes(10)], "q.png", { type: "image/png" })
+    );
+    const uploaded = await POST(
+      new Request(
+        `http://localhost:3000/api/tests/${saved.id}/questions/q_http/image`,
+        {
+          method: "POST",
+          headers: mutatingHeaders(sessionToken),
+          body: form,
+        }
+      ),
+      {
+        params: Promise.resolve({ id: saved.id, questionId: "q_http" }),
+      }
+    );
+    expect(uploaded.status).toBe(200);
+    const payload = (await uploaded.json()) as { imageObjectKey: string };
+    expect(payload.imageObjectKey).toContain(`questions/`);
+    expect(payload.imageObjectKey).toContain(saved.id);
+    expect(payload.imageObjectKey).toContain("q_http");
+    await persistImageKey(
+      t.db,
+      teacher,
+      saved.id,
+      "q_http",
+      payload.imageObjectKey
+    );
+
+    const got = await GET(
+      new Request(
+        `http://localhost:3000/api/tests/${saved.id}/questions/q_http/image`,
+        {
+          headers: {
+            cookie: `${SESSION_COOKIE}=${encodeURIComponent(sessionToken)}`,
+          },
+        }
+      ),
+      {
+        params: Promise.resolve({ id: saved.id, questionId: "q_http" }),
+      }
+    );
+    expect(got.status).toBe(200);
+    expect(got.headers.get("content-type")).toMatch(/image\//);
+    const bytes = Buffer.from(await got.arrayBuffer());
+    expect(bytes.length).toBeGreaterThan(0);
   });
 
   it("forbids delete and upload for student and foreign teacher", async () => {
