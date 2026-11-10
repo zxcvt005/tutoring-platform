@@ -51,22 +51,33 @@ export function hasDemoSkipAutoLogin(
   return storage?.getItem(DEMO_SKIP_AUTO_LOGIN_KEY) === "1";
 }
 
+/**
+ * Страницы без platform-сессии: login/register, инвайты орг, личные звонки.
+ * `/join/*` и `/private-calls` используют свои cookie (гость/хост), не кабинетный login.
+ */
+export function isDemoPublicPath(pathname: string | null): boolean {
+  if (!pathname) return false;
+  return (
+    pathname === "/" ||
+    pathname === "/login" ||
+    pathname === "/setup" ||
+    pathname === "/private-calls" ||
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/setup") ||
+    pathname.startsWith("/register") ||
+    pathname.startsWith("/invite") ||
+    pathname.startsWith("/demo") ||
+    pathname === "/join" ||
+    pathname.startsWith("/join/") ||
+    pathname.startsWith("/private-calls/")
+  );
+}
+
 /** Public pages vs cabinet role — used so in-cabinet navigation does not re-login. */
 export function demoSessionBootKey(
   pathname: string | null
 ): "public" | MembershipRole {
-  if (
-    pathname === "/login" ||
-    pathname === "/setup" ||
-    pathname === "/" ||
-    pathname?.startsWith("/login") ||
-    pathname?.startsWith("/setup") ||
-    pathname?.startsWith("/register") ||
-    pathname?.startsWith("/invite") ||
-    pathname?.startsWith("/demo")
-  ) {
-    return "public";
-  }
+  if (isDemoPublicPath(pathname)) return "public";
   return roleFromCabinetPath(pathname);
 }
 

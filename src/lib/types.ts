@@ -91,6 +91,7 @@ export type Homework = {
   /** Тема, если тест создан из карточки темы; иначе каталог «Тесты». */
   topicId?: string | null;
   sectionId?: string | null;
+  folderId?: string | null;
   teacherId: string;
   libraryScope?: LibraryScope;
   origin?: MaterialOrigin | null;
@@ -415,7 +416,7 @@ export type Attendance = {
   status: AttendanceStatus;
 };
 
-/** Раздел учебной программы преподавателя */
+/** Раздел учебной программы преподавателя (legacy; зеркало корневых material_folders). */
 export type TopicSection = {
   id: string;
   teacherId: string;
@@ -423,6 +424,9 @@ export type TopicSection = {
   /** Порядок среди разделов этого преподавателя */
   sortOrder: number;
 };
+
+/** Универсальная папка материалов (новая иерархическая модель). */
+export type { MaterialFolder, MaterialFolderKind, FolderSpace } from "@/lib/folders/material-folders";
 
 export type LibraryScope = "school" | "teacher";
 
@@ -444,8 +448,10 @@ export type Topic = {
   libraryScope?: LibraryScope;
   origin?: MaterialOrigin | null;
   updatedAt?: string;
-  /** null / отсутствует — «Без раздела» */
+  /** null / отсутствует — «Без раздела» (legacy) */
   sectionId: string | null;
+  /** Папка в material_folders; null — корень пространства */
+  folderId?: string | null;
   title: string;
   subject: string;
   description?: string;
@@ -476,6 +482,7 @@ export type TheoryMaterial = {
   teacherId: string;
   libraryScope?: LibraryScope;
   origin?: MaterialOrigin | null;
+  folderId?: string | null;
   title: string;
   description?: string;
   videoUrl?: string | null;
@@ -531,6 +538,7 @@ export type Intensive = {
   id: string;
   teacherId: string;
   libraryScope?: LibraryScope;
+  folderId?: string | null;
   title: string;
   description?: string;
   videoUrl?: string | null;
@@ -608,6 +616,8 @@ export type DemoData = {
   trialLessons: TrialLessonPublic[];
   attendances: Attendance[];
   topicSections: TopicSection[];
+  /** Иерархические папки материалов (источник правды для проводника). */
+  materialFolders: import("@/lib/folders/material-folders").MaterialFolder[];
   topics: Topic[];
   homeworks: Homework[];
   homeworkAssignments: HomeworkAssignment[];

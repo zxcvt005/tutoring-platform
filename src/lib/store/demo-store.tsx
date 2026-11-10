@@ -176,6 +176,33 @@ export type DemoStoreValue = {
     sectionId: string | null,
     orderedIds: string[]
   ) => void;
+  upsertMaterialFolder: (input: {
+    id?: string;
+    title: string;
+    parentId?: string | null;
+    ownerScope: "school" | "teacher";
+    teacherId?: string | null;
+    sortOrder?: number;
+  }) => Promise<OkResult & { id?: string }>;
+  deleteMaterialFolder: (
+    id: string,
+    mode?: "empty_only" | "move_to_parent"
+  ) => Promise<OkResult>;
+  moveMaterialFolder: (
+    folderId: string,
+    targetParentId: string | null
+  ) => Promise<OkResult>;
+  reorderMaterialFolders: (input: {
+    ownerScope: "school" | "teacher";
+    teacherId?: string | null;
+    parentId: string | null;
+    orderedIds: string[];
+  }) => Promise<OkResult>;
+  moveMaterialToFolder: (
+    kind: "topic" | "test" | "theory" | "intensive",
+    id: string,
+    folderId: string | null
+  ) => Promise<OkResult>;
   upsertHomework: (
     hw: Omit<Homework, "id"> & { id?: string }
   ) => Promise<OkResult & { id?: string }>;
@@ -291,14 +318,15 @@ const EMPTY_DATA: DemoData = {
   trialLessons: [],
   attendances: [],
   topicSections: [],
+  materialFolders: [],
   topics: [],
   homeworks: [],
   homeworkAssignments: [],
   theories: [],
-    theoryAssignments: [],
-    intensives: [],
-    intensiveAssignments: [],
-    mockExams: [],
+  theoryAssignments: [],
+  intensives: [],
+  intensiveAssignments: [],
+  mockExams: [],
   mockExamResults: [],
   tariffs: [],
   tariffAssignments: [],
@@ -549,6 +577,19 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       reorderTopics: (teacherId, sectionId, orderedIds) => {
         void run("reorderTopics", { teacherId, sectionId, orderedIds });
       },
+      upsertMaterialFolder: async (input) => {
+        const id = input.id ?? newClientId("fld");
+        const r = await run("upsertMaterialFolder", { ...input, id });
+        return { ...r, id: r.ok ? (r.id ?? id) : undefined };
+      },
+      deleteMaterialFolder: (id, mode = "move_to_parent") =>
+        run("deleteMaterialFolder", { id, mode }),
+      moveMaterialFolder: (folderId, targetParentId) =>
+        run("moveMaterialFolder", { folderId, targetParentId }),
+      reorderMaterialFolders: (input) =>
+        run("reorderMaterialFolders", input),
+      moveMaterialToFolder: (kind, id, folderId) =>
+        run("moveMaterialToFolder", { kind, id, folderId }),
       upsertHomework: async (hw) => {
         const id = hw.id ?? newClientId("hw");
         const r = await run("upsertHomework", { ...hw, id });

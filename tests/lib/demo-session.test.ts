@@ -5,6 +5,7 @@ import {
   createSerialAsyncQueue,
   demoSessionBootKey,
   hasDemoSkipAutoLogin,
+  isDemoPublicPath,
   rememberDemoExplicitLogout,
   shouldDefaultDemoLogin,
   shouldSwitchDemoCabinet,
@@ -116,6 +117,33 @@ describe("demo session stability", () => {
     expect(demoSessionBootKey("/demo/student")).toBe("public");
     expect(demoSessionBootKey("/demo/student/homework")).toBe("public");
     expect(demoSessionBootKey("/direkciya/students")).toBe("director");
+  });
+
+  it("treats private-call guest and host paths as public (no platform login redirect)", () => {
+    expect(isDemoPublicPath("/join")).toBe(true);
+    expect(isDemoPublicPath("/join/abc123")).toBe(true);
+    expect(isDemoPublicPath("/join/abc123/extra")).toBe(true);
+    expect(isDemoPublicPath("/private-calls")).toBe(true);
+    expect(isDemoPublicPath("/private-calls/")).toBe(true);
+    expect(isDemoPublicPath("/private-calls/settings")).toBe(true);
+
+    expect(demoSessionBootKey("/join/invite-code")).toBe("public");
+    expect(demoSessionBootKey("/join")).toBe("public");
+    expect(demoSessionBootKey("/private-calls")).toBe("public");
+    expect(demoSessionBootKey("/private-calls/")).toBe("public");
+
+    // Не открывает кабинеты и чужие зоны
+    expect(demoSessionBootKey("/direkciya")).toBe("director");
+    expect(demoSessionBootKey("/kafedra/calls")).toBe("teacher");
+    expect(demoSessionBootKey("/auditoria/calls")).toBe("student");
+    expect(demoSessionBootKey("/pressa")).toBe("press");
+    expect(demoSessionBootKey("/assistent")).toBe("assistant");
+    expect(isDemoPublicPath("/direkciya")).toBe(false);
+    expect(isDemoPublicPath("/kafedra")).toBe(false);
+    expect(isDemoPublicPath("/auditoria")).toBe(false);
+    // Похожие имена не считаются public
+    expect(isDemoPublicPath("/joining")).toBe(false);
+    expect(isDemoPublicPath("/private-calls-admin")).toBe(false);
   });
 
   it("does not switch cabinets from filters when demo login is off", () => {

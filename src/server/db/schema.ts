@@ -4,6 +4,7 @@
  */
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   boolean,
   check,
   index,
@@ -253,6 +254,48 @@ export const topicSections = pgTable("topic_sections", {
   index("topic_sections_teacher_idx").on(t.teacherId),
 ]);
 
+/**
+ * Универсальные папки учебных материалов (иерархия без лимита глубины).
+ * owner_scope=school → школьная база знаний; teacher → личное пространство преподавателя.
+ * topic_sections сохраняются для совместимости; корневые teacher-папки зеркалятся туда.
+ */
+export const materialFolders = pgTable(
+  "material_folders",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    ownerScope: text("owner_scope").notNull().default("teacher"),
+    teacherId: text("teacher_id").references(() => teachers.id, {
+      onDelete: "cascade",
+    }),
+    parentId: text("parent_id").references((): AnyPgColumn => materialFolders.id, {
+      onDelete: "cascade",
+    }),
+    title: text("title").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    ...timestamps,
+  },
+  (t) => [
+    index("material_folders_org_scope_idx").on(
+      t.organizationId,
+      t.ownerScope,
+      t.teacherId
+    ),
+    index("material_folders_parent_idx").on(t.parentId),
+    index("material_folders_teacher_parent_idx").on(t.teacherId, t.parentId),
+    check(
+      "material_folders_scope_check",
+      sql`${t.ownerScope} in ('school', 'teacher')`
+    ),
+    check(
+      "material_folders_owner_check",
+      sql`(${t.ownerScope} = 'school' and ${t.teacherId} is null) or (${t.ownerScope} = 'teacher' and ${t.teacherId} is not null)`
+    ),
+  ]
+);
+
 export const topics = pgTable("topics", {
   id: text("id").primaryKey(),
   organizationId: text("organization_id")
@@ -266,7 +309,11 @@ export const topics = pgTable("topics", {
     onDelete: "cascade",
   }),
   libraryScope: text("library_scope").notNull().default("teacher"),
+  /** @deprecated Используйте folderId; синхронизируется для корневых папок. */
   sectionId: text("section_id").references(() => topicSections.id, {
+    onDelete: "set null",
+  }),
+  folderId: text("folder_id").references(() => materialFolders.id, {
     onDelete: "set null",
   }),
   title: text("title").notNull(),
@@ -279,6 +326,7 @@ export const topics = pgTable("topics", {
 }, (t) => [
   index("topics_teacher_idx").on(t.teacherId),
   index("topics_section_idx").on(t.sectionId),
+  index("topics_folder_idx").on(t.folderId),
   check(
     "topics_status_check",
     sql`${t.status} in ('active', 'archived')`
@@ -309,6 +357,9 @@ export const tests = pgTable("tests", {
   sectionId: text("section_id").references(() => topicSections.id, {
     onDelete: "set null",
   }),
+  folderId: text("folder_id").references(() => materialFolders.id, {
+    onDelete: "set null",
+  }),
   /** null только у оригинала базы знаний школы. */
   teacherId: text("teacher_id").references(() => teachers.id, {
     onDelete: "cascade",
@@ -327,6 +378,7 @@ export const tests = pgTable("tests", {
   index("tests_topic_idx").on(t.topicId),
   index("tests_teacher_idx").on(t.teacherId),
   index("tests_section_idx").on(t.sectionId),
+  index("tests_folder_idx").on(t.folderId),
   check(
     "tests_status_check",
     sql`${t.status} in ('draft', 'published', 'archived')`
@@ -1196,6 +1248,9 @@ export const theoryMaterials = pgTable(
       onDelete: "cascade",
     }),
     libraryScope: text("library_scope").notNull().default("teacher"),
+    folderId: text("folder_id").references(() => materialFolders.id, {
+      onDelete: "set null",
+    }),
     title: text("title").notNull(),
     description: text("description"),
     videoUrl: text("video_url"),
@@ -1213,6 +1268,7 @@ export const theoryMaterials = pgTable(
   (t) => [
     index("theory_materials_teacher_idx").on(t.teacherId),
     index("theory_materials_org_idx").on(t.organizationId),
+    index("theory_materials_folder_idx").on(t.folderId),
     check(
       "theory_materials_status_check",
       sql`${t.status} in ('draft', 'published', 'archived')`
@@ -2301,6 +2357,9 @@ export const intensives = pgTable(
       onDelete: "cascade",
     }),
     libraryScope: text("library_scope").notNull().default("teacher"),
+    folderId: text("folder_id").references(() => materialFolders.id, {
+      onDelete: "set null",
+    }),
     title: text("title").notNull(),
     description: text("description"),
     videoUrl: text("video_url"),
@@ -2315,6 +2374,7 @@ export const intensives = pgTable(
   (t) => [
     index("intensives_teacher_idx").on(t.teacherId),
     index("intensives_org_idx").on(t.organizationId),
+    index("intensives_folder_idx").on(t.folderId),
     check(
       "intensives_status_check",
       sql`${t.status} in ('draft', 'published', 'archived')`
@@ -2647,6 +2707,7 @@ export const schema = {
   students,
   accountInvitations,
   topicSections,
+  materialFolders,
   topics,
   tests,
   testAnswerKeys,

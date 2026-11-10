@@ -15,7 +15,10 @@ import {
   normalizeKimNumber,
 } from "@/lib/math/rich-text-math";
 import type { StudentAnswer, TestQuestion } from "@/lib/types";
-import { clipboardHasImageItem } from "@/lib/tests/question-image";
+import {
+  clipboardHasImageItem,
+  normalizeQuestionImageFileName,
+} from "@/lib/tests/question-image";
 import { QuestionImagePreview } from "@/components/tests/question-image-controls";
 import { cn } from "@/lib/utils";
 
@@ -131,9 +134,16 @@ export function QuestionFields({
               if (!clipboardHasImageItem(items)) return;
               for (const item of items!) {
                 if (!item.type.startsWith("image/")) continue;
-                const file = item.getAsFile();
-                if (!file) continue;
+                const raw = item.getAsFile();
+                if (!raw) continue;
                 e.preventDefault();
+                const name = normalizeQuestionImageFileName(raw.name, raw.type || item.type);
+                const file =
+                  name === raw.name
+                    ? raw
+                    : new File([raw], name, {
+                        type: raw.type || item.type || "application/octet-stream",
+                      });
                 void (async () => {
                   const { apiTestQuestionImageUpload } = await import(
                     "@/lib/store/api-client"

@@ -20,6 +20,7 @@ import {
   tests,
   topicSections,
   topics,
+  materialFolders,
   users,
 } from "@/server/db/schema";
 import { publicMediaUrl } from "@/server/media/storage";
@@ -106,6 +107,11 @@ export async function buildBootstrap(
     .from(topicSections)
     .where(eq(topicSections.organizationId, orgId));
 
+  let folderRows = await db
+    .select()
+    .from(materialFolders)
+    .where(eq(materialFolders.organizationId, orgId));
+
   let topicRows = await db
     .select()
     .from(topics)
@@ -131,6 +137,11 @@ export async function buildBootstrap(
     studentRows = studentRows.filter((s) => s.primaryTeacherId === tid);
     lessonRows = lessonRows.filter((l) => l.teacherId === tid);
     sectionRows = sectionRows.filter((s) => s.teacherId === tid);
+    folderRows = folderRows.filter(
+      (f) =>
+        f.ownerScope === "school" ||
+        (f.ownerScope === "teacher" && f.teacherId === tid)
+    );
     topicRows = topicRows.filter((t) => t.teacherId === tid);
     testRows = testRows.filter((t) => t.teacherId === tid);
     assignmentRows = assignmentRows.filter((a) => a.teacherId === tid);
@@ -157,6 +168,15 @@ export async function buildBootstrap(
     topicRows = topicRows.filter((t) => topicIds.has(t.id) || t.teacherId === myTeacherId);
     testRows = testRows.filter((t) => t.status === "published");
     sectionRows = sectionRows.filter((s) => s.teacherId === myTeacherId);
+    // Школьные папки ученику не отдаём (как assertCanReadSpace в folder-service).
+    folderRows = folderRows.filter(
+      (f) => f.ownerScope === "teacher" && f.teacherId === myTeacherId
+    );
+  }
+
+  if (ctx.role === "press") {
+    // Пресс не использует explorer материалов и не проходит assertCanReadSpace.
+    folderRows = [];
   }
 
   if (ctx.role === "assistant") {
@@ -229,6 +249,7 @@ export async function buildBootstrap(
       id: t.id,
       topicId: t.topicId,
       sectionId: t.sectionId,
+      folderId: t.folderId ?? t.sectionId ?? null,
       teacherId: t.teacherId ?? "",
       libraryScope: (t.libraryScope as Homework["libraryScope"]) ?? "teacher",
       origin:
@@ -519,12 +540,24 @@ export async function buildBootstrap(
         : (originMap.get(originKey("topic", t.id)) ?? null),
     updatedAt: t.updatedAt.toISOString(),
     sectionId: t.sectionId,
+    folderId: t.folderId ?? t.sectionId ?? null,
     title: t.title,
     subject: t.subject,
     description: t.description ?? undefined,
     programNote: t.programNote ?? undefined,
     status: t.status as Topic["status"],
     sortOrder: t.sortOrder,
+  }));
+
+  const mappedMaterialFolders = folderRows.map((f) => ({
+    id: f.id,
+    ownerScope: (f.ownerScope === "school" ? "school" : "teacher") as
+      | "school"
+      | "teacher",
+    teacherId: f.teacherId,
+    parentId: f.parentId,
+    title: f.title,
+    sortOrder: f.sortOrder,
   }));
 
   let tariffRows = await db
@@ -737,6 +770,7 @@ export async function buildBootstrap(
     trialLessons: trialLessonsForSchedule,
     attendances: mappedAttendances,
     topicSections: mappedSections,
+    materialFolders: mappedMaterialFolders,
     topics: mappedTopics,
     homeworks,
     homeworkAssignments: homeworkAssignmentsWithTheory,

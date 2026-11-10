@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
+import { MaterialsFolderPanel } from "@/components/folders/materials-folder-panel";
 import { PageHeader } from "@/components/layout/page-header";
 import { TheoryStatusBadge, TopicStatusBadge } from "@/components/status-badge";
 import { TestEditorDialog } from "@/components/tests/test-editor-dialog";
@@ -347,223 +348,103 @@ export function KnowledgeWorkspace({
       {block === "school" ? (
         <div className="space-y-3">
           <div className="flex flex-wrap gap-2">
-            {(Object.keys(KIND_LABEL) as Kind[]).map((item) => {
-              const count =
-                item === "intensive"
-                  ? schoolIntensives.length
-                  : item === "theory"
-                    ? schoolTheories.length
-                    : item === "test"
-                      ? schoolTests.length
-                      : schoolTopics.length;
-              return (
-                <Button
-                  key={item}
-                  type="button"
-                  size="sm"
-                  variant={kind === item ? "default" : "outline"}
-                  onClick={() => {
-                    setKind(item);
-                    setSelected([]);
-                  }}
-                >
-                  {KIND_LABEL[item]} · {count}
-                </Button>
-              );
-            })}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Поиск по названию"
-              className="max-w-xs"
-            />
-            <select
-              className="h-8 rounded-lg border border-border bg-background px-2 text-sm"
-              value={sort}
-              onChange={(e) => setSort(e.target.value as SortKey)}
+            <Link
+              href={`${knowledgeBasePath}/theory/new`}
+              className={buttonVariants({ variant: "outline" })}
             >
-              <option value="updated">Сначала новые</option>
-              <option value="title">По названию</option>
-            </select>
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={showArchived}
-                onCheckedChange={() => setShowArchived((v) => !v)}
-              />
-              Архив
-            </label>
-            <div className="ml-auto flex flex-wrap gap-2">
-              {kind === "intensive" ? null : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={selected.length === 0}
-                  onClick={() => setTransferOpen(true)}
-                >
-                  Передать преподавателям
-                  {selected.length ? ` (${selected.length})` : ""}
-                </Button>
-              )}
-              {kind === "intensive" ? (
-                <Link
-                  href={`${knowledgeBasePath}/intensives/new`}
-                  className={buttonVariants()}
-                >
-                  Новый интенсив
-                </Link>
-              ) : kind === "theory" ? (
-                <Link
-                  href={`${knowledgeBasePath}/theory/new`}
-                  className={buttonVariants()}
-                >
-                  Новая теория
-                </Link>
-              ) : kind === "test" ? (
-                <Button type="button" onClick={openNewTest}>
-                  Новый тест
-                </Button>
-              ) : (
-                <Button type="button" onClick={openNewTopic}>
-                  Новая тема
-                </Button>
-              )}
-            </div>
+              Новая теория
+            </Link>
+            <Link
+              href={`${knowledgeBasePath}/intensives/new`}
+              className={buttonVariants({ variant: "outline" })}
+            >
+              Новый интенсив
+            </Link>
+            <Button type="button" variant="outline" onClick={openNewTest}>
+              Новый тест
+            </Button>
+            <Button type="button" variant="outline" onClick={openNewTopic}>
+              Новая тема
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={selected.length === 0}
+              onClick={() => setTransferOpen(true)}
+            >
+              Передать выбранные
+              {selected.length ? ` (${selected.length})` : ""}
+            </Button>
           </div>
-          {visibleSchool.length === 0 ? (
-            <EmptyState
-              title={schoolItems.length === 0 ? "Материалов пока нет" : "Ничего не найдено"}
-              description={
-                schoolItems.length === 0
-                  ? kind === "intensive"
-                    ? "Создайте общий интенсив. Преподаватель отправит его своим ученикам без копии."
-                    : "Создайте оригинал школы. После передачи у преподавателя появится отдельная копия."
-                  : "Измените поиск или фильтр."
+          <MaterialsFolderPanel
+            ownerScope="school"
+            teacherId={null}
+            canEdit
+            onOpenMaterial={(itemKind, id) => {
+              if (itemKind === "theory") {
+                router.push(`${knowledgeBasePath}/theory/${id}`);
+              } else if (itemKind === "intensive") {
+                router.push(`${knowledgeBasePath}/intensives/${id}`);
+              } else if (itemKind === "topic") {
+                const topic = schoolTopics.find((t) => t.id === id);
+                if (topic) openTopic(topic);
+              } else if (itemKind === "test") {
+                const hw = schoolTests.find((t) => t.id === id);
+                if (hw) {
+                  setEditingTest(hw);
+                  setTestOwner({ teacherId: "", libraryScope: "school" });
+                  setTestOpen(true);
+                }
               }
-            />
-          ) : (
-            <div className="panel overflow-x-auto">
-              <table className="w-full min-w-[40rem] text-sm">
-                <thead className="text-left text-xs text-muted-foreground">
-                  <tr>
-                    <th className="w-10 px-3 py-2">
-                      <Checkbox
-                        checked={
-                          visibleSchool.length > 0 &&
-                          visibleSchool.every((item) => selected.includes(item.id))
-                        }
-                        onCheckedChange={() => {
-                          const ids = visibleSchool.map((item) => item.id);
-                          const allOn = ids.every((id) => selected.includes(id));
-                          setSelected((prev) =>
-                            allOn
-                              ? prev.filter((id) => !ids.includes(id))
-                              : [...new Set([...prev, ...ids])]
-                          );
-                        }}
-                      />
-                    </th>
-                    <th className="px-2 py-2 font-medium">Название</th>
-                    <th className="px-2 py-2 font-medium">Статус</th>
-                    <th className="px-2 py-2 font-medium">Обновлено</th>
-                    <th className="px-3 py-2" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleSchool.map((item) => (
-                    <tr key={item.id} className="border-t border-border/70">
-                      <td className="px-3 py-2">
-                        <Checkbox
-                          checked={selected.includes(item.id)}
-                          onCheckedChange={() => toggleSelected(item.id)}
-                        />
-                      </td>
-                      <td className="px-2 py-2 font-medium">
-                        <p>{item.title}</p>
-                        {"origin" in item && item.origin ? (
-                          <p className="text-xs font-normal text-muted-foreground">
-                            {originText(
-                              item.origin,
-                              sourceIds.has(
-                                `${item.origin.sourceKind}:${item.origin.sourceId}`
-                              )
-                            )}
-                          </p>
-                        ) : null}
-                      </td>
-                      <td className="px-2 py-2">
-                        {kind === "topic" ? (
-                          <TopicStatusBadge status={item.status as TopicStatus} />
-                        ) : (
-                          <TheoryStatusBadge
-                            status={item.status as TheoryMaterial["status"]}
-                          />
-                        )}
-                      </td>
-                      <td className="px-2 py-2 text-muted-foreground">
-                        {"updatedAt" in item && item.updatedAt
-                          ? formatDate(item.updatedAt)
-                          : "—"}
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex flex-wrap justify-end gap-1">
-                          {kind === "intensive" ? (
-                            <Link
-                              href={`${knowledgeBasePath}/intensives/${item.id}`}
-                              className={cn(buttonVariants({ size: "xs", variant: "outline" }))}
-                            >
-                              Открыть
-                            </Link>
-                          ) : kind === "theory" ? (
-                            <Link
-                              href={`${knowledgeBasePath}/theory/${item.id}`}
-                              className={cn(buttonVariants({ size: "xs", variant: "outline" }))}
-                            >
-                              Открыть
-                            </Link>
-                          ) : (
-                            <Button
-                              type="button"
-                              size="xs"
-                              variant="outline"
-                              onClick={() =>
-                                kind === "test"
-                                  ? openTest(item as Homework)
-                                  : openTopic(item as Topic)
-                              }
-                            >
-                              Открыть
-                            </Button>
-                          )}
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="ghost"
-                            onClick={() =>
-                              setRemoving({
-                                kind,
-                                id: item.id,
-                                title: item.title,
-                                assigned:
-                                  kind === "theory"
-                                    ? (item as TheoryMaterial).assignedCount > 0
-                                    : kind === "intensive"
-                                      ? (item as Intensive).assignedCount > 0
-                                      : false,
-                              })
-                            }
-                          >
-                            Удалить
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+            }}
+            renderMaterialActions={(item) => {
+              if (item.kind === "folder") return null;
+              const transferKind =
+                item.kind === "topic" ||
+                item.kind === "test" ||
+                item.kind === "theory"
+                  ? (item.kind as Kind)
+                  : null;
+              return (
+                <div className="flex gap-1">
+                  {transferKind && transferKind !== "intensive" ? (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => {
+                        setKind(transferKind);
+                        setSelected([item.id]);
+                        setTransferOpen(true);
+                      }}
+                    >
+                      Передать
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="ghost"
+                    onClick={() =>
+                      setRemoving({
+                        kind: (item.kind === "test"
+                          ? "test"
+                          : item.kind === "topic"
+                            ? "topic"
+                            : item.kind === "intensive"
+                              ? "intensive"
+                              : "theory") as Kind,
+                        id: item.id,
+                        title: item.title,
+                      })
+                    }
+                  >
+                    Удалить
+                  </Button>
+                </div>
+              );
+            }}
+          />
         </div>
       ) : (
         <TeacherDevelopments

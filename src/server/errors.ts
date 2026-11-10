@@ -185,15 +185,40 @@ export type ErrorBody = {
   };
 };
 
+function isApiErrorLike(
+  err: unknown
+): err is { status: number; code: ErrorCode; message: string; details?: unknown } {
+  if (!err || typeof err !== "object") return false;
+  const anyErr = err as {
+    status?: unknown;
+    code?: unknown;
+    message?: unknown;
+  };
+  return (
+    typeof anyErr.status === "number" &&
+    typeof anyErr.code === "string" &&
+    typeof anyErr.message === "string" &&
+    (anyErr.code === "bad_request" ||
+      anyErr.code === "unauthorized" ||
+      anyErr.code === "forbidden" ||
+      anyErr.code === "not_found" ||
+      anyErr.code === "conflict" ||
+      anyErr.code === "validation_error" ||
+      anyErr.code === "rate_limited" ||
+      anyErr.code === "service_unavailable" ||
+      anyErr.code === "internal_error")
+  );
+}
+
 export function toErrorBody(err: unknown): { status: number; body: ErrorBody } {
-  if (err instanceof ApiError) {
+  if (err instanceof ApiError || isApiErrorLike(err)) {
     return {
       status: err.status,
       body: {
         error: {
           code: err.code,
           message: err.message,
-          details: err.details,
+          details: "details" in err ? err.details : undefined,
         },
       },
     };

@@ -242,6 +242,9 @@ export function migrateToV5(raw: unknown): DemoData | null {
       : [],
     attendances: Array.isArray(blob.attendances) ? blob.attendances : [],
     topicSections,
+    materialFolders: Array.isArray((blob as DemoData).materialFolders)
+      ? (blob as DemoData).materialFolders
+      : [],
     topics,
     homeworks,
     homeworkAssignments,

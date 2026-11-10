@@ -856,6 +856,7 @@ export async function listIntensivesForBootstrap(
       id: row.id,
       teacherId: row.teacherId ?? "",
       libraryScope: row.libraryScope as LibraryScope,
+      folderId: row.folderId ?? null,
       title: row.title,
       description: row.description ?? undefined,
       videoUrl: row.videoUrl,

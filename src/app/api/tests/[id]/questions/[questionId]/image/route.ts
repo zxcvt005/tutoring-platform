@@ -1,7 +1,10 @@
 import { assertMutatingRequest } from "@/server/auth/csrf";
 import { getDb } from "@/server/db/runtime";
 import { jsonError, jsonOk, validationError } from "@/server/errors";
-import { filesFromFormData, isMultipart } from "@/server/http/chat-uploads";
+import {
+  isMultipart,
+  questionImageFromFormData,
+} from "@/server/http/chat-uploads";
 import { requireAuth } from "@/server/http/request";
 import {
   deleteTestQuestionImage,
@@ -39,7 +42,7 @@ export async function POST(request: Request, { params }: Params) {
     const { id: testId, questionId } = await params;
     const ctx = await requireAuth(request);
     const form = await request.formData();
-    const files = await filesFromFormData(form);
+    const files = await questionImageFromFormData(form);
     if (files.length !== 1) {
       throw validationError("Загрузите одно изображение");
     }

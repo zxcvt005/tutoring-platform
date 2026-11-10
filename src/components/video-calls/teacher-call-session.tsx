@@ -189,13 +189,16 @@ export function TeacherCallSession({
       })
     );
     const controller = new CameraBackgroundController();
-    controller.onAutoOff = (message) => {
+    const softOff = (message: string) => {
       setBgChoice({ type: "off" });
       setError(message);
     };
+    controller.onAutoOff = softOff;
+    controller.onFailure = softOff;
     bgRef.current = controller;
     return () => {
       controller.onAutoOff = null;
+      controller.onFailure = null;
       void controller.dispose();
       bgRef.current = null;
     };
@@ -218,9 +221,11 @@ export function TeacherCallSession({
   const applyCameraBackground = useCallback(async () => {
     const track = currentCameraTrack();
     try {
-      await bgRef.current?.applyTo(track);
+      const result = await bgRef.current?.applyTo(track);
+      if (result) setBgChoice(result.choice);
     } catch (err) {
       setBgChoice({ type: "off" });
+      bgRef.current?.setDesired({ type: "off" });
       setError(deviceErrorMessage(err));
     }
     const view = callRef.current;

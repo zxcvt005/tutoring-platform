@@ -940,6 +940,7 @@ export function createSeedData(): DemoData {
     trialLessons: [],
     attendances,
     topicSections,
+    materialFolders: [],
     topics,
     homeworks,
     homeworkAssignments,

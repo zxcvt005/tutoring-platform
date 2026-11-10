@@ -55,6 +55,16 @@ export function AuditoriaLearningPanel() {
     () => sectionsForTeacher(teacherId),
     [sectionsForTeacher, teacherId]
   );
+  const folderLabels = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const f of data.materialFolders ?? []) {
+      if (f.ownerScope === "teacher" && f.teacherId === teacherId) {
+        map.set(f.id, f.title);
+      }
+    }
+    for (const s of sections) map.set(s.id, s.title);
+    return map;
+  }, [data.materialFolders, sections, teacherId]);
   const topics = useMemo(
     () => topicsForTeacher(teacherId).filter((t) => t.status === "active"),
     [topicsForTeacher, teacherId]
@@ -72,18 +82,18 @@ export function AuditoriaLearningPanel() {
 
   const grouped = useMemo(() => {
     const bySection = new Map<string, Topic[]>();
-    for (const section of sections) {
-      bySection.set(section.id, []);
+    for (const id of folderLabels.keys()) {
+      bySection.set(id, []);
     }
     bySection.set(UNSECTIONED_ID, []);
     for (const topic of topics) {
-      const key = topic.sectionId ?? UNSECTIONED_ID;
+      const key = topic.folderId ?? topic.sectionId ?? UNSECTIONED_ID;
       const list = bySection.get(key) ?? [];
       list.push(topic);
       bySection.set(key, list);
     }
     return bySection;
-  }, [sections, topics]);
+  }, [folderLabels, topics]);
 
   if (!student) {
     return (
@@ -104,14 +114,14 @@ export function AuditoriaLearningPanel() {
   }
 
   const sectionBlocks = [
-    ...sections.map((s) => ({
-      id: s.id,
-      title: s.title,
-      topics: grouped.get(s.id) ?? [],
+    ...[...folderLabels.entries()].map(([id, title]) => ({
+      id,
+      title,
+      topics: grouped.get(id) ?? [],
     })),
     {
       id: UNSECTIONED_ID,
-      title: "Без раздела",
+      title: "Без папки",
       topics: grouped.get(UNSECTIONED_ID) ?? [],
     },
   ].filter((b) => b.topics.length > 0);

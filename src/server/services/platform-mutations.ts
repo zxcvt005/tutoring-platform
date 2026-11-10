@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { parseAppInstant } from "@/lib/app-time";
 import { dateKeyLocal } from "@/lib/calendar-month";
@@ -69,7 +69,13 @@ import {
   recordChatSystemEventSafe,
 } from "@/server/services/chat-events";
 import type { AppDb } from "@/server/db/types";
-import { badRequest, conflict, forbidden, notFound } from "@/server/errors";
+import {
+  ApiError,
+  badRequest,
+  conflict,
+  forbidden,
+  notFound,
+} from "@/server/errors";
 import { settleLessonPayroll } from "@/server/services/teacher-payroll-service";
 import {
   reviewAssignment,
@@ -1308,43 +1314,17 @@ export async function upsertTopicSection(
     sortOrder?: number;
   }
 ) {
-  requireRoles(ctx, ["teacher", "director", "assistant"]);
-  if (ctx.role === "teacher") {
-    const tid = await requireTeacherProfile(ctx);
-    if (section.teacherId !== tid) throw forbidden();
-  }
-  const id = section.id ?? newId("sec");
-  const siblings = await db
-    .select()
-    .from(topicSections)
-    .where(
-      and(
-        eq(topicSections.organizationId, ctx.organizationId),
-        eq(topicSections.teacherId, section.teacherId)
-      )
-    );
-  const sortOrder =
-    section.sortOrder ??
-    (siblings.length ? Math.max(...siblings.map((s) => s.sortOrder)) + 1 : 0);
-  const [existing] = await db
-    .select()
-    .from(topicSections)
-    .where(eq(topicSections.id, id))
-    .limit(1);
-  const values = {
-    id,
-    organizationId: ctx.organizationId,
-    teacherId: section.teacherId,
+  // Dual-write: корневая папка в новой модели + зеркало topic_sections.
+  const { upsertMaterialFolder } = await import("@/server/services/folder-service");
+  const folder = await upsertMaterialFolder(db, ctx, {
+    id: section.id,
     title: section.title,
-    sortOrder,
-    updatedAt: new Date(),
-  };
-  if (existing) {
-    await db.update(topicSections).set(values).where(eq(topicSections.id, id));
-  } else {
-    await db.insert(topicSections).values({ ...values, createdAt: new Date() });
-  }
-  return { id };
+    parentId: null,
+    ownerScope: "teacher",
+    teacherId: section.teacherId,
+    sortOrder: section.sortOrder,
+  });
+  return { id: folder.id };
 }
 
 export async function deleteTopicSection(
@@ -1353,31 +1333,60 @@ export async function deleteTopicSection(
   id: string,
   moveTopicsTo: string | null
 ) {
-  requireRoles(ctx, ["teacher", "director", "assistant"]);
-  const [section] = await db
-    .select()
-    .from(topicSections)
-    .where(eq(topicSections.id, id))
-    .limit(1);
-  if (!section || section.organizationId !== ctx.organizationId) throw notFound();
-  if (ctx.role === "teacher" && section.teacherId !== ctx.teacherId) throw forbidden();
-
+  const { deleteMaterialFolder, moveMaterialToFolder } = await import(
+    "@/server/services/folder-service"
+  );
   if (moveTopicsTo) {
-    const [target] = await db
-      .select()
-      .from(topicSections)
-      .where(eq(topicSections.id, moveTopicsTo))
-      .limit(1);
-    if (!target || target.teacherId !== section.teacherId) {
-      throw badRequest("Нельзя перенести темы в этот раздел");
+    const topicRows = await db
+      .select({ id: topics.id })
+      .from(topics)
+      .where(or(eq(topics.sectionId, id), eq(topics.folderId, id)));
+    for (const row of topicRows) {
+      await moveMaterialToFolder(db, ctx, { kind: "topic", id: row.id }, moveTopicsTo);
+    }
+    const testRows = await db
+      .select({ id: tests.id })
+      .from(tests)
+      .where(or(eq(tests.sectionId, id), eq(tests.folderId, id)));
+    for (const row of testRows) {
+      await moveMaterialToFolder(db, ctx, { kind: "test", id: row.id }, moveTopicsTo);
     }
   }
-
-  await db
-    .update(topics)
-    .set({ sectionId: moveTopicsTo, updatedAt: new Date() })
-    .where(eq(topics.sectionId, id));
-  await db.delete(topicSections).where(eq(topicSections.id, id));
+  try {
+    await deleteMaterialFolder(db, ctx, id, "move_to_parent");
+  } catch (err) {
+    // Legacy: раздел ещё не в material_folders. Не глотаем forbidden/validation.
+    if (!(err instanceof ApiError) || err.code !== "not_found") {
+      throw err;
+    }
+    requireRoles(ctx, ["teacher", "director", "assistant"]);
+    const [section] = await db
+      .select()
+      .from(topicSections)
+      .where(eq(topicSections.id, id))
+      .limit(1);
+    if (!section || section.organizationId !== ctx.organizationId) throw notFound();
+    if (ctx.role === "teacher" && section.teacherId !== ctx.teacherId) {
+      throw forbidden();
+    }
+    await db
+      .update(topics)
+      .set({
+        sectionId: moveTopicsTo,
+        folderId: moveTopicsTo,
+        updatedAt: new Date(),
+      })
+      .where(or(eq(topics.sectionId, id), eq(topics.folderId, id)));
+    await db
+      .update(tests)
+      .set({
+        sectionId: moveTopicsTo,
+        folderId: moveTopicsTo,
+        updatedAt: new Date(),
+      })
+      .where(or(eq(tests.sectionId, id), eq(tests.folderId, id)));
+    await db.delete(topicSections).where(eq(topicSections.id, id));
+  }
   return { ok: true };
 }
 
@@ -1407,9 +1416,10 @@ export async function reorderTopicSections(
 export async function upsertTopic(
   db: AppDb,
   ctx: AuthContext,
-  topic: Omit<Topic, "id" | "sortOrder" | "sectionId"> & {
+  topic: Omit<Topic, "id" | "sortOrder" | "sectionId" | "folderId"> & {
     id?: string;
     sectionId?: string | null;
+    folderId?: string | null;
     sortOrder?: number;
   }
 ) {
@@ -1422,8 +1432,20 @@ export async function upsertTopic(
   const id = topic.id ?? newId("tp");
   const [existing] = await db.select().from(topics).where(eq(topics.id, id)).limit(1);
   const owner = await resolveLibraryOwner(db, ctx, topic, existing);
-  let sectionId = topic.sectionId === undefined ? null : topic.sectionId;
-  if (owner.libraryScope === "school") sectionId = null;
+  let folderId =
+    topic.folderId !== undefined
+      ? topic.folderId
+      : topic.sectionId !== undefined
+        ? topic.sectionId
+        : (existing?.folderId ?? existing?.sectionId ?? null);
+  if (owner.libraryScope === "school") folderId = null;
+  const { legacySectionIdForFolder } = await import(
+    "@/server/services/folder-service"
+  );
+  const sectionId =
+    owner.libraryScope === "school"
+      ? null
+      : await legacySectionIdForFolder(db, folderId);
   const siblings = await db
     .select()
     .from(topics)
@@ -1433,9 +1455,9 @@ export async function upsertTopic(
         owner.teacherId == null
           ? isNull(topics.teacherId)
           : eq(topics.teacherId, owner.teacherId),
-        sectionId == null
-          ? sql`${topics.sectionId} is null`
-          : eq(topics.sectionId, sectionId)
+        folderId == null
+          ? sql`${topics.folderId} is null`
+          : eq(topics.folderId, folderId)
       )
     );
   const sortOrder =
@@ -1450,6 +1472,7 @@ export async function upsertTopic(
     teacherId: owner.teacherId,
     libraryScope: owner.libraryScope,
     sectionId,
+    folderId,
     title,
     subject,
     description,
@@ -1499,26 +1522,19 @@ export async function moveTopic(
   sectionId: string | null,
   sortOrder?: number
 ) {
-  requireRoles(ctx, ["teacher", "director", "assistant"]);
-  const [topic] = await db.select().from(topics).where(eq(topics.id, topicId)).limit(1);
-  if (!topic || topic.organizationId !== ctx.organizationId) throw notFound();
-  if (ctx.role === "teacher" && topic.teacherId !== ctx.teacherId) throw forbidden();
-  if (sectionId) {
-    const [sec] = await db
-      .select()
-      .from(topicSections)
-      .where(eq(topicSections.id, sectionId))
-      .limit(1);
-    if (!sec || sec.teacherId !== topic.teacherId) throw forbidden();
+  const { moveMaterialToFolder } = await import("@/server/services/folder-service");
+  await moveMaterialToFolder(
+    db,
+    ctx,
+    { kind: "topic", id: topicId },
+    sectionId
+  );
+  if (sortOrder != null) {
+    await db
+      .update(topics)
+      .set({ sortOrder, updatedAt: new Date() })
+      .where(eq(topics.id, topicId));
   }
-  await db
-    .update(topics)
-    .set({
-      sectionId,
-      sortOrder: sortOrder ?? topic.sortOrder,
-      updatedAt: new Date(),
-    })
-    .where(eq(topics.id, topicId));
   return { ok: true };
 }
 
@@ -1563,11 +1579,25 @@ export async function upsertHomework(
     : [];
   const owner = await resolveLibraryOwner(db, ctx, hw, existing);
   const purpose = hw.purpose ?? existing?.purpose ?? "homework";
+  let folderId =
+    owner.libraryScope === "school"
+      ? null
+      : ((hw as { folderId?: string | null }).folderId !== undefined
+          ? (hw as { folderId?: string | null }).folderId ?? null
+          : hw.sectionId ?? existing?.folderId ?? null);
+  const { legacySectionIdForFolder } = await import(
+    "@/server/services/folder-service"
+  );
+  const sectionId =
+    owner.libraryScope === "school"
+      ? null
+      : await legacySectionIdForFolder(db, folderId);
   const values = {
     id,
     organizationId: ctx.organizationId,
     topicId: owner.libraryScope === "school" ? null : hw.topicId || null,
-    sectionId: owner.libraryScope === "school" ? null : hw.sectionId ?? null,
+    sectionId,
+    folderId,
     teacherId: owner.teacherId,
     libraryScope: owner.libraryScope,
     title: hw.title,

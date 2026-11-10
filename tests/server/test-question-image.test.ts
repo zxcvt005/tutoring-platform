@@ -11,8 +11,12 @@ import {
 import { CSRF_COOKIE, CSRF_HEADER } from "@/server/auth/constants";
 import { SESSION_COOKIE } from "@/server/auth/session";
 import { resolveAuthContext } from "@/server/authz/context";
+import {
+  setChatObjectStoreForTests,
+} from "@/server/media/chat-storage";
 import { getTestQuestionObject } from "@/server/media/test-question-storage";
 import { loginWithPassword } from "@/server/services/auth-service";
+import { serviceUnavailable } from "@/server/errors";
 import {
   assignHomework,
   publishHomework,
@@ -52,6 +56,7 @@ describe("test question images", () => {
   });
 
   afterEach(async () => {
+    setChatObjectStoreForTests(null);
     if (close) await close();
     close = undefined;
     if (previousUploadRoot === undefined) delete process.env.CHAT_UPLOAD_ROOT;
@@ -338,6 +343,142 @@ describe("test question images", () => {
     expect(got.headers.get("content-type")).toMatch(/image\//);
     const bytes = Buffer.from(await got.arrayBuffer());
     expect(bytes.length).toBeGreaterThan(0);
+  });
+
+  it("accepts clipboard-style PNG/JPEG via HTTP and rejects bad formats with 400", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const { ctx: teacher, sessionToken } = await asRole(t.db, "anna@example.com");
+    const saved = await draftHomework(t.db, teacher, "q_clip");
+
+    // Клиент (Ctrl+V) нормализует пустое имя до clipboard.png до FormData —
+    // пустой filename через Request→formData() отбрасывается рантаймом.
+    const { normalizeQuestionImageFileName } = await import(
+      "@/lib/tests/question-image"
+    );
+    const { questionImageFromFormData } = await import(
+      "@/server/http/chat-uploads"
+    );
+    const emptyNamed = new FormData();
+    emptyNamed.append(
+      "files",
+      new File([pngBytes(11)], "", { type: "image/png" })
+    );
+    const normalizedFromEmpty = await questionImageFromFormData(emptyNamed);
+    expect(normalizedFromEmpty).toHaveLength(1);
+    expect(normalizedFromEmpty[0]!.filename).toBe("clipboard.png");
+
+    const clipName = normalizeQuestionImageFileName("", "image/png");
+    expect(clipName).toBe("clipboard.png");
+    const clipPng = new FormData();
+    clipPng.append(
+      "files",
+      new File([pngBytes(11)], clipName, { type: "image/png" })
+    );
+    const pngRes = await POST(
+      new Request(
+        `http://localhost:3000/api/tests/${saved.id}/questions/q_clip/image`,
+        {
+          method: "POST",
+          headers: mutatingHeaders(sessionToken),
+          body: clipPng,
+        }
+      ),
+      {
+        params: Promise.resolve({ id: saved.id, questionId: "q_clip" }),
+      }
+    );
+    expect(pngRes.status).toBe(200);
+    const pngBody = (await pngRes.json()) as { imageObjectKey: string };
+    expect(pngBody.imageObjectKey).toContain(".png");
+
+    const jpegForm = new FormData();
+    jpegForm.append(
+      "files",
+      new File([jpegBytes(12)], "file", { type: "image/jpeg" })
+    );
+    const jpegRes = await POST(
+      new Request(
+        `http://localhost:3000/api/tests/${saved.id}/questions/q_clip/image`,
+        {
+          method: "POST",
+          headers: mutatingHeaders(sessionToken),
+          body: jpegForm,
+        }
+      ),
+      {
+        params: Promise.resolve({ id: saved.id, questionId: "q_clip" }),
+      }
+    );
+    expect(jpegRes.status).toBe(200);
+
+    const bad = new FormData();
+    bad.append(
+      "files",
+      new File([Buffer.from("%PDF-1.4")], "x.png", { type: "image/png" })
+    );
+    const badRes = await POST(
+      new Request(
+        `http://localhost:3000/api/tests/${saved.id}/questions/q_clip/image`,
+        {
+          method: "POST",
+          headers: mutatingHeaders(sessionToken),
+          body: bad,
+        }
+      ),
+      {
+        params: Promise.resolve({ id: saved.id, questionId: "q_clip" }),
+      }
+    );
+    expect(badRes.status).toBe(400);
+    const badBody = (await badRes.json()) as {
+      error: { code: string; message: string };
+    };
+    expect(badBody.error.code).toBe("validation_error");
+    expect(badBody.error.message).not.toBe("Внутренняя ошибка сервера");
+  });
+
+  it("surfaces S3 NoSuchBucket as service_unavailable for question upload", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    setChatObjectStoreForTests({
+      async put() {
+        throw serviceUnavailable(
+          "Бакет S3 не найден или URL хранилища неверный (HTTP 404 / NoSuchBucket). Проверьте S3_BUCKET и S3_ENDPOINT (origin без имени бакета), а также path-style (`S3_FORCE_PATH_STYLE=1`). HTTP 404 здесь не означает отказ ACL."
+        );
+      },
+      async get() {
+        throw new Error("unused");
+      },
+      async delete() {},
+    });
+
+    const { ctx: teacher, sessionToken } = await asRole(t.db, "anna@example.com");
+    const saved = await draftHomework(t.db, teacher, "q_s3");
+    const form = new FormData();
+    form.append(
+      "files",
+      new File([pngBytes(13)], "ok.png", { type: "image/png" })
+    );
+    const res = await POST(
+      new Request(
+        `http://localhost:3000/api/tests/${saved.id}/questions/q_s3/image`,
+        {
+          method: "POST",
+          headers: mutatingHeaders(sessionToken),
+          body: form,
+        }
+      ),
+      {
+        params: Promise.resolve({ id: saved.id, questionId: "q_s3" }),
+      }
+    );
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("service_unavailable");
+    expect(body.error.message).toMatch(/NoSuchBucket|не найден/i);
+    expect(body.error.message).not.toBe("Внутренняя ошибка сервера");
+    expect(body.error.message).not.toMatch(/secret|password|AKIA/i);
   });
 
   it("forbids delete and upload for student and foreign teacher", async () => {

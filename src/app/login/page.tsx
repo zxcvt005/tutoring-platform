@@ -70,20 +70,21 @@ function LoginForm() {
           | "press"
           | "assistant"
       );
-      if (
+      // Кабинеты — только свой префикс; /join и /private-calls — без platform-кабинета.
+      const safeNext =
         next &&
         next.startsWith("/") &&
         !next.startsWith("//") &&
-        ((result.role === "director" && next.startsWith("/direkciya")) ||
+        (next === "/join" ||
+          next.startsWith("/join/") ||
+          next === "/private-calls" ||
+          next.startsWith("/private-calls/") ||
+          (result.role === "director" && next.startsWith("/direkciya")) ||
           (result.role === "teacher" && next.startsWith("/kafedra")) ||
           (result.role === "student" && next.startsWith("/auditoria")) ||
           (result.role === "press" && next.startsWith("/pressa")) ||
-          (result.role === "assistant" && next.startsWith("/assistent")))
-      ) {
-        router.replace(next);
-      } else {
-        router.replace(home);
-      }
+          (result.role === "assistant" && next.startsWith("/assistent")));
+      router.replace(safeNext ? next! : home);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка входа");
     } finally {

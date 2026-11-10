@@ -616,6 +616,7 @@ export function createStudentTourSeed(): DemoData {
     trialLessons: [],
     attendances,
     topicSections: sections,
+    materialFolders: [],
     topics,
     homeworks,
     homeworkAssignments,

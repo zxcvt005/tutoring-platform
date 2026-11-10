@@ -115,6 +115,78 @@ export async function POST(request: Request) {
             (p.sectionId as string | null) ?? null,
             p.orderedIds as string[]
           );
+        case "upsertMaterialFolder": {
+          const {
+            upsertMaterialFolder,
+          } = await import("@/server/services/folder-service");
+          return upsertMaterialFolder(db, ctx, {
+            id: p.id as string | undefined,
+            title: String(p.title ?? ""),
+            parentId: (p.parentId as string | null | undefined) ?? null,
+            ownerScope:
+              p.ownerScope === "school" ? "school" : "teacher",
+            teacherId: (p.teacherId as string | null | undefined) ?? null,
+            sortOrder: p.sortOrder as number | undefined,
+          });
+        }
+        case "deleteMaterialFolder": {
+          const {
+            deleteMaterialFolder,
+          } = await import("@/server/services/folder-service");
+          return deleteMaterialFolder(
+            db,
+            ctx,
+            String(p.id),
+            p.mode === "empty_only" ? "empty_only" : "move_to_parent"
+          );
+        }
+        case "moveMaterialFolder": {
+          const {
+            moveMaterialFolder,
+          } = await import("@/server/services/folder-service");
+          return moveMaterialFolder(
+            db,
+            ctx,
+            String(p.folderId),
+            (p.targetParentId as string | null) ?? null
+          );
+        }
+        case "reorderMaterialFolders": {
+          const {
+            reorderMaterialFolders,
+          } = await import("@/server/services/folder-service");
+          return reorderMaterialFolders(
+            db,
+            ctx,
+            {
+              ownerScope:
+                p.ownerScope === "school" ? "school" : "teacher",
+              teacherId: (p.teacherId as string | null | undefined) ?? null,
+            },
+            (p.parentId as string | null) ?? null,
+            (p.orderedIds as string[]) ?? []
+          );
+        }
+        case "moveMaterialToFolder": {
+          const {
+            moveMaterialToFolder,
+          } = await import("@/server/services/folder-service");
+          const kind = String(p.kind);
+          if (
+            kind !== "topic" &&
+            kind !== "test" &&
+            kind !== "theory" &&
+            kind !== "intensive"
+          ) {
+            throw validationError("Неизвестный тип материала");
+          }
+          return moveMaterialToFolder(
+            db,
+            ctx,
+            { kind, id: String(p.id) },
+            (p.folderId as string | null) ?? null
+          );
+        }
         case "upsertHomework":
           return m.upsertHomework(db, ctx, p as never);
         case "deleteHomework":

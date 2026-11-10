@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  normalizeQuestionImageFileName,
   testQuestionImageUrl,
   QUESTION_IMAGE_EXTENSIONS,
 } from "@/lib/tests/question-image";
@@ -19,6 +20,15 @@ import {
   apiTestQuestionImageUpload,
 } from "@/lib/store/api-client";
 import { cn } from "@/lib/utils";
+
+/** File из буфера часто без имени — задаём clipboard.{ext} до upload. */
+function withClipboardFileName(file: File): File {
+  const name = normalizeQuestionImageFileName(file.name, file.type);
+  if (name === file.name) return file;
+  return new File([file], name, {
+    type: file.type || "application/octet-stream",
+  });
+}
 
 export function QuestionImagePreview({
   testId,
@@ -67,7 +77,7 @@ export function QuestionImagePreview({
       const result = await apiTestQuestionImageUpload(
         readyTestId,
         questionId,
-        file
+        withClipboardFileName(file)
       );
       onImageChange(result.imageObjectKey);
       toast.success("Изображение прикреплено");
@@ -91,12 +101,8 @@ export function QuestionImagePreview({
         const type = item.types.find((t) => t.startsWith("image/"));
         if (!type) continue;
         const blob = await item.getType(type);
-        const ext = type.includes("png")
-          ? ".png"
-          : type.includes("webp")
-            ? ".webp"
-            : ".jpg";
-        const file = new File([blob], `clipboard${ext}`, { type });
+        const name = normalizeQuestionImageFileName("", type);
+        const file = new File([blob], name, { type });
         await attachFile(file);
         return;
       }
@@ -132,7 +138,7 @@ export function QuestionImagePreview({
       const file = item.getAsFile();
       if (!file) continue;
       e.preventDefault();
-      void attachFile(file);
+      void attachFile(withClipboardFileName(file));
       return;
     }
   }
