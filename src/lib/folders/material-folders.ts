@@ -52,6 +52,25 @@ export function buildFolderBreadcrumbs(
   return crumbs;
 }
 
+/** Id предков folderId от родителя к корню (не включая сам folderId). */
+export function collectFolderAncestorIds(
+  folders: readonly MaterialFolder[],
+  folderId: string | null
+): string[] {
+  if (!folderId) return [];
+  const byId = new Map(folders.map((f) => [f.id, f]));
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  let cur: MaterialFolder | undefined = byId.get(folderId);
+  while (cur?.parentId) {
+    if (seen.has(cur.parentId)) break;
+    seen.add(cur.parentId);
+    ids.push(cur.parentId);
+    cur = byId.get(cur.parentId);
+  }
+  return ids;
+}
+
 /** Все потомки folderId (не включая сам folderId). */
 export function collectFolderDescendantIds(
   folders: readonly MaterialFolder[],

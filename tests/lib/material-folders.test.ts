@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildFolderBreadcrumbs,
+  collectFolderAncestorIds,
   collectFolderDescendantIds,
   filterFoldersByQuery,
   folderParentSpaceMismatch,
@@ -58,6 +59,12 @@ describe("material folder helpers", () => {
     expect(buildFolderBreadcrumbs(folders, null)).toEqual([
       { id: null, title: "Корень" },
     ]);
+  });
+
+  it("collects ancestor ids toward the root", () => {
+    expect(collectFolderAncestorIds(folders, "c")).toEqual(["b", "a"]);
+    expect(collectFolderAncestorIds(folders, "a")).toEqual([]);
+    expect(collectFolderAncestorIds(folders, null)).toEqual([]);
   });
 
   it("lists children and searches by title", () => {
