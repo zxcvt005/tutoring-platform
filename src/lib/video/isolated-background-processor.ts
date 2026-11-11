@@ -126,9 +126,15 @@ export class IsolatedBackgroundProcessor
   private readonly maxFps: number;
   private readonly onFrameProcessed?: IsolatedBackgroundProcessorOptions["onFrameProcessed"];
   private minFrameIntervalMs: number;
-  /** Set AFTER a heavy frame finishes so queued frames drain as passthrough. */
+  /** Set AFTER a heavy frame finishes so backlog frames skip MediaPipe. */
   private nextFrameDue = 0;
   private firstFrameDone = false;
+  /**
+   * Canvas pixels hold the last successful composite. When FPS-throttling skips
+   * heavy work we re-emit from this canvas instead of the raw camera frame
+   * (raw passthrough caused ~12 Hz flicker against the processed stream).
+   */
+  private hasLastProcessedOutput = false;
   private destroyed = false;
   /** Bumped on destroy/restart so late async work ignores stale state. */
   private epoch = 0;
@@ -292,6 +298,7 @@ export class IsolatedBackgroundProcessor
     await this.destroy();
     this.destroyed = false;
     this.firstFrameDone = false;
+    this.hasLastProcessedOutput = false;
     this.nextFrameDue = 0;
     await this.init(opts);
   }
@@ -339,6 +346,7 @@ export class IsolatedBackgroundProcessor
     }
     this.backgroundImage = null;
     this.backgroundPath = null;
+    this.hasLastProcessedOutput = false;
     this.canvas = undefined;
     this.ctx = undefined;
     this.workCanvas = undefined;
@@ -402,26 +410,23 @@ export class IsolatedBackgroundProcessor
     const epoch = this.epoch;
     try {
       if (this.destroyed || !this.canvas || !this.ctx || !this.segmenter) {
-        controller.enqueue(frame);
-        passedThrough = true;
+        // After the effect has painted once, never fall back to the raw camera.
+        if (
+          resolveSkippedBackgroundFrameOutput({
+            mode: this.mode,
+            hasLastProcessedFrame: this.hasLastProcessedOutput,
+          }) === "repeat_last_processed"
+        ) {
+          this.enqueueLastProcessed(frame, controller);
+          return;
+        }
+        if (this.mode === "disabled") {
+          controller.enqueue(frame);
+          passedThrough = true;
+        }
         return;
       }
       if (frame.codedWidth === 0 || frame.codedHeight === 0) {
-        return;
-      }
-
-      const now = performance.now();
-      // Skip heavy work for frames that arrived while a previous segmentation ran.
-      // nextFrameDue is stamped AFTER processing so the backlog drains as passthrough.
-      if (
-        shouldSkipHeavyCameraBackgroundFrame({
-          now,
-          nextFrameDue: this.nextFrameDue,
-          firstFrameDone: this.firstFrameDone,
-        })
-      ) {
-        controller.enqueue(frame);
-        passedThrough = true;
         return;
       }
 
@@ -431,9 +436,32 @@ export class IsolatedBackgroundProcessor
         return;
       }
 
+      const now = performance.now();
+      // Skip heavy MediaPipe work under the FPS budget. Never emit the raw
+      // camera frame here — that alternates processed/original and flickers.
+      if (
+        shouldSkipHeavyCameraBackgroundFrame({
+          now,
+          nextFrameDue: this.nextFrameDue,
+          firstFrameDone: this.firstFrameDone,
+        })
+      ) {
+        const policy = resolveSkippedBackgroundFrameOutput({
+          mode: this.mode,
+          hasLastProcessedFrame: this.hasLastProcessedOutput,
+        });
+        if (policy === "repeat_last_processed") {
+          this.enqueueLastProcessed(frame, controller);
+        }
+        // "drop": close input in finally; output keeps showing last enqueued frame.
+        return;
+      }
+
       const width = frame.displayWidth || frame.codedWidth;
       const height = frame.displayHeight || frame.codedHeight;
       if (this.canvas.width !== width || this.canvas.height !== height) {
+        // Resizing clears pixels — drop the previous hold until we composite again.
+        this.hasLastProcessedOutput = false;
         this.canvas.width = width;
         this.canvas.height = height;
         if (this.workCanvas) {
@@ -482,8 +510,28 @@ export class IsolatedBackgroundProcessor
       const segmentationTimeMs = performance.now() - segStart;
 
       if (this.destroyed || epoch !== this.epoch || !this.canvas || !this.ctx) {
-        controller.enqueue(frame);
-        passedThrough = true;
+        if (
+          resolveSkippedBackgroundFrameOutput({
+            mode: this.mode,
+            hasLastProcessedFrame: this.hasLastProcessedOutput,
+          }) === "repeat_last_processed"
+        ) {
+          this.enqueueLastProcessed(frame, controller);
+        }
+        return;
+      }
+
+      const maskUsable =
+        !!mask && mask.bytes.length >= mask.width * mask.height;
+      if (!maskUsable) {
+        // Missing mask must not paint the raw camera over a good composite.
+        const policy = resolveMissingMaskFrameOutput({
+          hasLastProcessedFrame: this.hasLastProcessedOutput,
+        });
+        if (policy === "repeat_last_processed") {
+          this.enqueueLastProcessed(frame, controller);
+          this.nextFrameDue = performance.now() + this.minFrameIntervalMs;
+        }
         return;
       }
 
@@ -493,8 +541,9 @@ export class IsolatedBackgroundProcessor
         timestamp: frame.timestamp || Date.now(),
       });
       controller.enqueue(out);
+      this.hasLastProcessedOutput = true;
       const filterTimeMs = performance.now() - filterStart;
-      // Stamp after work so frames queued during segmentation become passthrough.
+      // Stamp after work so frames queued during segmentation skip MediaPipe.
       this.nextFrameDue = performance.now() + this.minFrameIntervalMs;
 
       if (!this.firstFrameDone) {
@@ -518,8 +567,17 @@ export class IsolatedBackgroundProcessor
       });
       if (!passedThrough) {
         try {
-          controller.enqueue(frame);
-          passedThrough = true;
+          if (
+            resolveSkippedBackgroundFrameOutput({
+              mode: this.mode,
+              hasLastProcessedFrame: this.hasLastProcessedOutput,
+            }) === "repeat_last_processed"
+          ) {
+            this.enqueueLastProcessed(frame, controller);
+          } else if (this.mode === "disabled") {
+            controller.enqueue(frame);
+            passedThrough = true;
+          }
         } catch {
           /* stream closed */
         }
@@ -536,12 +594,28 @@ export class IsolatedBackgroundProcessor
   }
 
   /**
+   * Re-emit the last successful composite with the current frame timestamp.
+   * Captures canvas pixels at construction time; does not keep a live VideoFrame.
+   */
+  private enqueueLastProcessed(
+    frame: VideoFrame,
+    controller: TransformStreamDefaultController<VideoFrame>
+  ): void {
+    if (!this.canvas || !this.hasLastProcessedOutput) return;
+    const out = new VideoFrame(this.canvas, {
+      timestamp: frame.timestamp || Date.now(),
+    });
+    controller.enqueue(out);
+  }
+
+  /**
    * LiveKit composite treats high mask as background (mix uses 1-smoothAlpha).
    * Category mask bytes: non-zero ≈ background for selfie_segmenter.
+   * Caller must pass a usable mask — missing masks must not clear a good hold.
    */
   private drawComposite(
     frame: VideoFrame,
-    mask: { bytes: Uint8Array; width: number; height: number } | null,
+    mask: { bytes: Uint8Array; width: number; height: number },
     width: number,
     height: number
   ) {
@@ -561,10 +635,6 @@ export class IsolatedBackgroundProcessor
     }
 
     ctx.drawImage(frame, 0, 0, width, height);
-    if (!mask || mask.bytes.length < mask.width * mask.height) {
-      // Without mask keep original frame — safer than wrong composite.
-      return;
-    }
 
     const person = ctx.getImageData(0, 0, width, height);
     const background = work.getImageData(0, 0, width, height);
@@ -598,6 +668,31 @@ export function shouldSkipHeavyCameraBackgroundFrame(input: {
   firstFrameDone: boolean;
 }): boolean {
   return input.firstFrameDone && input.now < input.nextFrameDue;
+}
+
+export type SkippedBackgroundFrameOutput =
+  | "passthrough_original"
+  | "repeat_last_processed"
+  | "drop";
+
+/**
+ * When FPS-throttling skips segmentation, decide what to put on the output track.
+ * Emitting the raw camera frame while the effect is on causes visible flicker.
+ */
+export function resolveSkippedBackgroundFrameOutput(input: {
+  mode: IsolatedBackgroundProcessorOptions["mode"] | string;
+  hasLastProcessedFrame: boolean;
+}): SkippedBackgroundFrameOutput {
+  if (input.mode === "disabled") return "passthrough_original";
+  if (input.hasLastProcessedFrame) return "repeat_last_processed";
+  return "drop";
+}
+
+/** Missing segmentation mask after the effect is live must not flash the camera. */
+export function resolveMissingMaskFrameOutput(input: {
+  hasLastProcessedFrame: boolean;
+}): Exclude<SkippedBackgroundFrameOutput, "passthrough_original"> {
+  return input.hasLastProcessedFrame ? "repeat_last_processed" : "drop";
 }
 
 export function createIsolatedBackgroundProcessor(

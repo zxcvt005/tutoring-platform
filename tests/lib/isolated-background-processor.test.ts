@@ -5,6 +5,8 @@ import { resetCameraBackgroundStageStateForTests } from "@/lib/video/camera-back
 import {
   IsolatedBackgroundProcessor,
   isolatedProcessorSupportsEnvironment,
+  resolveMissingMaskFrameOutput,
+  resolveSkippedBackgroundFrameOutput,
   shouldSkipHeavyCameraBackgroundFrame,
 } from "@/lib/video/isolated-background-processor";
 
@@ -53,8 +55,277 @@ describe("isolated background FPS backlog gate", () => {
   });
 });
 
+describe("skipped / missing-mask output policy", () => {
+  it("never emits the original camera frame while an effect is active", () => {
+    expect(
+      resolveSkippedBackgroundFrameOutput({
+        mode: "background-blur",
+        hasLastProcessedFrame: true,
+      })
+    ).toBe("repeat_last_processed");
+    expect(
+      resolveSkippedBackgroundFrameOutput({
+        mode: "virtual-background",
+        hasLastProcessedFrame: true,
+      })
+    ).toBe("repeat_last_processed");
+    expect(
+      resolveSkippedBackgroundFrameOutput({
+        mode: "background-blur",
+        hasLastProcessedFrame: false,
+      })
+    ).toBe("drop");
+  });
+
+  it("allows raw passthrough only when the effect is disabled", () => {
+    expect(
+      resolveSkippedBackgroundFrameOutput({
+        mode: "disabled",
+        hasLastProcessedFrame: false,
+      })
+    ).toBe("passthrough_original");
+    expect(
+      resolveSkippedBackgroundFrameOutput({
+        mode: "disabled",
+        hasLastProcessedFrame: true,
+      })
+    ).toBe("passthrough_original");
+  });
+
+  it("holds the last composite when segmentation mask is missing", () => {
+    expect(
+      resolveMissingMaskFrameOutput({ hasLastProcessedFrame: true })
+    ).toBe("repeat_last_processed");
+    expect(
+      resolveMissingMaskFrameOutput({ hasLastProcessedFrame: false })
+    ).toBe("drop");
+  });
+});
+
+type TransformHarness = {
+  mode: string;
+  firstFrameDone: boolean;
+  nextFrameDue: number;
+  hasLastProcessedOutput: boolean;
+  destroyed: boolean;
+  epoch: number;
+  canvas: { width: number; height: number };
+  ctx: object;
+  segmenter: {
+    segmentForVideo: ReturnType<typeof vi.fn>;
+    close: ReturnType<typeof vi.fn>;
+  };
+  minFrameIntervalMs: number;
+  transform: (
+    frame: VideoFrame,
+    controller: TransformStreamDefaultController<VideoFrame>
+  ) => Promise<void>;
+  enqueueLastProcessed: (
+    frame: VideoFrame,
+    controller: TransformStreamDefaultController<VideoFrame>
+  ) => void;
+};
+
+function asHarness(processor: IsolatedBackgroundProcessor): TransformHarness {
+  return processor as unknown as TransformHarness;
+}
+
+function makeFrame(overrides?: Partial<{ timestamp: number; close: () => void }>) {
+  const close = vi.fn(overrides?.close);
+  return {
+    codedWidth: 16,
+    codedHeight: 16,
+    displayWidth: 16,
+    displayHeight: 16,
+    timestamp: overrides?.timestamp ?? 1000,
+    close,
+  } as unknown as VideoFrame & { close: ReturnType<typeof vi.fn> };
+}
+
+describe("isolated background transform skip path", () => {
+  it("reuses the last processed canvas instead of the original on FPS skip", async () => {
+    const processor = new IsolatedBackgroundProcessor({
+      mode: "background-blur",
+      maxFps: 12,
+    });
+    const h = asHarness(processor);
+    h.mode = "background-blur";
+    h.firstFrameDone = true;
+    h.nextFrameDue = Number.POSITIVE_INFINITY;
+    h.hasLastProcessedOutput = true;
+    h.destroyed = false;
+    h.canvas = { width: 16, height: 16 };
+    h.ctx = {};
+    h.segmenter = {
+      segmentForVideo: vi.fn(),
+      close: vi.fn(),
+    };
+    h.minFrameIntervalMs = 80;
+
+    const enqueued: VideoFrame[] = [];
+    const controller = {
+      enqueue: (frame: VideoFrame) => {
+        enqueued.push(frame);
+      },
+    } as TransformStreamDefaultController<VideoFrame>;
+
+    const created: Array<{ source: unknown; timestamp: number }> = [];
+    class FakeVideoFrame {
+      constructor(
+        public source: unknown,
+        init?: { timestamp?: number }
+      ) {
+        created.push({ source, timestamp: init?.timestamp ?? 0 });
+      }
+      close() {}
+    }
+    vi.stubGlobal("VideoFrame", FakeVideoFrame);
+
+    const input = makeFrame({ timestamp: 4242 });
+    await h.transform(input, controller);
+
+    expect(h.segmenter.segmentForVideo).not.toHaveBeenCalled();
+    expect(enqueued).toHaveLength(1);
+    expect(created).toHaveLength(1);
+    expect(created[0]?.source).toBe(h.canvas);
+    expect(created[0]?.timestamp).toBe(4242);
+    expect(enqueued[0]).not.toBe(input);
+    expect(input.close).toHaveBeenCalledTimes(1);
+
+    await processor.destroy();
+  });
+
+  it("drops skipped frames before the first composite instead of flashing the camera", async () => {
+    const processor = new IsolatedBackgroundProcessor({
+      mode: "virtual-background",
+      maxFps: 12,
+    });
+    const h = asHarness(processor);
+    h.mode = "virtual-background";
+    h.firstFrameDone = true;
+    h.nextFrameDue = Number.POSITIVE_INFINITY;
+    h.hasLastProcessedOutput = false;
+    h.destroyed = false;
+    h.canvas = { width: 16, height: 16 };
+    h.ctx = {};
+    h.segmenter = {
+      segmentForVideo: vi.fn(),
+      close: vi.fn(),
+    };
+
+    const enqueued: VideoFrame[] = [];
+    const controller = {
+      enqueue: (frame: VideoFrame) => {
+        enqueued.push(frame);
+      },
+    } as TransformStreamDefaultController<VideoFrame>;
+
+    const input = makeFrame({ timestamp: 7 });
+    await h.transform(input, controller);
+
+    expect(h.segmenter.segmentForVideo).not.toHaveBeenCalled();
+    expect(enqueued).toHaveLength(0);
+    expect(input.close).toHaveBeenCalledTimes(1);
+
+    await processor.destroy();
+  });
+
+  it("holds the last composite when segmentation is slow and backlog skips fire", async () => {
+    const processor = new IsolatedBackgroundProcessor({
+      mode: "background-blur",
+      maxFps: 5,
+    });
+    const h = asHarness(processor);
+    h.mode = "background-blur";
+    h.firstFrameDone = true;
+    h.hasLastProcessedOutput = true;
+    h.destroyed = false;
+    h.canvas = { width: 8, height: 8 };
+    h.ctx = {};
+    h.segmenter = {
+      segmentForVideo: vi.fn(),
+      close: vi.fn(),
+    };
+    // Simulate a long MediaPipe call that stamps nextFrameDue far ahead.
+    h.nextFrameDue = performance.now() + 500;
+
+    class FakeVideoFrame {
+      constructor(
+        _source: unknown,
+        public init?: { timestamp?: number }
+      ) {}
+      close() {}
+    }
+    vi.stubGlobal("VideoFrame", FakeVideoFrame);
+
+    const enqueued: VideoFrame[] = [];
+    const controller = {
+      enqueue: (frame: VideoFrame) => enqueued.push(frame),
+    } as TransformStreamDefaultController<VideoFrame>;
+
+    const frames = [makeFrame({ timestamp: 1 }), makeFrame({ timestamp: 2 }), makeFrame({ timestamp: 3 })];
+    for (const frame of frames) {
+      await h.transform(frame, controller);
+    }
+
+    expect(h.segmenter.segmentForVideo).not.toHaveBeenCalled();
+    expect(enqueued).toHaveLength(3);
+    for (const frame of frames) {
+      expect(frame.close).toHaveBeenCalledTimes(1);
+    }
+
+    await processor.destroy();
+  });
+
+  it("repeats last processed output when mask is missing after the effect is live", async () => {
+    const processor = new IsolatedBackgroundProcessor({
+      mode: "background-blur",
+      maxFps: 12,
+    });
+    const h = asHarness(processor);
+    h.mode = "background-blur";
+    h.firstFrameDone = true;
+    h.nextFrameDue = 0;
+    h.hasLastProcessedOutput = true;
+    h.destroyed = false;
+    h.canvas = { width: 16, height: 16 };
+    h.ctx = {};
+    h.minFrameIntervalMs = 80;
+    h.segmenter = {
+      segmentForVideo: vi.fn((_frame, _ts, cb: (r: { categoryMask: null }) => void) => {
+        cb({ categoryMask: null });
+      }),
+      close: vi.fn(),
+    };
+
+    class FakeVideoFrame {
+      constructor(
+        public source: unknown,
+        public init?: { timestamp?: number }
+      ) {}
+      close() {}
+    }
+    vi.stubGlobal("VideoFrame", FakeVideoFrame);
+
+    const enqueued: VideoFrame[] = [];
+    const controller = {
+      enqueue: (frame: VideoFrame) => enqueued.push(frame),
+    } as TransformStreamDefaultController<VideoFrame>;
+
+    const input = makeFrame({ timestamp: 99 });
+    await h.transform(input, controller);
+
+    expect(h.segmenter.segmentForVideo).toHaveBeenCalledTimes(1);
+    expect(enqueued).toHaveLength(1);
+    expect((enqueued[0] as unknown as { source: unknown }).source).toBe(h.canvas);
+    expect(input.close).toHaveBeenCalledTimes(1);
+
+    await processor.destroy();
+  });
+});
+
 describe("isolated background processor lifecycle", () => {
-  it("closes MediaPipe segmenter before tearing down the pipe", async () => {
+  it("closes MediaPipe segmenter before tearing down the pipe and clears the hold", async () => {
     const closeOrder: string[] = [];
     const segmenter = {
       segmentForVideo: vi.fn(),
@@ -63,25 +334,14 @@ describe("isolated background processor lifecycle", () => {
       }),
     };
 
-    vi.doMock("@mediapipe/tasks-vision", () => ({
-      FilesetResolver: {
-        forVisionTasks: async () => ({}),
-      },
-      ImageSegmenter: {
-        createFromOptions: async () => segmenter,
-      },
-    }));
-
-    // Re-import after mock is awkward with ESM; exercise destroy path directly.
     const processor = new IsolatedBackgroundProcessor({
       mode: "background-blur",
       maxFps: 8,
     });
 
-    // Inject a fake segmenter as if init completed.
-    (
-      processor as unknown as { segmenter: typeof segmenter; destroyed: boolean }
-    ).segmenter = segmenter;
+    const h = asHarness(processor);
+    h.segmenter = segmenter;
+    h.hasLastProcessedOutput = true;
     (
       processor as unknown as { pipeAbort: AbortController }
     ).pipeAbort = new AbortController();
@@ -91,11 +351,20 @@ describe("isolated background processor lifecycle", () => {
     (
       processor as unknown as { trackGenerator: { stop: () => void } }
     ).trackGenerator = { stop };
+    (
+      processor as unknown as { backgroundImage: { close: () => void } | null }
+    ).backgroundImage = {
+      close: () => {
+        closeOrder.push("bitmap");
+      },
+    };
 
     await processor.destroy();
     expect(closeOrder[0]).toBe("segmenter");
     expect(closeOrder).toContain("generator");
+    expect(closeOrder).toContain("bitmap");
     expect(segmenter.close).toHaveBeenCalledTimes(1);
+    expect(h.hasLastProcessedOutput).toBe(false);
   });
 
   it("switchTo updates blur and image modes without recreating the class", async () => {
@@ -111,8 +380,6 @@ describe("isolated background processor lifecycle", () => {
       (processor as unknown as { blurRadius: number }).blurRadius
     ).toBe(12);
 
-    // Avoid network image load in unit test: virtual-background path loads Image.
-    // Only assert disabled switch stays local.
     await processor.switchTo({ mode: "disabled" });
     expect((processor as unknown as { mode: string }).mode).toBe("disabled");
     await processor.destroy();
