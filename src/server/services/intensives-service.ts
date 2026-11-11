@@ -32,6 +32,7 @@ import {
   intensiveVersionTests,
   intensiveVersions,
   intensives,
+  materialFolders,
   testAssignments,
   tests,
 } from "@/server/db/schema";
@@ -297,6 +298,7 @@ export async function upsertIntensive(
     videoUrl?: string | null;
     testIds?: string[];
     publish?: boolean;
+    folderId?: string | null;
   }
 ) {
   requireRoles(ctx, ["teacher", "director", "assistant"]);
@@ -361,10 +363,42 @@ export async function upsertIntensive(
     : existing?.status === "published"
       ? "published"
       : "draft";
+  let folderId =
+    input.folderId !== undefined
+      ? input.folderId
+      : (existing?.folderId ?? null);
+  // Без folderId — legacy; при указании папки — только подраздел своего типа.
+  if (folderId) {
+    const [folder] = await db
+      .select()
+      .from(materialFolders)
+      .where(eq(materialFolders.id, folderId))
+      .limit(1);
+    if (!folder || folder.organizationId !== ctx.organizationId) {
+      throw badRequest("Папка не найдена");
+    }
+    if (!folder.parentId) {
+      throw badRequest(
+        "Интенсив можно размещать только внутри подраздела, не в корне раздела"
+      );
+    }
+    const { folderAcceptsMaterialKind, normalizeFolderContentKind } =
+      await import("@/lib/folders/material-folders");
+    if (
+      !folderAcceptsMaterialKind(
+        normalizeFolderContentKind(folder.contentKind),
+        "intensive"
+      )
+    ) {
+      throw badRequest("Папка принадлежит другому типу раздела");
+    }
+  }
+
   const values = {
     title,
     description: input.description?.trim() || null,
     ...video,
+    folderId,
     status: nextStatus,
     updatedAt: new Date(),
   };

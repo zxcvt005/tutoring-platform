@@ -561,16 +561,32 @@ export async function buildBootstrap(
     sortOrder: t.sortOrder,
   }));
 
-  const mappedMaterialFolders = folderRows.map((f) => ({
-    id: f.id,
-    ownerScope: (f.ownerScope === "school" ? "school" : "teacher") as
-      | "school"
-      | "teacher",
-    teacherId: f.teacherId,
-    parentId: f.parentId,
-    title: f.title,
-    sortOrder: f.sortOrder,
-  }));
+  const mappedMaterialFolders = folderRows.map((f) => {
+    const contentKind =
+      f.contentKind === "topic" ||
+      f.contentKind === "theory" ||
+      f.contentKind === "test" ||
+      f.contentKind === "intensive" ||
+      f.contentKind === "shared"
+        ? (f.contentKind as
+            | "topic"
+            | "theory"
+            | "test"
+            | "intensive"
+            | "shared")
+        : null;
+    return {
+      id: f.id,
+      ownerScope: (f.ownerScope === "school" ? "school" : "teacher") as
+        | "school"
+        | "teacher",
+      teacherId: f.teacherId,
+      parentId: f.parentId,
+      title: f.title,
+      sortOrder: f.sortOrder,
+      contentKind,
+    };
+  });
 
   let tariffRows = await db
     .select()

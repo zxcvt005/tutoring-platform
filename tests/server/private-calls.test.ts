@@ -171,9 +171,19 @@ describe("private calls", () => {
       sessionId: anna.sessionId,
       exp: 0,
     });
+    const borisView = await getPrivateGuestCall(database, {
+      roomId: boris.roomId,
+      sessionId: boris.sessionId,
+      exp: 0,
+    });
     expect(JSON.stringify(annaView)).not.toContain("Борис");
     expect(annaView.members).toBeNull();
-    expect(annaView.teacherWithMe).toBe(false);
+    // Первый гость автоматически в эфире (иначе хост не видит входящие потоки).
+    expect(annaView.teacherWithMe).toBe(true);
+    // Второй гость не перехватывает эфир и не видит чужие потоки через teacherWithMe.
+    expect(borisView.teacherWithMe).toBe(false);
+    const host = await getPrivateHost(database);
+    expect(host?.call.activeParticipantId).toBe(anna.roomId);
 
     await expect(
       issuePrivateGuestTokens(database, {
@@ -383,6 +393,33 @@ describe("private calls", () => {
         ip: "10.8.1.1",
       })
     ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("reclaims auto-activate after the active guest leaves", async () => {
+    const database = await db();
+    const session = await startPrivateSession(database);
+    const first = await joinPrivateCall(database, {
+      code: session.code,
+      name: "Анна",
+      ip: "10.9.0.1",
+    });
+    expect(first.call.teacherWithMe).toBe(true);
+    await leavePrivateGuest(
+      database,
+      { roomId: first.roomId, sessionId: first.sessionId, exp: 0 },
+      new Date()
+    );
+    const hostAfterLeave = await getPrivateHost(database);
+    expect(hostAfterLeave?.call.activeParticipantId).toBeNull();
+
+    const second = await joinPrivateCall(database, {
+      code: session.code,
+      name: "Борис",
+      ip: "10.9.0.2",
+    });
+    expect(second.call.teacherWithMe).toBe(true);
+    const host = await getPrivateHost(database);
+    expect(host?.call.activeParticipantId).toBe(second.roomId);
   });
 
   it("does not close a private room from page hide", () => {

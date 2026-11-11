@@ -212,10 +212,18 @@ describe("biz integrity sprint scenarios", () => {
     const teacherId = anna.teacherId!;
 
     const folder = await upsertMaterialFolder(db, anna, {
-      title: "Спринт папка",
+      title: "Спринт раздел",
       ownerScope: "teacher",
       teacherId,
       parentId: null,
+      contentKind: "topic",
+    });
+    const sub = await upsertMaterialFolder(db, anna, {
+      title: "Спринт подраздел",
+      ownerScope: "teacher",
+      teacherId,
+      parentId: folder.id,
+      contentKind: "topic",
     });
     const topic = await upsertTopic(db, anna, {
       teacherId,
@@ -228,7 +236,7 @@ describe("biz integrity sprint scenarios", () => {
       db,
       anna,
       { kind: "topic", id: topic.id },
-      folder.id
+      sub.id
     );
 
     const [moved] = await db
@@ -236,7 +244,7 @@ describe("biz integrity sprint scenarios", () => {
       .from(topics)
       .where(eq(topics.id, topic.id))
       .limit(1);
-    expect(moved?.folderId).toBe(folder.id);
+    expect(moved?.folderId).toBe(sub.id);
 
     const created = await upsertStudent(db, director, {
       fullName: "Архив Спринт",

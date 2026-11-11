@@ -127,6 +127,16 @@ export async function POST(request: Request) {
               p.ownerScope === "school" ? "school" : "teacher",
             teacherId: (p.teacherId as string | null | undefined) ?? null,
             sortOrder: p.sortOrder as number | undefined,
+            contentKind:
+              p.contentKind === "topic" ||
+              p.contentKind === "theory" ||
+              p.contentKind === "test" ||
+              p.contentKind === "intensive" ||
+              p.contentKind === "shared"
+                ? p.contentKind
+                : p.contentKind === null
+                  ? null
+                  : undefined,
           });
         }
         case "deleteMaterialFolder": {

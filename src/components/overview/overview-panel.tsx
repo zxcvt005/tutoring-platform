@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { HomeworkAssignmentStatusBadge } from "@/components/status-badge";
+import { countUnassignedActiveStudents } from "@/lib/students/unassigned";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { cn } from "@/lib/utils";
 
@@ -20,7 +21,7 @@ function DirekciyaOverview() {
 
   const activeTeachers = data.teachers.filter((t) => t.status === "active").length;
   const activeStudents = data.students.filter((s) => s.status === "active").length;
-  const unassigned = data.students.filter((s) => !s.teacherId).length;
+  const unassigned = countUnassignedActiveStudents(data.students);
   const planned = data.lessons.filter((l) => l.status === "planned").length;
   const done = data.lessons.filter((l) => l.status === "done").length;
 

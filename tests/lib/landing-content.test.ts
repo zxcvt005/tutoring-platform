@@ -57,6 +57,12 @@ describe("landing content", () => {
     expect(landingBonuses.notice.length).toBeGreaterThan(40);
   });
 
+  it("uses the shared link-preview description", () => {
+    expect(landingMeta.description).toBe(
+      "Вы не останетесь одни при подготовке."
+    );
+  });
+
   it("marks guarantees as not yet an offer and answers the required objections", () => {
     expect(landingGuarantees.status).toBe("needs_agreement");
     expect(landingGuarantees.notice.length).toBeGreaterThan(40);

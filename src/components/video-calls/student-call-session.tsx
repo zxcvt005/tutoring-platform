@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LocalVideoTrack, Room, RoomEvent, type RemoteTrack } from "livekit-client";
+import {
+  LocalVideoTrack,
+  Room,
+  RoomEvent,
+  Track,
+  type RemoteTrack,
+} from "livekit-client";
 import { supportsBackgroundProcessors } from "@livekit/track-processors";
 import {
   LogOut,
@@ -19,6 +25,7 @@ import {
   callControlClass,
   callTileFrameClass,
 } from "@/components/video-calls/call-overlay";
+import { MicLevelIndicator } from "@/components/video-calls/mic-level-indicator";
 import { RemoteGrid } from "@/components/video-calls/remote-grid";
 import { StudentCallPip } from "@/components/video-calls/student-call-pip";
 import type { PipMediaEls } from "@/components/video-calls/teacher-call-pip";
@@ -42,8 +49,13 @@ import {
 import {
   attachLocalCamera,
   attachRemoteMedia,
+  playAttachedMedia,
   publishedCameraTrack,
 } from "@/lib/video/media-attach";
+import {
+  applyNoiseSuppressionToTrack,
+  noiseSuppressionSupported,
+} from "@/lib/video/noise-suppression";
 import {
   cabinetStudentTransport,
   type StudentCallTransport,
@@ -87,6 +99,9 @@ export function StudentCallSession({
   const [call, setCall] = useState<VideoCallStudentView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wantMic, setWantMic] = useState(true);
+  const [noiseOn, setNoiseOn] = useState(true);
+  const [micStream, setMicStream] = useState<MediaStream | null>(null);
+  const noiseSupported = noiseSuppressionSupported();
   const [wantCamera, setWantCamera] = useState(true);
   const [blocked, setBlocked] = useState<string | null>(null);
   const [leaveOpen, setLeaveOpen] = useState(false);
@@ -197,11 +212,21 @@ export function StudentCallSession({
       room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
         if (shouldPlayRemote(callRef.current)) {
           if (track.kind === "video") {
-            for (const el of remoteEls()) if (el) track.attach(el);
+            for (const el of remoteEls()) {
+              if (!el) continue;
+              track.attach(el);
+              el.muted = true;
+              el.playsInline = true;
+            }
           }
           if (track.kind === "audio") {
-            for (const el of audioEls()) if (el) track.attach(el);
+            for (const el of audioEls()) {
+              if (!el) continue;
+              track.attach(el);
+              el.muted = false;
+            }
           }
+          void playAttachedMedia([...remoteEls(), ...audioEls()]);
         }
       });
       room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach());
@@ -228,6 +253,17 @@ export function StudentCallSession({
       }
       await room.localParticipant.setMicrophoneEnabled(wantRef.current.mic);
       await room.localParticipant.setCameraEnabled(wantRef.current.camera);
+      {
+        const micTrack = room.localParticipant.getTrackPublication(
+          Track.Source.Microphone
+        )?.track?.mediaStreamTrack;
+        if (micTrack) {
+          setMicStream(new MediaStream([micTrack]));
+          void applyNoiseSuppressionToTrack(micTrack, noiseOn).then((result) => {
+            if (!result.ok && noiseOn) setNoiseOn(false);
+          });
+        }
+      }
       if (leavingRef.current) {
         room.removeAllListeners();
         await room.disconnect();
@@ -316,6 +352,23 @@ export function StudentCallSession({
     };
   }, [pulse]);
 
+  async function toggleNoise() {
+    if (!noiseSupported) return;
+    const next = !noiseOn;
+    const room = roomRef.current;
+    const track = room?.localParticipant.getTrackPublication(
+      Track.Source.Microphone
+    )?.track?.mediaStreamTrack;
+    const result = await applyNoiseSuppressionToTrack(track, next);
+    if (result.ok) {
+      setNoiseOn(next);
+    } else {
+      setError(
+        "Не удалось изменить шумоподавление. Браузер или устройство не применили настройку."
+      );
+    }
+  }
+
   async function toggle(kind: "mic" | "camera") {
     const room = roomRef.current;
     if (!room) return;
@@ -325,6 +378,17 @@ export function StudentCallSession({
         setWantMic(next);
         wantRef.current.mic = next;
         await room.localParticipant.setMicrophoneEnabled(next);
+        const track = room.localParticipant.getTrackPublication(
+          Track.Source.Microphone
+        )?.track?.mediaStreamTrack;
+        if (next && track) {
+          setMicStream(new MediaStream([track]));
+          void applyNoiseSuppressionToTrack(track, noiseOn).then((result) => {
+            if (!result.ok && noiseOn) setNoiseOn(false);
+          });
+        } else {
+          setMicStream(null);
+        }
       } else {
         const next = !wantCamera;
         setWantCamera(next);
@@ -479,17 +543,37 @@ export function StudentCallSession({
               </div>
             )}
           </div>
+          {waitingAlone ? (
+            <p className="border-b border-border bg-muted/50 px-4 py-2 text-center text-sm text-muted-foreground">
+              Ожидание преподавателя в эфире…
+            </p>
+          ) : null}
           <div className="flex shrink-0 items-center justify-center gap-3 border-t border-border bg-muted/40 px-3 py-3 max-md:gap-4">
-            <Button
-              type="button"
-              variant={wantMic ? "secondary" : "outline"}
-              size="icon-lg"
-              className={callControlClass}
-              aria-label={wantMic ? "Выключить микрофон" : "Включить микрофон"}
-              onClick={() => void toggle("mic")}
-            >
-              {wantMic ? <Mic /> : <MicOff />}
-            </Button>
+            <div className="flex items-center gap-1.5">
+              <Button
+                type="button"
+                variant={wantMic ? "secondary" : "outline"}
+                size="icon-lg"
+                className={callControlClass}
+                aria-label={wantMic ? "Выключить микрофон" : "Включить микрофон"}
+                onClick={() => void toggle("mic")}
+              >
+                {wantMic ? <Mic /> : <MicOff />}
+              </Button>
+              <MicLevelIndicator stream={micStream} active={wantMic} />
+            </div>
+            {noiseSupported ? (
+              <Button
+                type="button"
+                variant={noiseOn ? "secondary" : "outline"}
+                size="sm"
+                className="rounded-full text-xs"
+                aria-pressed={noiseOn}
+                onClick={() => void toggleNoise()}
+              >
+                Шум {noiseOn ? "вкл" : "выкл"}
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant={wantCamera ? "secondary" : "outline"}

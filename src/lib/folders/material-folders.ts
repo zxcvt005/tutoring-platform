@@ -1,5 +1,13 @@
 import type { LibraryScope } from "@/lib/types";
 
+/** Тип дерева папок (отдельные разделы Кафедры / Базы знаний). */
+export type FolderContentKind =
+  | "topic"
+  | "theory"
+  | "test"
+  | "intensive"
+  | "shared";
+
 export type MaterialFolder = {
   id: string;
   ownerScope: LibraryScope;
@@ -7,6 +15,8 @@ export type MaterialFolder = {
   parentId: string | null;
   title: string;
   sortOrder: number;
+  /** null — до миграции / неизвестно; shared — смешанное наследие. */
+  contentKind?: FolderContentKind | null;
 };
 
 export type MaterialFolderKind =
@@ -20,6 +30,60 @@ export type FolderSpace = {
   ownerScope: LibraryScope;
   teacherId: string | null;
 };
+
+export type MaterialsSection = Exclude<FolderContentKind, "shared">;
+
+/** Сущности только внутри подраздела (папка с родителем), не в корне раздела. */
+export function isSubsectionFolder(
+  folders: readonly MaterialFolder[],
+  folderId: string | null
+): boolean {
+  if (!folderId) return false;
+  const folder = folders.find((f) => f.id === folderId);
+  return Boolean(folder?.parentId);
+}
+
+export function folderMatchesSection(
+  folder: MaterialFolder,
+  section: MaterialsSection
+): boolean {
+  const kind = folder.contentKind ?? null;
+  return kind == null || kind === "shared" || kind === section;
+}
+
+export function primaryContentKindFromKinds(
+  kinds: readonly MaterialFolderKind[]
+): MaterialsSection | null {
+  const entity = kinds.find(
+    (k): k is MaterialsSection =>
+      k === "topic" || k === "theory" || k === "test" || k === "intensive"
+  );
+  return entity ?? null;
+}
+
+export function normalizeFolderContentKind(
+  value: string | null | undefined
+): FolderContentKind | null {
+  if (
+    value === "topic" ||
+    value === "theory" ||
+    value === "test" ||
+    value === "intensive" ||
+    value === "shared"
+  ) {
+    return value;
+  }
+  return null;
+}
+
+/** null/shared принимают любой тип; типизированная папка — только свой. */
+export function folderAcceptsMaterialKind(
+  folderKind: FolderContentKind | null | undefined,
+  materialKind: MaterialsSection
+): boolean {
+  const ck = folderKind ?? null;
+  return ck == null || ck === "shared" || ck === materialKind;
+}
 
 export type FolderBreadcrumb = {
   id: string | null;
@@ -111,7 +175,8 @@ export function wouldCreateFolderCycle(
 export function foldersInParent(
   folders: readonly MaterialFolder[],
   parentId: string | null,
-  space: FolderSpace
+  space: FolderSpace,
+  section?: MaterialsSection | null
 ): MaterialFolder[] {
   return folders
     .filter(
@@ -120,7 +185,8 @@ export function foldersInParent(
         f.ownerScope === space.ownerScope &&
         (space.ownerScope === "school"
           ? f.teacherId == null
-          : f.teacherId === space.teacherId)
+          : f.teacherId === space.teacherId) &&
+        (section ? folderMatchesSection(f, section) : true)
     )
     .slice()
     .sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title, "ru"));
@@ -129,7 +195,8 @@ export function foldersInParent(
 export function filterFoldersByQuery(
   folders: readonly MaterialFolder[],
   query: string,
-  space: FolderSpace
+  space: FolderSpace,
+  section?: MaterialsSection | null
 ): MaterialFolder[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
@@ -140,6 +207,7 @@ export function filterFoldersByQuery(
         (space.ownerScope === "school"
           ? f.teacherId == null
           : f.teacherId === space.teacherId) &&
+        (section ? folderMatchesSection(f, section) : true) &&
         f.title.toLowerCase().includes(q)
     )
     .sort((a, b) => a.title.localeCompare(b.title, "ru"));

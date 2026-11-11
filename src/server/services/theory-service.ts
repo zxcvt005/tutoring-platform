@@ -31,6 +31,7 @@ import {
   requireTeacherProfile,
 } from "@/server/authz/require";
 import {
+  materialFolders,
   testAssignments,
   tests,
   theoryAssignments,
@@ -274,6 +275,7 @@ export async function upsertTheory(
     status?: TheoryStatus;
     publish?: boolean;
     libraryScope?: LibraryScope;
+    folderId?: string | null;
   }
 ) {
   requireRoles(ctx, ["teacher", "director", "assistant"]);
@@ -370,11 +372,44 @@ export async function upsertTheory(
     throw badRequest(THEORY_NEED_COMPONENT_MESSAGE);
   }
 
+  let folderId =
+    input.folderId !== undefined
+      ? input.folderId
+      : (existing?.folderId ?? null);
+  // Без folderId — legacy/неразложенные; при указании папки — только подраздел
+  // своего contentKind (не корень раздела).
+  if (folderId) {
+    const [folder] = await db
+      .select()
+      .from(materialFolders)
+      .where(eq(materialFolders.id, folderId))
+      .limit(1);
+    if (!folder || folder.organizationId !== ctx.organizationId) {
+      throw badRequest("Папка не найдена");
+    }
+    if (!folder.parentId) {
+      throw badRequest(
+        "Теорию можно размещать только внутри подраздела, не в корне раздела"
+      );
+    }
+    const { folderAcceptsMaterialKind, normalizeFolderContentKind } =
+      await import("@/lib/folders/material-folders");
+    if (
+      !folderAcceptsMaterialKind(
+        normalizeFolderContentKind(folder.contentKind),
+        "theory"
+      )
+    ) {
+      throw badRequest("Папка принадлежит другому типу раздела");
+    }
+  }
+
   const values = {
     title,
     description: input.description?.trim() || null,
     ...video,
     testId,
+    folderId,
     status: nextStatus,
     updatedAt: new Date(),
   };

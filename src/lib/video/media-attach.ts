@@ -32,6 +32,37 @@ export function attachPreviewTrack(
   }
 }
 
+export async function playAttachedMedia(
+  elements: Array<HTMLMediaElement | null | undefined>
+): Promise<"ok" | "blocked" | "empty"> {
+  let attempted = false;
+  let blocked = false;
+  for (const el of elements) {
+    if (!el) continue;
+    if (!el.srcObject) continue;
+    attempted = true;
+    try {
+      el.setAttribute("playsinline", "true");
+    } catch {
+      /* jsdom/node stubs */
+    }
+    try {
+      // Удалённое видео можно держать muted для autoplay; аудио — нет.
+      if (
+        typeof HTMLVideoElement !== "undefined" &&
+        el instanceof HTMLVideoElement
+      ) {
+        el.playsInline = true;
+      }
+      await el.play();
+    } catch {
+      blocked = true;
+    }
+  }
+  if (!attempted) return "empty";
+  return blocked ? "blocked" : "ok";
+}
+
 export function attachRemoteMedia(
   room: Room | undefined,
   videos: Array<HTMLVideoElement | null>,
@@ -46,6 +77,15 @@ export function attachRemoteMedia(
   let audioTrack: Track | undefined;
   for (const participant of room.remoteParticipants.values()) {
     for (const pub of participant.trackPublications.values()) {
+      // Подписываемся явно, если LiveKit ещё не сделал этого.
+      if (pub.isSubscribed === false && "setSubscribed" in pub) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (pub as any).setSubscribed?.(true);
+        } catch {
+          /* ignore */
+        }
+      }
       if (!pub.track) continue;
       if (pub.kind === "video" && !videoTrack) videoTrack = pub.track;
       if (pub.kind === "audio" && !audioTrack) audioTrack = pub.track;
@@ -53,14 +93,22 @@ export function attachRemoteMedia(
   }
   for (const el of videos) {
     if (!el) continue;
-    if (videoTrack) videoTrack.attach(el);
-    else el.srcObject = null;
+    if (videoTrack) {
+      videoTrack.attach(el);
+      el.playsInline = true;
+      // Видео muted — звук идёт через отдельный <audio>, так надёжнее с autoplay.
+      el.muted = true;
+    } else el.srcObject = null;
   }
   for (const el of audios) {
     if (!el) continue;
-    if (audioTrack) audioTrack.attach(el);
-    else el.srcObject = null;
+    if (audioTrack) {
+      audioTrack.attach(el);
+      el.muted = false;
+      el.volume = 1;
+    } else el.srcObject = null;
   }
+  void playAttachedMedia([...videos, ...audios]);
 }
 
 export function cameraIsPublished(rooms: Iterable<Room>): boolean {

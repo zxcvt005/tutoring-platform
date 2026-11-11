@@ -93,13 +93,13 @@ export const CAMERA_BACKGROUND_MAX_FPS = 20;
  */
 export const CAMERA_BACKGROUND_CPU_MAX_FPS = 20;
 /** Heavy MediaPipe passes per second (mask updates). */
-export const CAMERA_BACKGROUND_SEGMENT_MAX_FPS = 12;
+export const CAMERA_BACKGROUND_SEGMENT_MAX_FPS = 15;
 /** Downscale long edge before MediaPipe to cut CPU cost. */
-export const CAMERA_BACKGROUND_SEG_MAX_WIDTH = 320;
-/** EMA weight for new masks (0..1). */
-export const CAMERA_BACKGROUND_MASK_TEMPORAL = 0.4;
+export const CAMERA_BACKGROUND_SEG_MAX_WIDTH = 384;
+/** EMA weight for new masks (0..1). Ниже — стабильнее маска при движении. */
+export const CAMERA_BACKGROUND_MASK_TEMPORAL = 0.28;
 /** Feather radius in mask pixels after temporal blend. */
-export const CAMERA_BACKGROUND_MASK_FEATHER = 2;
+export const CAMERA_BACKGROUND_MASK_FEATHER = 3;
 /**
  * На Chrome MediaStreamTrackProcessor path maxFps процессора не действует.
  * Сжимаем захват камеры до применения фона, чтобы снизить нагрузку GPU/CPU.

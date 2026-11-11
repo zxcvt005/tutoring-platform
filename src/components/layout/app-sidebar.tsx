@@ -37,6 +37,7 @@ import {
   pressaNavItems,
 } from "@/lib/cabinet-nav";
 import { showSidebarCabinetChrome } from "@/lib/cabinet-shell-classes";
+import { countUnassignedActiveStudents } from "@/lib/students/unassigned";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { cn } from "@/lib/utils";
 
@@ -236,7 +237,7 @@ export function AppSidebar({
 
   const unassignedActiveCount =
     role === "direkciya"
-      ? data.students.filter((s) => !s.teacherId && s.status === "active").length
+      ? countUnassignedActiveStudents(data.students)
       : 0;
   const alertHrefs =
     unassignedActiveCount > 0

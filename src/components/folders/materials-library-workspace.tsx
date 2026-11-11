@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { MaterialsFolderPanel } from "@/components/folders/materials-folder-panel";
 import { PageHeader } from "@/components/layout/page-header";
@@ -29,7 +29,11 @@ import {
   countIntensivesInFolderSubtree,
   folderTransferIntensiveWarning,
 } from "@/lib/folders/folder-transfer-intensives";
-import { MIXED_MATERIAL_KINDS } from "@/lib/folders/material-routes";
+import {
+  isSubsectionFolder,
+  type MaterialFolderKind,
+  type MaterialsSection,
+} from "@/lib/folders/material-folders";
 import { topicStatusLabel } from "@/lib/format";
 import { isCatalogHomeworkPurpose } from "@/lib/homework/source-kind";
 import { apiPlatform } from "@/lib/store/api-client";
@@ -38,16 +42,54 @@ import type { Homework, Topic, TopicStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-/**
- * Единый смешанный проводник материалов Кафедры:
- * папки + темы + тесты + теория + интенсивы в одном списке.
- */
-export function MaterialsLibraryWorkspace({
+const SECTION_META: Record<
+  MaterialsSection,
+  {
+    title: string;
+    description: string;
+    kinds: MaterialFolderKind[];
+    createLabel: string;
+  }
+> = {
+  topic: {
+    title: "Темы",
+    description:
+      "Разделы и подразделы программы. Темы создаются только внутри подраздела.",
+    kinds: ["folder", "topic"],
+    createLabel: "Новая тема",
+  },
+  theory: {
+    title: "Теория",
+    description:
+      "Теоретические материалы по разделам. Файлы только внутри подраздела.",
+    kinds: ["folder", "theory"],
+    createLabel: "Новая теория",
+  },
+  test: {
+    title: "Домашние задания",
+    description:
+      "Каталог тестов и ДЗ. Задания создаются только внутри подраздела.",
+    kinds: ["folder", "test"],
+    createLabel: "Новый тест",
+  },
+  intensive: {
+    title: "Интенсивы",
+    description:
+      "Видеоинтенсивы по разделам. Материалы только внутри подраздела.",
+    kinds: ["folder", "intensive"],
+    createLabel: "Новый интенсив",
+  },
+};
+
+export function MaterialsSectionWorkspace({
+  section,
   teacherId: teacherIdProp,
 }: {
+  section: MaterialsSection;
   teacherId?: string;
 }) {
   const router = useRouter();
+  const meta = SECTION_META[section];
   const {
     data,
     topicsForTeacher,
@@ -62,6 +104,7 @@ export function MaterialsLibraryWorkspace({
   const teacher = data.teachers.find((t) => t.id === teacherId);
 
   const [showArchived, setShowArchived] = useState(false);
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [topicOpen, setTopicOpen] = useState(false);
   const [topicSaving, setTopicSaving] = useState(false);
   const [topicForm, setTopicForm] = useState({
@@ -80,7 +123,9 @@ export function MaterialsLibraryWorkspace({
   const [testOpen, setTestOpen] = useState(false);
   const [editingTest, setEditingTest] = useState<Homework | null>(null);
   const [testFolderId, setTestFolderId] = useState<string | null>(null);
-  const [folderToSchoolBusy, setFolderToSchoolBusy] = useState<string | null>(null);
+  const [folderToSchoolBusy, setFolderToSchoolBusy] = useState<string | null>(
+    null
+  );
 
   const topics = topicsForTeacher(teacherId);
   const tests = homeworksForTeacher(teacherId);
@@ -91,7 +136,25 @@ export function MaterialsLibraryWorkspace({
       isCatalogHomeworkPurpose(h.purpose)
   );
 
-  function openCreateTopic(folderId: string | null = null) {
+  const folders = useMemo(
+    () =>
+      (data.materialFolders ?? []).filter(
+        (f) =>
+          f.ownerScope === "teacher" &&
+          f.teacherId === teacherId
+      ),
+    [data.materialFolders, teacherId]
+  );
+
+  const canCreateEntity = isSubsectionFolder(folders, currentFolderId);
+
+  function openCreateTopic(folderId: string | null) {
+    if (!isSubsectionFolder(folders, folderId)) {
+      toast.error(
+        "Сначала откройте подраздел (папку внутри раздела), затем создайте тему"
+      );
+      return;
+    }
     setTopicForm({
       id: undefined,
       title: "",
@@ -121,6 +184,11 @@ export function MaterialsLibraryWorkspace({
     const errors: { title?: string; description?: string } = {};
     if (!topicForm.title.trim()) errors.title = "Укажите название";
     if (!topicForm.description.trim()) errors.description = "Укажите описание";
+    if (!isSubsectionFolder(folders, topicForm.folderId)) {
+      errors.title =
+        errors.title ??
+        "Тема должна находиться внутри подраздела";
+    }
     setTopicErrors(errors);
     if (Object.keys(errors).length) return;
     setTopicSaving(true);
@@ -143,80 +211,98 @@ export function MaterialsLibraryWorkspace({
     })();
   }
 
+  function createEntity() {
+    if (!canCreateEntity) {
+      toast.error(
+        "Создайте подраздел внутри раздела, затем добавьте материал"
+      );
+      return;
+    }
+    if (section === "topic") {
+      openCreateTopic(currentFolderId);
+      return;
+    }
+    if (section === "test") {
+      setEditingTest(null);
+      setTestFolderId(currentFolderId);
+      setTestOpen(true);
+      return;
+    }
+    if (section === "theory") {
+      const q = currentFolderId
+        ? `?folderId=${encodeURIComponent(currentFolderId)}`
+        : "";
+      router.push(`/kafedra/theory/new${q}`);
+      return;
+    }
+    const q = currentFolderId
+      ? `?folderId=${encodeURIComponent(currentFolderId)}`
+      : "";
+    router.push(`/kafedra/intensivy/new${q}`);
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Материалы"
-        description="Единое файловое пространство: папки, темы, тесты, теория и интенсивы."
+        title={meta.title}
+        description={meta.description}
         actions={
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               variant="outline"
               className="rounded-full"
-              onClick={() => openCreateTopic(null)}
+              disabled={!canCreateEntity || showArchived}
+              onClick={createEntity}
             >
-              Новая тема
+              {meta.createLabel}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-full"
-              onClick={() => {
-                setEditingTest(null);
-                setTestFolderId(null);
-                setTestOpen(true);
-              }}
-            >
-              Новый тест
-            </Button>
-            <Link
-              href="/kafedra/theory/new"
-              className={cn(buttonVariants({ variant: "outline" }), "rounded-full")}
-            >
-              Новая теория
-            </Link>
-            <Link
-              href="/kafedra/intensivy/new"
-              className={cn(buttonVariants({ variant: "outline" }), "rounded-full")}
-            >
-              Новый интенсив
-            </Link>
           </div>
         }
       />
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant={showArchived ? "outline" : "default"}
-          onClick={() => setShowArchived(false)}
-        >
-          Материалы
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={showArchived ? "default" : "outline"}
-          onClick={() => setShowArchived(true)}
-        >
-          Архив
-          {archivedTests.length > 0 ? (
-            <span className="ml-1 text-xs opacity-80">({archivedTests.length})</span>
-          ) : null}
-        </Button>
-      </div>
+      {!canCreateEntity && !showArchived ? (
+        <p className="text-sm text-muted-foreground">
+          Откройте или создайте подраздел внутри раздела — только там можно
+          добавлять {meta.title.toLowerCase()}.
+        </p>
+      ) : null}
+
+      {section === "test" ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={showArchived ? "outline" : "default"}
+            onClick={() => setShowArchived(false)}
+          >
+            Активные
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={showArchived ? "default" : "outline"}
+            onClick={() => setShowArchived(true)}
+          >
+            Архив
+            {archivedTests.length > 0 ? (
+              <span className="ml-1 text-xs opacity-80">
+                ({archivedTests.length})
+              </span>
+            ) : null}
+          </Button>
+        </div>
+      ) : null}
 
       <MaterialsFolderPanel
-        kinds={MIXED_MATERIAL_KINDS}
+        kinds={meta.kinds}
+        contentKind={section}
         teacherId={teacherId}
         canEdit={!showArchived}
         showArchived={showArchived}
+        onCurrentFolderChange={setCurrentFolderId}
         onOpenMaterial={(kind, id) => {
-          if (showArchived && kind === "test") {
-            return;
-          }
+          if (showArchived && kind === "test") return;
           if (kind === "topic") {
             router.push(`/kafedra/topics/${id}`);
             return;
@@ -260,9 +346,8 @@ export function MaterialsLibraryWorkspace({
                     const ok = window.confirm(
                       [
                         `Передать папку «${item.title}» в Дирекцию со всем содержимым?`,
-                        "Будет создана копия тем, тестов и теории (включая вложенные папки).",
-                        intensiveNote ??
-                          "Интенсивы в этой папке не найдены.",
+                        "Будет создана копия материалов (включая вложенные папки).",
+                        intensiveNote ?? "Интенсивы в этой папке не найдены.",
                       ].join("\n\n")
                     );
                     if (!ok) return;
@@ -344,6 +429,25 @@ export function MaterialsLibraryWorkspace({
               >
                 Изменить
               </Button>
+            );
+          }
+          if (
+            (item.kind === "theory" || item.kind === "intensive") &&
+            !showArchived
+          ) {
+            const href =
+              item.kind === "theory"
+                ? `/kafedra/theory/${item.id}`
+                : `/kafedra/intensivy/${item.id}`;
+            return (
+              <Link
+                href={href}
+                className={cn(
+                  buttonVariants({ variant: "ghost", size: "xs" })
+                )}
+              >
+                Открыть
+              </Link>
             );
           }
           return null;
@@ -453,4 +557,9 @@ export function MaterialsLibraryWorkspace({
       />
     </div>
   );
+}
+
+/** @deprecated Используйте MaterialsSectionWorkspace с конкретным разделом. */
+export function MaterialsLibraryWorkspace(props: { teacherId?: string }) {
+  return <MaterialsSectionWorkspace section="topic" {...props} />;
 }

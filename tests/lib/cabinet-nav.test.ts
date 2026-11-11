@@ -72,16 +72,24 @@ describe("cabinet navigation", () => {
     });
   });
 
-  it("uses a single Materials library for the teacher cabinet", () => {
+  it("restores separate content sections for the teacher cabinet", () => {
     expect(kafedraNavItems).toContainEqual({
-      href: "/kafedra/materials",
-      label: "Материалы",
+      href: "/kafedra/topics",
+      label: "Темы",
     });
-    const hrefs = kafedraNavItems.map((i) => i.href);
-    expect(hrefs).not.toContain("/kafedra/topics");
-    expect(hrefs).not.toContain("/kafedra/tests");
-    expect(hrefs).not.toContain("/kafedra/theory");
-    expect(hrefs).not.toContain("/kafedra/intensivy");
+    expect(kafedraNavItems).toContainEqual({
+      href: "/kafedra/theory",
+      label: "Теория",
+    });
+    expect(kafedraNavItems).toContainEqual({
+      href: "/kafedra/tests",
+      label: "Домашние задания",
+    });
+    expect(kafedraNavItems).toContainEqual({
+      href: "/kafedra/intensivy",
+      label: "Интенсивы",
+    });
+    expect(kafedraNavItems.map((i) => i.href)).not.toContain("/kafedra/materials");
   });
 
   it("keeps Theory and Intensives in the student cabinet", () => {

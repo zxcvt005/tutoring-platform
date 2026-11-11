@@ -4,7 +4,10 @@ import { newId } from "@/lib/format";
 import {
   buildFolderBreadcrumbs,
   collectFolderDescendantIds,
+  folderAcceptsMaterialKind,
+  normalizeFolderContentKind,
   wouldCreateFolderCycle,
+  type FolderContentKind,
   type FolderSpace,
   type MaterialFolder,
   type MaterialFolderKind,
@@ -36,7 +39,19 @@ function mapFolder(row: typeof materialFolders.$inferSelect): MaterialFolder {
     parentId: row.parentId,
     title: row.title,
     sortOrder: row.sortOrder,
+    contentKind: normalizeFolderContentKind(row.contentKind),
   };
+}
+
+function assertSubsectionPlacement(folder: {
+  id: string;
+  parentId: string | null;
+}) {
+  if (!folder.parentId) {
+    throw validationError(
+      "Материал можно размещать только внутри подраздела, не в корне раздела"
+    );
+  }
 }
 
 async function loadOrgFolders(db: AppDb, organizationId: string) {
@@ -217,6 +232,7 @@ export async function upsertMaterialFolder(
     ownerScope: FolderSpace["ownerScope"];
     teacherId?: string | null;
     sortOrder?: number;
+    contentKind?: FolderContentKind | null;
   }
 ) {
   const title = input.title.trim();
@@ -228,6 +244,7 @@ export async function upsertMaterialFolder(
   await assertCanManageSpace(db, ctx, space);
 
   const parentId = input.parentId ?? null;
+  let resolvedContentKind = normalizeFolderContentKind(input.contentKind);
   if (parentId) {
     const parent = await getFolderOrThrow(db, ctx, parentId);
     if (parent.ownerScope !== space.ownerScope) {
@@ -235,6 +252,19 @@ export async function upsertMaterialFolder(
     }
     if (space.ownerScope === "teacher" && parent.teacherId !== space.teacherId) {
       throw forbidden();
+    }
+    const parentKind = normalizeFolderContentKind(parent.contentKind);
+    if (
+      parentKind &&
+      parentKind !== "shared" &&
+      resolvedContentKind &&
+      resolvedContentKind !== "shared" &&
+      parentKind !== resolvedContentKind
+    ) {
+      throw badRequest("Нельзя вложить папку другого типа раздела");
+    }
+    if (!resolvedContentKind || resolvedContentKind === "shared") {
+      resolvedContentKind = parentKind ?? resolvedContentKind;
     }
   }
 
@@ -266,12 +296,16 @@ export async function upsertMaterialFolder(
       ownerScope: existing.ownerScope === "school" ? "school" : "teacher",
       teacherId: existing.teacherId,
     });
+    const nextKind =
+      resolvedContentKind ??
+      normalizeFolderContentKind(existing.contentKind);
     await db
       .update(materialFolders)
       .set({
         title,
         parentId,
         sortOrder,
+        contentKind: nextKind,
         updatedAt: new Date(),
       })
       .where(eq(materialFolders.id, id));
@@ -283,6 +317,7 @@ export async function upsertMaterialFolder(
       teacherId: space.teacherId,
       parentId,
       title,
+      contentKind: resolvedContentKind,
       sortOrder,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -323,6 +358,17 @@ export async function moveMaterialFolder(
       parent.teacherId !== folder.teacherId
     ) {
       throw forbidden("Нельзя переместить папку в чужое пространство");
+    }
+    const movingKind = normalizeFolderContentKind(folder.contentKind);
+    const parentKind = normalizeFolderContentKind(parent.contentKind);
+    if (
+      movingKind &&
+      movingKind !== "shared" &&
+      parentKind &&
+      parentKind !== "shared" &&
+      movingKind !== parentKind
+    ) {
+      throw badRequest("Нельзя переместить папку в дерево другого раздела");
     }
   }
 
@@ -493,15 +539,27 @@ export async function moveMaterialToFolder(
 ) {
   requireRoles(ctx, ["teacher", "director", "assistant"]);
 
-  let space: FolderSpace | null = null;
-  if (folderId) {
-    const folder = await getFolderOrThrow(db, ctx, folderId);
-    space = {
-      ownerScope: folder.ownerScope === "school" ? "school" : "teacher",
-      teacherId: folder.teacherId,
-    };
-    await assertCanManageSpace(db, ctx, space);
+  if (!folderId) {
+    throw validationError(
+      "Материал можно размещать только внутри подраздела, не в корне"
+    );
   }
+
+  const folder = await getFolderOrThrow(db, ctx, folderId);
+  assertSubsectionPlacement(folder);
+  if (
+    !folderAcceptsMaterialKind(
+      normalizeFolderContentKind(folder.contentKind),
+      material.kind
+    )
+  ) {
+    throw badRequest("Папка принадлежит другому типу раздела");
+  }
+  const space: FolderSpace = {
+    ownerScope: folder.ownerScope === "school" ? "school" : "teacher",
+    teacherId: folder.teacherId,
+  };
+  await assertCanManageSpace(db, ctx, space);
 
   const legacy = await legacySectionIdForFolder(db, folderId);
 

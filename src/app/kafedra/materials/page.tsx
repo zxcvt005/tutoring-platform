@@ -1,5 +1,5 @@
-import { MaterialsLibraryWorkspace } from "@/components/folders/materials-library-workspace";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return <MaterialsLibraryWorkspace />;
+  redirect("/kafedra/topics");
 }

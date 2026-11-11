@@ -31,6 +31,7 @@ import type {
   StudentTourExtras,
   StudentTourTrainerResult,
 } from "@/lib/student-tour/types";
+import { isUnassignedActiveStudent } from "@/lib/students/unassigned";
 import type {
   DemoData,
   HomeworkAssignment,
@@ -123,7 +124,8 @@ function selectors(data: DemoData): Pick<
   return {
     studentsForTeacher: (teacherId) =>
       data.students.filter((s) => s.teacherId === teacherId),
-    unassignedStudents: () => data.students.filter((s) => !s.teacherId),
+    unassignedStudents: () =>
+      data.students.filter((s) => isUnassignedActiveStudent(s)),
     lessonsForTeacher: (teacherId) =>
       data.lessons.filter((l) => l.teacherId === teacherId),
     lessonsForStudent: (studentId) =>

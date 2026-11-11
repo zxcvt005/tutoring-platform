@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import { and, asc, eq, gte, sql } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, sql } from "drizzle-orm";
 
 import { newId } from "@/lib/format";
 import {
@@ -491,6 +491,27 @@ export async function joinPrivateCall(
     createdAt: now,
     updatedAt: now,
   });
+  // Первый гость автоматически в эфире: иначе хост не видит/не слышит,
+  // пока вручную не нажмёт «Активировать» (асимметрия исходящих потоков).
+  // Условный UPDATE исключает гонку двух одновременных join.
+  let nextSession = session;
+  if (!session.activeRoomId) {
+    const claimed = await db
+      .update(privateCallSessions)
+      .set({ activeRoomId: roomId, updatedAt: now })
+      .where(
+        and(
+          eq(privateCallSessions.id, session.id),
+          isNull(privateCallSessions.activeRoomId)
+        )
+      )
+      .returning();
+    if (claimed.length > 0) {
+      nextSession = { ...session, activeRoomId: roomId };
+    } else {
+      nextSession = await loadSession(db, session.id);
+    }
+  }
   await videoLivekitSync().ensureRoom(
     livekitRoomName,
     2,
@@ -499,7 +520,7 @@ export async function joinPrivateCall(
   const room = await loadRoom(db, roomId);
   if (!room) throw notFound("Комната не найдена");
   return {
-    call: toStudentCall(session, room),
+    call: toStudentCall(nextSession, room),
     roomId,
     sessionId: session.id,
   };

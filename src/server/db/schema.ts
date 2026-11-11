@@ -274,6 +274,11 @@ export const materialFolders = pgTable(
       onDelete: "cascade",
     }),
     title: text("title").notNull(),
+    /**
+     * Дерево раздела: topic | theory | test | intensive.
+     * shared — наследие смешанных папок до разделения (видно во всех разделах до разборки).
+     */
+    contentKind: text("content_kind"),
     sortOrder: integer("sort_order").notNull().default(0),
     ...timestamps,
   },
@@ -285,6 +290,7 @@ export const materialFolders = pgTable(
     ),
     index("material_folders_parent_idx").on(t.parentId),
     index("material_folders_teacher_parent_idx").on(t.teacherId, t.parentId),
+    index("material_folders_content_kind_idx").on(t.contentKind),
     check(
       "material_folders_scope_check",
       sql`${t.ownerScope} in ('school', 'teacher')`
@@ -292,6 +298,10 @@ export const materialFolders = pgTable(
     check(
       "material_folders_owner_check",
       sql`(${t.ownerScope} = 'school' and ${t.teacherId} is null) or (${t.ownerScope} = 'teacher' and ${t.teacherId} is not null)`
+    ),
+    check(
+      "material_folders_content_kind_check",
+      sql`${t.contentKind} is null or ${t.contentKind} in ('topic', 'theory', 'test', 'intensive', 'shared')`
     ),
   ]
 );

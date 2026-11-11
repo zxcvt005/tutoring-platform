@@ -32,7 +32,25 @@ export const metadata: Metadata = {
     default: "Неодин",
     template: "%s | Неодин",
   },
-  description: "Неодин — онлайн-школа подготовки к ЕГЭ",
+  description: "Вы не останетесь одни при подготовке.",
+  openGraph: {
+    title: "Неодин",
+    description: "Вы не останетесь одни при подготовке.",
+    locale: "ru_RU",
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: "Неодин",
+    description: "Вы не останетесь одни при подготовке.",
+  },
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon-32.png", type: "image/png", sizes: "32x32" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+  },
 };
 
 export const viewport: Viewport = {

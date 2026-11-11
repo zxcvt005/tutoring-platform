@@ -1456,6 +1456,31 @@ export async function upsertTopic(
         ? topic.sectionId
         : (existing?.folderId ?? existing?.sectionId ?? null);
   if (owner.libraryScope === "school") folderId = null;
+  if (owner.libraryScope === "teacher" && folderId) {
+    const [folder] = await db
+      .select()
+      .from(materialFolders)
+      .where(eq(materialFolders.id, folderId))
+      .limit(1);
+    if (!folder || folder.organizationId !== ctx.organizationId) {
+      throw badRequest("Папка не найдена");
+    }
+    if (!folder.parentId) {
+      throw badRequest(
+        "Тему можно размещать только внутри подраздела, не в корне раздела"
+      );
+    }
+    const { folderAcceptsMaterialKind, normalizeFolderContentKind } =
+      await import("@/lib/folders/material-folders");
+    if (
+      !folderAcceptsMaterialKind(
+        normalizeFolderContentKind(folder.contentKind),
+        "topic"
+      )
+    ) {
+      throw badRequest("Папка принадлежит другому типу раздела");
+    }
+  }
   const { legacySectionIdForFolder } = await import(
     "@/server/services/folder-service"
   );
@@ -1602,6 +1627,31 @@ export async function upsertHomework(
       : ((hw as { folderId?: string | null }).folderId !== undefined
           ? (hw as { folderId?: string | null }).folderId ?? null
           : hw.sectionId ?? existing?.folderId ?? null);
+  if (owner.libraryScope === "teacher" && purpose === "homework" && folderId) {
+    const [folder] = await db
+      .select()
+      .from(materialFolders)
+      .where(eq(materialFolders.id, folderId))
+      .limit(1);
+    if (!folder || folder.organizationId !== ctx.organizationId) {
+      throw badRequest("Папка не найдена");
+    }
+    if (!folder.parentId) {
+      throw badRequest(
+        "Домашнее задание можно размещать только внутри подраздела, не в корне раздела"
+      );
+    }
+    const { folderAcceptsMaterialKind, normalizeFolderContentKind } =
+      await import("@/lib/folders/material-folders");
+    if (
+      !folderAcceptsMaterialKind(
+        normalizeFolderContentKind(folder.contentKind),
+        "test"
+      )
+    ) {
+      throw badRequest("Папка принадлежит другому типу раздела");
+    }
+  }
   const { legacySectionIdForFolder } = await import(
     "@/server/services/folder-service"
   );
@@ -2222,6 +2272,12 @@ export async function upsertIntensiveAction(
     videoUrl: (payload.videoUrl as string | null | undefined) ?? null,
     testIds,
     publish: Boolean(payload.publish),
+    folderId:
+      payload.folderId === undefined
+        ? undefined
+        : payload.folderId
+          ? String(payload.folderId)
+          : null,
   });
 }
 
@@ -2279,6 +2335,12 @@ export async function upsertTheoryAction(
     status: payload.status as "draft" | "published" | "archived" | undefined,
     publish: Boolean(payload.publish),
     libraryScope: payload.libraryScope === "school" ? "school" : "teacher",
+    folderId:
+      payload.folderId === undefined
+        ? undefined
+        : payload.folderId
+          ? String(payload.folderId)
+          : null,
   });
 }
 

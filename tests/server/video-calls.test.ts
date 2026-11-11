@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 
 import { resolveAuthContext } from "@/server/authz/context";
 import { DEMO_ORG_ID } from "@/server/db/seed";
@@ -122,6 +123,12 @@ describe("video calls", () => {
     close = t.close;
     const teacher = await asUser(t.db, "anna@example.com");
     const created = await createVideoCall(t.db, teacher, {});
+    // Сид уже может содержать ближайшие уроки — отменяем их, чтобы порядок
+    // зависел только от вставок ниже (иначе тест флапает по календарю сида).
+    await t.db
+      .update(lessons)
+      .set({ status: "cancelled" })
+      .where(eq(lessons.organizationId, DEMO_ORG_ID));
     const soon = new Date(Date.now() + 60 * 60_000);
     const later = new Date(Date.now() + 5 * 60 * 60_000);
     await t.db.insert(lessons).values({

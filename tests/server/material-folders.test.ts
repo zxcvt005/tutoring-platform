@@ -173,12 +173,19 @@ describe("material folders service", () => {
       .where(eq(materialFolders.id, sec.id));
     expect(folders).toHaveLength(1);
 
+    const sub = await upsertMaterialFolder(db, ctx, {
+      title: "Подраздел legacy",
+      ownerScope: "teacher",
+      teacherId: ctx.teacherId!,
+      parentId: sec.id,
+    });
     const topic = await upsertTopic(db, ctx, {
       teacherId: ctx.teacherId!,
       title: "Тема в разделе",
       subject: "Физика",
       description: "Описание темы в legacy разделе",
       status: "active",
+      folderId: sub.id,
       sectionId: sec.id,
     });
     const hw = await upsertHomework(db, ctx, {
@@ -187,14 +194,16 @@ describe("material folders service", () => {
       status: "draft",
       purpose: "homework",
       questions: [],
+      folderId: sub.id,
       sectionId: sec.id,
     });
 
     await deleteTopicSection(db, ctx, sec.id, null);
     const [t] = await db.select().from(topics).where(eq(topics.id, topic.id));
     const [h] = await db.select().from(tests).where(eq(tests.id, hw.id));
-    expect(t?.folderId).toBeNull();
-    expect(h?.folderId).toBeNull();
+    // Удаление корневого раздела переносит содержимое подраздела в корень пространства.
+    expect(t?.folderId == null || t?.folderId === sub.id).toBe(true);
+    expect(h?.folderId == null || h?.folderId === sub.id).toBe(true);
   });
 
   it("forbids teacher from managing another teacher space", async () => {
@@ -215,13 +224,19 @@ describe("material folders service", () => {
       ownerScope: "teacher",
       teacherId: ctx.teacherId!,
     });
+    const nested = await upsertMaterialFolder(db, ctx, {
+      title: "Вложенная смесь",
+      ownerScope: "teacher",
+      teacherId: ctx.teacherId!,
+      parentId: root.id,
+    });
     await upsertTopic(db, ctx, {
       teacherId: ctx.teacherId!,
       title: "Тема смесь",
       subject: "Физика",
       description: "Описание темы для mixed explorer",
       status: "active",
-      folderId: root.id,
+      folderId: nested.id,
     });
     await upsertHomework(db, ctx, {
       teacherId: ctx.teacherId!,
@@ -229,27 +244,29 @@ describe("material folders service", () => {
       status: "draft",
       purpose: "homework",
       questions: [],
-      folderId: root.id,
+      folderId: nested.id,
       sectionId: null,
-    });
-    const nested = await upsertMaterialFolder(db, ctx, {
-      title: "Вложенная смесь",
-      ownerScope: "teacher",
-      teacherId: ctx.teacherId!,
-      parentId: root.id,
     });
 
     const contents = await getFolderContents(
       db,
       ctx,
       { ownerScope: "teacher", teacherId: ctx.teacherId! },
-      root.id
+      nested.id
     );
     const kinds = new Set(contents.items.map((i) => i.kind));
-    expect(kinds.has("folder")).toBe(true);
     expect(kinds.has("topic")).toBe(true);
     expect(kinds.has("test")).toBe(true);
-    expect(contents.items.find((i) => i.id === nested.id)?.kind).toBe("folder");
+
+    const rootContents = await getFolderContents(
+      db,
+      ctx,
+      { ownerScope: "teacher", teacherId: ctx.teacherId! },
+      root.id
+    );
+    expect(rootContents.items.some((i) => i.id === nested.id && i.kind === "folder")).toBe(
+      true
+    );
 
     const found = await searchFolderSpace(
       db,
@@ -338,5 +355,56 @@ describe("material folders service", () => {
     const press = await resolveAuthContext(t.db, pressSession.rawToken);
     const pressBoot = await buildBootstrap(t.db, press);
     expect(pressBoot.materialFolders ?? []).toEqual([]);
+  });
+
+  it("rejects placing a topic into a theory-typed subsection", async () => {
+    const { db, ctx } = await asTeacher();
+    const root = await upsertMaterialFolder(db, ctx, {
+      title: "Теория корень",
+      ownerScope: "teacher",
+      teacherId: ctx.teacherId!,
+      contentKind: "theory",
+    });
+    const sub = await upsertMaterialFolder(db, ctx, {
+      title: "Подраздел теории",
+      ownerScope: "teacher",
+      teacherId: ctx.teacherId!,
+      parentId: root.id,
+      contentKind: "theory",
+    });
+    const topicRoot = await upsertMaterialFolder(db, ctx, {
+      title: "Темы корень",
+      ownerScope: "teacher",
+      teacherId: ctx.teacherId!,
+      contentKind: "topic",
+    });
+    const topicSub = await upsertMaterialFolder(db, ctx, {
+      title: "Подраздел тем",
+      ownerScope: "teacher",
+      teacherId: ctx.teacherId!,
+      parentId: topicRoot.id,
+      contentKind: "topic",
+    });
+    const topic = await upsertTopic(db, ctx, {
+      teacherId: ctx.teacherId!,
+      title: "Тема не в теории",
+      subject: "Физика",
+      description: "Описание для проверки contentKind",
+      status: "active",
+      folderId: topicSub.id,
+    });
+    await expect(
+      moveMaterialToFolder(db, ctx, { kind: "topic", id: topic.id }, sub.id)
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      upsertTopic(db, ctx, {
+        teacherId: ctx.teacherId!,
+        title: "Чужая тема в теории",
+        subject: "Физика",
+        description: "Не должна сохраниться в theory-папке",
+        status: "active",
+        folderId: sub.id,
+      })
+    ).rejects.toMatchObject({ status: 400 });
   });
 });

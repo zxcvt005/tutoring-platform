@@ -26,11 +26,13 @@ export function TheoryEditor({
   libraryScope,
   listHref = "/kafedra/theory",
   editorBase = "/kafedra/theory",
+  initialFolderId,
 }: {
   materialId?: string;
   libraryScope?: "school" | "teacher";
   listHref?: string;
   editorBase?: string;
+  initialFolderId?: string | null;
 }) {
   const {
     data,
@@ -45,6 +47,7 @@ export function TheoryEditor({
   const scope = existing?.libraryScope ?? libraryScope ?? "teacher";
   const teacherId =
     scope === "school" ? "" : existing?.teacherId || data.currentTeacherId;
+  const folderId = existing?.folderId ?? initialFolderId ?? null;
 
   const [title, setTitle] = useState(existing?.title ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
@@ -92,6 +95,7 @@ export function TheoryEditor({
         videoUrl: videoUrl.trim() || null,
         testId: testId || null,
         publish,
+        folderId: id ? undefined : folderId,
       });
       if (!result.ok) return;
       const nextId = result.id ?? id;
@@ -125,6 +129,7 @@ export function TheoryEditor({
         description: description.trim() || null,
         videoUrl: videoUrl.trim() || null,
         testId: testId || null,
+        folderId,
       });
       setBusy(false);
       if (!created.ok || !created.id) return;

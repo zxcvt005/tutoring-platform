@@ -9,10 +9,13 @@ import {
 import {
   buildFolderBreadcrumbs,
   filterFoldersByQuery,
+  folderMatchesSection,
   foldersInParent,
+  primaryContentKindFromKinds,
   type FolderSpace,
   type MaterialFolder,
   type MaterialFolderKind,
+  type MaterialsSection,
 } from "@/lib/folders/material-folders";
 import { MIXED_MATERIAL_KINDS } from "@/lib/folders/material-routes";
 import { useDemoStore } from "@/lib/store/demo-store";
@@ -21,6 +24,8 @@ import { isCatalogHomeworkPurpose } from "@/lib/homework/source-kind";
 export type MaterialsFolderPanelProps = {
   /** По умолчанию — смешанный список всех типов. */
   kinds?: MaterialFolderKind[];
+  /** Фильтр дерева папок по типу раздела. */
+  contentKind?: MaterialsSection | null;
   ownerScope?: FolderSpace["ownerScope"];
   teacherId?: string | null;
   canEdit?: boolean;
@@ -30,6 +35,7 @@ export type MaterialsFolderPanelProps = {
    */
   showArchived?: boolean;
   onOpenMaterial?: (kind: string, id: string) => void;
+  onCurrentFolderChange?: (folderId: string | null) => void;
   renderMaterialActions?: (item: FolderExplorerItem) => ReactNode;
   className?: string;
 };
@@ -67,11 +73,13 @@ function folderIdOf(
 
 export function MaterialsFolderPanel({
   kinds = MIXED_MATERIAL_KINDS,
+  contentKind: contentKindProp = null,
   ownerScope = "teacher",
   teacherId,
   canEdit = true,
   showArchived = false,
   onOpenMaterial,
+  onCurrentFolderChange,
   renderMaterialActions,
   className,
 }: MaterialsFolderPanelProps) {
@@ -96,11 +104,19 @@ export function MaterialsFolderPanel({
     [ownerScope, resolvedTeacherId]
   );
 
+  const section =
+    contentKindProp ?? primaryContentKindFromKinds(kinds);
+
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchScope, setSearchScope] = useState<"current" | "all">("current");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function navigate(folderId: string | null) {
+    setCurrentFolderId(folderId);
+    onCurrentFolderChange?.(folderId);
+  }
 
   const folders: MaterialFolder[] = useMemo(() => {
     const fromStore = data.materialFolders ?? [];
@@ -110,7 +126,8 @@ export function MaterialsFolderPanel({
           f.ownerScope === space.ownerScope &&
           (space.ownerScope === "school"
             ? f.teacherId == null
-            : f.teacherId === space.teacherId)
+            : f.teacherId === space.teacherId) &&
+          (section ? folderMatchesSection(f, section) : true)
       );
     }
     // Legacy fallback: корневые разделы программы.
@@ -124,8 +141,9 @@ export function MaterialsFolderPanel({
         parentId: null,
         title: s.title,
         sortOrder: s.sortOrder,
+        contentKind: section,
       }));
-  }, [data.materialFolders, data.topicSections, space]);
+  }, [data.materialFolders, data.topicSections, space, section]);
 
   const materials: MaterialRef[] = useMemo(() => {
     const want = new Set(kinds);
@@ -231,7 +249,7 @@ export function MaterialsFolderPanel({
 
     if (q && searchScope === "all") {
       if (wantFolder) {
-        for (const f of filterFoldersByQuery(folders, q, space)) {
+        for (const f of filterFoldersByQuery(folders, q, space, section)) {
           result.push({
             kind: "folder",
             id: f.id,
@@ -254,7 +272,7 @@ export function MaterialsFolderPanel({
     }
 
     if (wantFolder) {
-      for (const f of foldersInParent(folders, currentFolderId, space)) {
+      for (const f of foldersInParent(folders, currentFolderId, space, section)) {
         if (q && !f.title.toLowerCase().includes(q)) continue;
         result.push({
           kind: "folder",
@@ -286,6 +304,7 @@ export function MaterialsFolderPanel({
     searchScope,
     kinds,
     space,
+    section,
   ]);
 
   async function withBusy(fn: () => Promise<unknown>) {
@@ -320,7 +339,7 @@ export function MaterialsFolderPanel({
         kinds={kinds}
         canEdit={canEdit}
         currentFolderId={currentFolderId}
-        onNavigate={setCurrentFolderId}
+        onNavigate={navigate}
         breadcrumbs={breadcrumbs}
         folders={folders}
         items={items}
@@ -331,12 +350,20 @@ export function MaterialsFolderPanel({
         busy={busy}
         error={error}
         onCreateFolder={async (title) => {
+          const parent = currentFolderId
+            ? folders.find((f) => f.id === currentFolderId)
+            : null;
+          const inherited =
+            parent?.contentKind && parent.contentKind !== "shared"
+              ? parent.contentKind
+              : section;
           await withBusy(() =>
             upsertMaterialFolder({
               title,
               parentId: currentFolderId,
               ownerScope: space.ownerScope,
               teacherId: space.teacherId,
+              contentKind: inherited ?? null,
             })
           );
         }}
@@ -350,6 +377,7 @@ export function MaterialsFolderPanel({
               ownerScope: space.ownerScope,
               teacherId: space.teacherId,
               sortOrder: existing?.sortOrder,
+              contentKind: existing?.contentKind ?? section ?? null,
             })
           );
         }}
@@ -357,7 +385,7 @@ export function MaterialsFolderPanel({
           await withBusy(() => deleteMaterialFolder(id, "move_to_parent"));
           if (currentFolderId === id) {
             const parent = folders.find((f) => f.id === id)?.parentId ?? null;
-            setCurrentFolderId(parent);
+            navigate(parent);
           }
         }}
         onMoveFolder={async (id, targetParentId) => {

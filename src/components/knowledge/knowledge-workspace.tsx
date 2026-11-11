@@ -384,10 +384,32 @@ export function KnowledgeWorkspace({
               {selected.length ? ` (${selected.length})` : ""}
             </Button>
           </div>
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ["theory", "Теория"],
+                ["test", "Домашние задания"],
+                ["topic", "Темы"],
+                ["intensive", "Интенсивы"],
+              ] as const
+            ).map(([value, label]) => (
+              <Button
+                key={value}
+                type="button"
+                size="sm"
+                variant={kind === value ? "default" : "outline"}
+                onClick={() => setKind(value)}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
           <MaterialsFolderPanel
             ownerScope="school"
             teacherId={null}
             canEdit
+            kinds={["folder", kind]}
+            contentKind={kind}
             onOpenMaterial={(itemKind, id) => {
               if (itemKind === "theory") {
                 router.push(`${knowledgeBasePath}/theory/${id}`);

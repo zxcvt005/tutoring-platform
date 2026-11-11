@@ -37,11 +37,13 @@ export function IntensiveEditor({
   libraryScope,
   listHref = "/kafedra/intensivy",
   editorBase = "/kafedra/intensivy",
+  initialFolderId,
 }: {
   intensiveId?: string;
   libraryScope?: "school" | "teacher";
   listHref?: string;
   editorBase?: string;
+  initialFolderId?: string | null;
 }) {
   const {
     data,
@@ -57,6 +59,7 @@ export function IntensiveEditor({
   const scope = existing?.libraryScope ?? libraryScope ?? "teacher";
   const teacherId =
     scope === "school" ? "" : existing?.teacherId || data.currentTeacherId;
+  const folderId = existing?.folderId ?? initialFolderId ?? null;
   const readOnly = scope === "school" && listHref.startsWith("/kafedra");
 
   const [title, setTitle] = useState(existing?.title ?? "");
@@ -105,6 +108,7 @@ export function IntensiveEditor({
       description: description.trim() || null,
       videoUrl: videoUrl.trim() || null,
       testIds,
+      folderId,
     });
     setBusy(false);
     if (!created.ok || !created.id) return null;
@@ -152,6 +156,7 @@ export function IntensiveEditor({
         videoUrl: videoUrl.trim() || null,
         testIds,
         publish,
+        folderId: id ? undefined : folderId,
       });
       if (!result.ok) return;
       const nextId = result.id ?? id;
@@ -184,6 +189,7 @@ export function IntensiveEditor({
         description: description.trim() || null,
         videoUrl: videoUrl.trim() || null,
         testIds,
+        folderId,
       });
       setBusy(false);
       if (!created.ok || !created.id) return;

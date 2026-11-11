@@ -31,6 +31,7 @@ import {
   rememberDemoExplicitLogout,
 } from "@/lib/store/demo-session";
 import { isCatalogHomeworkPurpose } from "@/lib/homework/source-kind";
+import { isUnassignedActiveStudent } from "@/lib/students/unassigned";
 import type {
   Attendance,
   AttendanceStatus,
@@ -183,6 +184,13 @@ export type DemoStoreValue = {
     ownerScope: "school" | "teacher";
     teacherId?: string | null;
     sortOrder?: number;
+    contentKind?:
+      | "topic"
+      | "theory"
+      | "test"
+      | "intensive"
+      | "shared"
+      | null;
   }) => Promise<OkResult & { id?: string }>;
   deleteMaterialFolder: (
     id: string,
@@ -243,6 +251,7 @@ export type DemoStoreValue = {
     videoUrl?: string | null;
     testId?: string | null;
     publish?: boolean;
+    folderId?: string | null;
   }) => Promise<OkResult & { id?: string }>;
   deleteTheory: (id: string) => Promise<OkResult>;
   assignTheory: (input: {
@@ -261,6 +270,7 @@ export type DemoStoreValue = {
     videoUrl?: string | null;
     testIds: string[];
     publish?: boolean;
+    folderId?: string | null;
   }) => Promise<OkResult & { id?: string }>;
   deleteIntensive: (id: string) => Promise<OkResult>;
   assignIntensive: (input: {
@@ -764,7 +774,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
           (s) => s.teacherId === teacherId && s.status !== "archived"
         ),
       unassignedStudents: () =>
-        data.students.filter((s) => !s.teacherId && s.status !== "archived"),
+        data.students.filter((s) => isUnassignedActiveStudent(s)),
       lessonsForTeacher: (teacherId) =>
         data.lessons.filter((l) => l.teacherId === teacherId),
       lessonsForStudent: (studentId) =>
