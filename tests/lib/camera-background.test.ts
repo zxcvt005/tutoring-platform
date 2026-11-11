@@ -40,15 +40,15 @@ afterEach(() => {
 describe("camera background catalog", () => {
   it("lists every still from public/images/video/backgrounds", () => {
     expect(CAMERA_BACKGROUND_IMAGES.map((item) => item.src)).toEqual([
-      "/images/video/backgrounds/background1.png",
-      "/images/video/backgrounds/background2.png",
-      "/images/video/backgrounds/background3.png",
-      "/images/video/backgrounds/backgroun4.png",
-      "/images/video/backgrounds/background5.png",
-      "/images/video/backgrounds/background6.png",
-      "/images/video/backgrounds/background7.png",
+      "/images/video/backgrounds/background1.jpg",
+      "/images/video/backgrounds/background2.jpg",
+      "/images/video/backgrounds/background3.jpg",
+      "/images/video/backgrounds/background4.jpg",
+      "/images/video/backgrounds/background5.jpg",
+      "/images/video/backgrounds/background6.jpg",
+      "/images/video/backgrounds/background7.jpg",
     ]);
-    expect(cameraBackgroundImageById("background4")?.src).toContain("backgroun4");
+    expect(cameraBackgroundImageById("background4")?.src).toContain("background4.jpg");
     expect(cameraBackgroundImageById("missing")).toBeUndefined();
   });
 
@@ -346,7 +346,7 @@ describe("camera background controller", () => {
     expect(creates).toBe(1);
     expect(processor.switchTo).toHaveBeenCalledWith({
       mode: "virtual-background",
-      imagePath: "/images/video/backgrounds/background1.png",
+      imagePath: "/images/video/backgrounds/background1.jpg",
     });
 
     const p1 = controller.setChoice({ type: "blur" });

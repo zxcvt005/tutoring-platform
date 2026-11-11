@@ -280,6 +280,10 @@ export async function POST(request: Request) {
           );
         case "transferKnowledge":
           return m.transferKnowledgeAction(db, ctx, p);
+        case "transferFolderToTeachers":
+          return m.transferFolderToTeachersAction(db, ctx, p);
+        case "transferFolderToSchool":
+          return m.transferFolderToSchoolAction(db, ctx, p);
         case "saveToSchoolLibrary":
           return m.saveToSchoolLibraryAction(db, ctx, p);
         case "createMockExam":
@@ -317,6 +321,8 @@ export async function POST(request: Request) {
       "assignTheory",
       "assignIntensive",
       "transferKnowledge",
+      "transferFolderToTeachers",
+      "transferFolderToSchool",
       "saveToSchoolLibrary",
       "markTheoryViewed",
       "completeLesson",

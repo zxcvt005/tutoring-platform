@@ -31,6 +31,7 @@ import { connectVideoRoom, createVideoRoom } from "@/lib/video/connect";
 import { deviceErrorMessage } from "@/lib/video/device-error";
 import { CameraBackgroundController } from "@/lib/video/camera-background-controller";
 import {
+  prefetchCameraBackgroundAssets,
   shouldShowCameraBackground,
   type CameraBackgroundChoice,
 } from "@/lib/video/camera-background";
@@ -127,6 +128,7 @@ export function StudentCallSession({
         supportsProcessors: supportsBackgroundProcessors(),
       })
     );
+    prefetchCameraBackgroundAssets();
     const controller = new CameraBackgroundController();
     const softOff = (message: string) => {
       setBgChoice({ type: "off" });

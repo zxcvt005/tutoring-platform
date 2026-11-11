@@ -6,6 +6,7 @@
 
 import {
   recordCameraBackgroundDiag,
+  summarizeCameraBackgroundPerf,
   type CameraBackgroundDiagEvent,
 } from "@/lib/video/camera-background";
 
@@ -252,5 +253,6 @@ export function cameraBackgroundDiagToPayload(
         }
       : null,
     counters: getCameraBackgroundLifecycleCounters(),
+    perf: summarizeCameraBackgroundPerf(),
   };
 }

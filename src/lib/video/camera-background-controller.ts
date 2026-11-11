@@ -19,6 +19,7 @@ import {
   maxFpsForDelegate,
   noteProcessedFrame,
   probeCameraBackgroundAssets,
+  noteCameraBackgroundAutoDisable,
   recordCameraBackgroundDiag,
   shouldAutoDisableBackground,
   type CameraBackgroundChoice,
@@ -502,9 +503,10 @@ export class CameraBackgroundController {
     this.watch = noteProcessedFrame(this.watch, processingTimeMs);
     if (!shouldAutoDisableBackground(this.watch)) return;
     this.disabling = true;
+    noteCameraBackgroundAutoDisable(CAMERA_BACKGROUND_SLOW_MESSAGE);
     recordCameraBackgroundDiag({
       type: "frame_slow_trip",
-      detail: `ms:${Math.round(processingTimeMs)}`,
+      detail: `ms:${Math.round(processingTimeMs)};auto_off`,
       delegate: this.activeDelegate ?? undefined,
     });
     this.setDesired({ type: "off" });

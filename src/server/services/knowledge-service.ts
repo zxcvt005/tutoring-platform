@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 
 import { hasTheoryComponent } from "@/lib/theory/components";
@@ -11,6 +11,8 @@ import type { LibraryScope, MaterialOrigin, TestQuestion } from "@/lib/types";
 import type { AuthContext } from "@/server/authz/context";
 import { requireSchoolKnowledgeBase } from "@/server/authz/school-knowledge";
 import {
+  intensives,
+  materialFolders,
   materialOrigins,
   organizations,
   teachers,
@@ -21,6 +23,8 @@ import {
   theoryMaterials,
   topics,
 } from "@/server/db/schema";
+import { collectFolderDescendantIds } from "@/lib/folders/material-folders";
+import { requireRoles, requireTeacherProfile } from "@/server/authz/require";
 import type { AppDb } from "@/server/db/types";
 import { ApiError, badRequest, notFound } from "@/server/errors";
 import {
@@ -933,4 +937,576 @@ export async function listKnowledgeBase(db: AppDb, ctx: AuthContext) {
     }));
 
   return { school, teachers: staff };
+}
+
+export type FolderTransferResult = TransferResult & {
+  foldersCreated: number;
+  folderMap: Record<string, string>;
+  /** Intensives in the subtree that are intentionally not copied. */
+  intensivesNotTransferred: number;
+};
+
+type FolderMaterialRef = { kind: KnowledgeKind; id: string; folderId: string };
+
+async function listFolderMaterials(
+  db: AppDb,
+  organizationId: string,
+  folderIds: string[],
+  libraryScope: LibraryScope,
+  teacherId: string | null
+): Promise<FolderMaterialRef[]> {
+  if (!folderIds.length) return [];
+  const scopeFilter =
+    libraryScope === "school"
+      ? and(
+          eq(topics.organizationId, organizationId),
+          eq(topics.libraryScope, "school"),
+          isNull(topics.teacherId)
+        )
+      : and(
+          eq(topics.organizationId, organizationId),
+          eq(topics.libraryScope, "teacher"),
+          eq(topics.teacherId, teacherId ?? "")
+        );
+  const topicRows = await db
+    .select({ id: topics.id, folderId: topics.folderId })
+    .from(topics)
+    .where(
+      and(
+        scopeFilter,
+        inArray(topics.folderId, folderIds),
+        ne(topics.status, "archived")
+      )
+    );
+  const testScope =
+    libraryScope === "school"
+      ? and(
+          eq(tests.organizationId, organizationId),
+          eq(tests.libraryScope, "school"),
+          isNull(tests.teacherId),
+          eq(tests.purpose, "homework")
+        )
+      : and(
+          eq(tests.organizationId, organizationId),
+          eq(tests.libraryScope, "teacher"),
+          eq(tests.teacherId, teacherId ?? ""),
+          eq(tests.purpose, "homework")
+        );
+  const testRows = await db
+    .select({ id: tests.id, folderId: tests.folderId })
+    .from(tests)
+    .where(and(testScope, inArray(tests.folderId, folderIds)));
+  const theoryScope =
+    libraryScope === "school"
+      ? and(
+          eq(theoryMaterials.organizationId, organizationId),
+          eq(theoryMaterials.libraryScope, "school"),
+          isNull(theoryMaterials.teacherId)
+        )
+      : and(
+          eq(theoryMaterials.organizationId, organizationId),
+          eq(theoryMaterials.libraryScope, "teacher"),
+          eq(theoryMaterials.teacherId, teacherId ?? "")
+        );
+  const theoryRows = await db
+    .select({ id: theoryMaterials.id, folderId: theoryMaterials.folderId })
+    .from(theoryMaterials)
+    .where(and(theoryScope, inArray(theoryMaterials.folderId, folderIds)));
+
+  const out: FolderMaterialRef[] = [];
+  for (const row of topicRows) {
+    if (row.folderId) out.push({ kind: "topic", id: row.id, folderId: row.folderId });
+  }
+  for (const row of testRows) {
+    if (row.folderId) out.push({ kind: "test", id: row.id, folderId: row.folderId });
+  }
+  for (const row of theoryRows) {
+    if (row.folderId) out.push({ kind: "theory", id: row.id, folderId: row.folderId });
+  }
+  return out;
+}
+
+async function countSubtreeIntensives(
+  db: AppDb,
+  organizationId: string,
+  folderIds: string[],
+  libraryScope: LibraryScope,
+  teacherId: string | null
+): Promise<number> {
+  if (!folderIds.length) return 0;
+  const scope =
+    libraryScope === "school"
+      ? and(
+          eq(intensives.organizationId, organizationId),
+          eq(intensives.libraryScope, "school"),
+          isNull(intensives.teacherId)
+        )
+      : and(
+          eq(intensives.organizationId, organizationId),
+          eq(intensives.libraryScope, "teacher"),
+          eq(intensives.teacherId, teacherId!)
+        );
+  const rows = await db
+    .select({ id: intensives.id, folderId: intensives.folderId })
+    .from(intensives)
+    .where(and(scope, inArray(intensives.folderId, folderIds)));
+  return rows.length;
+}
+
+async function assignCopyFolder(
+  db: AppDb,
+  kind: KnowledgeKind,
+  copyId: string,
+  folderId: string | null
+) {
+  if (kind === "theory") {
+    await db
+      .update(theoryMaterials)
+      .set({ folderId, updatedAt: new Date() })
+      .where(eq(theoryMaterials.id, copyId));
+    return;
+  }
+  if (kind === "test") {
+    await db
+      .update(tests)
+      .set({ folderId, updatedAt: new Date() })
+      .where(eq(tests.id, copyId));
+    return;
+  }
+  await db
+    .update(topics)
+    .set({ folderId, updatedAt: new Date() })
+    .where(eq(topics.id, copyId));
+}
+
+/**
+ * Copy a school folder subtree (folders + theory/test/topic) to one or more teachers.
+ * Same ownership semantics as transferKnowledge (copy, not move).
+ */
+export async function transferFolderToTeachers(
+  db: AppDb,
+  ctx: AuthContext,
+  input: {
+    sourceFolderId: string;
+    teacherIds: string[];
+    duplicatePolicy?: "skip" | "create";
+    phase?: "plan" | "commit";
+  }
+): Promise<FolderTransferResult> {
+  requireSchoolKnowledgeBase(ctx);
+  const phase = input.phase === "plan" ? "plan" : "commit";
+  const duplicatePolicy = input.duplicatePolicy === "create" ? "create" : "skip";
+  const teacherIds = [...new Set((input.teacherIds ?? []).filter(Boolean))];
+  const sourceFolderId = String(input.sourceFolderId ?? "").trim();
+  if (!sourceFolderId) throw badRequest("Укажите папку");
+  if (!teacherIds.length) throw badRequest("Выберите преподавателей");
+
+  const [sourceFolder] = await db
+    .select()
+    .from(materialFolders)
+    .where(
+      and(
+        eq(materialFolders.id, sourceFolderId),
+        eq(materialFolders.organizationId, ctx.organizationId),
+        eq(materialFolders.ownerScope, "school"),
+        isNull(materialFolders.teacherId)
+      )
+    )
+    .limit(1);
+  if (!sourceFolder) throw notFound("Папка не найдена в школьной базе");
+
+  const allFolders = await db
+    .select()
+    .from(materialFolders)
+    .where(
+      and(
+        eq(materialFolders.organizationId, ctx.organizationId),
+        eq(materialFolders.ownerScope, "school"),
+        isNull(materialFolders.teacherId)
+      )
+    );
+  const mapped = allFolders.map((row) => ({
+    id: row.id,
+    ownerScope: "school" as const,
+    teacherId: null,
+    parentId: row.parentId,
+    title: row.title,
+    sortOrder: row.sortOrder,
+  }));
+  const descendantIds = collectFolderDescendantIds(mapped, sourceFolderId);
+  descendantIds.add(sourceFolderId);
+  const folderIdList = [...descendantIds];
+  const materials = await listFolderMaterials(
+    db,
+    ctx.organizationId,
+    folderIdList,
+    "school",
+    null
+  );
+  const intensivesNotTransferred = await countSubtreeIntensives(
+    db,
+    ctx.organizationId,
+    folderIdList,
+    "school",
+    null
+  );
+
+  const teacherRows = await db
+    .select({
+      id: teachers.id,
+      fullName: teachers.fullName,
+      organizationId: teachers.organizationId,
+    })
+    .from(teachers)
+    .where(inArray(teachers.id, teacherIds));
+  const teacherById = new Map(teacherRows.map((row) => [row.id, row]));
+  const authorName = await schoolAuthorName(db, ctx.organizationId);
+
+  const result: FolderTransferResult = {
+    phase,
+    planned: 0,
+    created: 0,
+    skipped: 0,
+    duplicates: [],
+    failed: [],
+    foldersCreated: 0,
+    folderMap: {},
+    intensivesNotTransferred,
+  };
+
+  // Parent-before-child order for folder creation.
+  const orderedFolders = allFolders
+    .filter((row) => descendantIds.has(row.id))
+    .sort((a, b) => {
+      const da = depthOf(allFolders, a.id);
+      const db_ = depthOf(allFolders, b.id);
+      return da - db_ || a.sortOrder - b.sortOrder;
+    });
+
+  for (const teacherId of teacherIds) {
+    const teacher = teacherById.get(teacherId);
+    if (!teacher || teacher.organizationId !== ctx.organizationId) {
+      result.failed.push({
+        kind: "folder",
+        id: sourceFolderId,
+        teacherId,
+        message: "Преподаватель не найден в этой организации",
+      });
+      continue;
+    }
+
+    if (phase === "plan") {
+      for (const item of materials) {
+        const existingCopyId = await findExistingCopy(
+          db,
+          ctx.organizationId,
+          item.kind,
+          item.id,
+          teacherId
+        );
+        if (existingCopyId && duplicatePolicy === "skip") {
+          result.duplicates.push({
+            kind: item.kind,
+            id: item.id,
+            title: item.id,
+            teacherId,
+            teacherName: teacher.fullName,
+            existingCopyId,
+          });
+          continue;
+        }
+        result.planned += 1;
+      }
+      result.planned += orderedFolders.length;
+      continue;
+    }
+
+    const folderMap = new Map<string, string>();
+    try {
+      await db.transaction(async (tx) => {
+        const transaction = tx as AppDb;
+        for (const folder of orderedFolders) {
+          const newIdFolder = newId("fld");
+          const parentMapped =
+            folder.parentId && descendantIds.has(folder.parentId)
+              ? folderMap.get(folder.parentId) ?? null
+              : null;
+          await transaction.insert(materialFolders).values({
+            id: newIdFolder,
+            organizationId: ctx.organizationId,
+            ownerScope: "teacher",
+            teacherId,
+            parentId: parentMapped,
+            title: folder.title,
+            sortOrder: folder.sortOrder,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+          folderMap.set(folder.id, newIdFolder);
+          result.foldersCreated += 1;
+        }
+
+        const owner: LibraryOwner = {
+          organizationId: ctx.organizationId,
+          teacherId,
+          libraryScope: "teacher",
+        };
+        for (const item of materials) {
+          const source = await loadSchoolSource(transaction, ctx.organizationId, {
+            kind: item.kind,
+            id: item.id,
+          });
+          const existingCopyId = await findExistingCopy(
+            transaction,
+            ctx.organizationId,
+            item.kind,
+            source.id,
+            teacherId
+          );
+          if (existingCopyId && duplicatePolicy === "skip") {
+            result.skipped += 1;
+            result.duplicates.push({
+              kind: item.kind,
+              id: source.id,
+              title: source.title,
+              teacherId,
+              teacherName: teacher.fullName,
+              existingCopyId,
+            });
+            continue;
+          }
+          await lockSource(transaction, item.kind, source.id);
+          const writtenKeys: string[] = [];
+          const copyId =
+            item.kind === "theory"
+              ? await copyTheoryRecord(
+                  transaction,
+                  source.id,
+                  owner,
+                  writtenKeys
+                )
+              : item.kind === "test"
+                ? await copyTestRecord(transaction, source.id, owner)
+                : await copyTopicRecord(transaction, source.id, owner);
+          await insertOrigin(transaction, {
+            organizationId: ctx.organizationId,
+            kind: item.kind,
+            materialId: copyId,
+            source,
+            authorName,
+            sourceScope: "school",
+            copiedByUserId: ctx.userId,
+          });
+          await assignCopyFolder(
+            transaction,
+            item.kind,
+            copyId,
+            folderMap.get(item.folderId) ?? null
+          );
+          result.created += 1;
+        }
+      });
+      for (const [from, to] of folderMap) {
+        result.folderMap[from] = to;
+      }
+    } catch (err) {
+      result.failed.push({
+        kind: "folder",
+        id: sourceFolderId,
+        teacherId,
+        message: errorMessage(err),
+      });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Copy a teacher's folder subtree into the school knowledge base (copy, not move).
+ * Callable by director/assistant, or by the owning teacher.
+ */
+export async function transferFolderToSchool(
+  db: AppDb,
+  ctx: AuthContext,
+  input: {
+    sourceFolderId: string;
+    duplicatePolicy?: "skip" | "create";
+    phase?: "plan" | "commit";
+  }
+): Promise<FolderTransferResult> {
+  requireRoles(ctx, ["director", "assistant", "teacher"]);
+  const phase = input.phase === "plan" ? "plan" : "commit";
+  const duplicatePolicy = input.duplicatePolicy === "create" ? "create" : "skip";
+  const sourceFolderId = String(input.sourceFolderId ?? "").trim();
+  if (!sourceFolderId) throw badRequest("Укажите папку");
+
+  const [sourceFolder] = await db
+    .select()
+    .from(materialFolders)
+    .where(
+      and(
+        eq(materialFolders.id, sourceFolderId),
+        eq(materialFolders.organizationId, ctx.organizationId),
+        eq(materialFolders.ownerScope, "teacher")
+      )
+    )
+    .limit(1);
+  if (!sourceFolder || !sourceFolder.teacherId) {
+    throw notFound("Папка преподавателя не найдена");
+  }
+  if (ctx.role === "teacher") {
+    const tid = await requireTeacherProfile(ctx);
+    if (tid !== sourceFolder.teacherId) throw badRequest("Можно передать только свою папку");
+  }
+
+  const teacherId = sourceFolder.teacherId;
+  const allFolders = await db
+    .select()
+    .from(materialFolders)
+    .where(
+      and(
+        eq(materialFolders.organizationId, ctx.organizationId),
+        eq(materialFolders.ownerScope, "teacher"),
+        eq(materialFolders.teacherId, teacherId)
+      )
+    );
+  const mapped = allFolders.map((row) => ({
+    id: row.id,
+    ownerScope: "teacher" as const,
+    teacherId: row.teacherId,
+    parentId: row.parentId,
+    title: row.title,
+    sortOrder: row.sortOrder,
+  }));
+  const descendantIds = collectFolderDescendantIds(mapped, sourceFolderId);
+  descendantIds.add(sourceFolderId);
+  const materials = await listFolderMaterials(
+    db,
+    ctx.organizationId,
+    [...descendantIds],
+    "teacher",
+    teacherId
+  );
+  const intensivesNotTransferred = await countSubtreeIntensives(
+    db,
+    ctx.organizationId,
+    [...descendantIds],
+    "teacher",
+    teacherId
+  );
+  const orderedFolders = allFolders
+    .filter((row) => descendantIds.has(row.id))
+    .sort((a, b) => depthOf(allFolders, a.id) - depthOf(allFolders, b.id));
+
+  const result: FolderTransferResult = {
+    phase,
+    planned: 0,
+    created: 0,
+    skipped: 0,
+    duplicates: [],
+    failed: [],
+    foldersCreated: 0,
+    folderMap: {},
+    intensivesNotTransferred,
+  };
+
+  if (phase === "plan") {
+    result.planned = orderedFolders.length + materials.length;
+    return result;
+  }
+
+  const owner = schoolOwner(ctx.organizationId);
+  const folderMap = new Map<string, string>();
+  try {
+    await db.transaction(async (tx) => {
+      const transaction = tx as AppDb;
+      for (const folder of orderedFolders) {
+        const newIdFolder = newId("fld");
+        const parentMapped =
+          folder.parentId && descendantIds.has(folder.parentId)
+            ? folderMap.get(folder.parentId) ?? null
+            : null;
+        await transaction.insert(materialFolders).values({
+          id: newIdFolder,
+          organizationId: ctx.organizationId,
+          ownerScope: "school",
+          teacherId: null,
+          parentId: parentMapped,
+          title: folder.title,
+          sortOrder: folder.sortOrder,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        folderMap.set(folder.id, newIdFolder);
+        result.foldersCreated += 1;
+      }
+      for (const item of materials) {
+        const source = await loadTeacherSource(transaction, ctx.organizationId, {
+          kind: item.kind,
+          id: item.id,
+        });
+        const existingId = await findExistingSchoolCopy(
+          transaction,
+          ctx.organizationId,
+          item.kind,
+          source.id
+        );
+        if (existingId && duplicatePolicy === "skip") {
+          result.skipped += 1;
+          continue;
+        }
+        await lockSource(transaction, item.kind, source.id);
+        const writtenKeys: string[] = [];
+        const copyId =
+          item.kind === "theory"
+            ? await copyTheoryRecord(transaction, source.id, owner, writtenKeys)
+            : item.kind === "test"
+              ? await copyTestRecord(transaction, source.id, owner)
+              : await copyTopicRecord(transaction, source.id, owner);
+        await insertOrigin(transaction, {
+          organizationId: ctx.organizationId,
+          kind: item.kind,
+          materialId: copyId,
+          source,
+          authorName: source.authorName || "Преподаватель",
+          sourceScope: "teacher",
+          copiedByUserId: ctx.userId,
+        });
+        await assignCopyFolder(
+          transaction,
+          item.kind,
+          copyId,
+          folderMap.get(item.folderId) ?? null
+        );
+        result.created += 1;
+      }
+    });
+    for (const [from, to] of folderMap) result.folderMap[from] = to;
+  } catch (err) {
+    result.failed.push({
+      kind: "folder",
+      id: sourceFolderId,
+      teacherId,
+      message: errorMessage(err),
+    });
+  }
+  return result;
+}
+
+function depthOf(
+  folders: { id: string; parentId: string | null }[],
+  id: string
+): number {
+  let depth = 0;
+  let current: string | null = id;
+  const byId = new Map(folders.map((f) => [f.id, f]));
+  while (current) {
+    const row = byId.get(current);
+    if (!row?.parentId) break;
+    depth += 1;
+    current = row.parentId;
+    if (depth > 64) break;
+  }
+  return depth;
 }

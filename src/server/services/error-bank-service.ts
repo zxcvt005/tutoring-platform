@@ -33,6 +33,14 @@ function isUniqueViolation(err: unknown): boolean {
   return candidate.code === "23505" || candidate.cause?.code === "23505";
 }
 
+/** Concurrent txn abort (PGlite/Postgres) after the peer already wrote the dedupe row. */
+function isConcurrentTxnAbort(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  return /rolled back|serialization|deadlock|could not serialize/i.test(
+    message
+  );
+}
+
 export function availableAtFrom(now: Date) {
   return new Date(now.getTime() + ERROR_BANK_DELAY_MS);
 }
@@ -219,111 +227,125 @@ export async function recordIncorrectAnswers(
       reason,
     };
 
-    const didRecord = await db.transaction(async (tx) => {
-      const txDb = tx as unknown as AppDb;
-      let active = await findActiveBankRow(txDb, input.studentId, question.id);
+    let didRecord = false;
+    try {
+      didRecord = await db.transaction(async (tx) => {
+        const txDb = tx as unknown as AppDb;
+        let active = await findActiveBankRow(txDb, input.studentId, question.id);
 
-      if (active) {
+        if (active) {
+          const claimed = await insertEvent(txDb, {
+            organizationId: input.organizationId,
+            studentId: input.studentId,
+            errorBankId: active.id,
+            sourceQuestionId: question.id,
+            eventType: "repeated",
+            payload: eventPayload,
+            dedupeKey,
+          });
+          if (!claimed) return false;
+          await tx
+            .update(studentErrorBank)
+            .set({
+              lastErrorAt: now,
+              availableAt: nextAvailable,
+              status: "waiting",
+              incorrectAttemptsCount: active.incorrectAttemptsCount + 1,
+              // Снимок первой ошибки сохраняем: правки шаблона и повторные ДЗ
+              // не подменяют зафиксированное содержание.
+              kimNumber: active.kimNumber ?? kimNumber,
+              sourceAssignmentId:
+                input.sourceAssignmentId ?? active.sourceAssignmentId,
+              sourceTestId: input.sourceTestId ?? active.sourceTestId,
+              updatedAt: now,
+            })
+            .where(eq(studentErrorBank.id, active.id));
+          return true;
+        }
+
+        const id = newId("seb");
         const claimed = await insertEvent(txDb, {
           organizationId: input.organizationId,
           studentId: input.studentId,
-          errorBankId: active.id,
+          errorBankId: null,
           sourceQuestionId: question.id,
-          eventType: "repeated",
+          eventType: "recorded",
           payload: eventPayload,
           dedupeKey,
         });
         if (!claimed) return false;
-        await tx
-          .update(studentErrorBank)
-          .set({
+
+        try {
+          await tx.insert(studentErrorBank).values({
+            id,
+            organizationId: input.organizationId,
+            studentId: input.studentId,
+            sourceAssignmentId: input.sourceAssignmentId ?? null,
+            sourceTestId: input.sourceTestId ?? null,
+            sourceQuestionId: question.id,
+            questionSnapshot: snapshot as unknown as Record<string, unknown>,
+            kimNumber,
+            firstErrorAt: now,
             lastErrorAt: now,
+            incorrectAttemptsCount: 1,
             availableAt: nextAvailable,
             status: "waiting",
-            incorrectAttemptsCount: active.incorrectAttemptsCount + 1,
-            // Снимок первой ошибки сохраняем: правки шаблона и повторные ДЗ
-            // не подменяют зафиксированное содержание.
-            kimNumber: active.kimNumber ?? kimNumber,
-            sourceAssignmentId:
-              input.sourceAssignmentId ?? active.sourceAssignmentId,
-            sourceTestId: input.sourceTestId ?? active.sourceTestId,
-            updatedAt: now,
-          })
-          .where(eq(studentErrorBank.id, active.id));
-        return true;
-      }
-
-      const id = newId("seb");
-      const claimed = await insertEvent(txDb, {
-        organizationId: input.organizationId,
-        studentId: input.studentId,
-        errorBankId: null,
-        sourceQuestionId: question.id,
-        eventType: "recorded",
-        payload: eventPayload,
-        dedupeKey,
+          });
+          await tx
+            .update(studentErrorBankEvents)
+            .set({ errorBankId: id })
+            .where(
+              eq(
+                studentErrorBankEvents.id,
+                errorBankEventId(input.studentId, dedupeKey)
+              )
+            );
+          return true;
+        } catch (err) {
+          if (!isUniqueViolation(err)) throw err;
+          active = await findActiveBankRow(txDb, input.studentId, question.id);
+          if (!active) throw err;
+          await tx
+            .update(studentErrorBank)
+            .set({
+              lastErrorAt: now,
+              availableAt: nextAvailable,
+              status: "waiting",
+              incorrectAttemptsCount: active.incorrectAttemptsCount + 1,
+              sourceAssignmentId:
+                input.sourceAssignmentId ?? active.sourceAssignmentId,
+              sourceTestId: input.sourceTestId ?? active.sourceTestId,
+              updatedAt: now,
+            })
+            .where(eq(studentErrorBank.id, active.id));
+          await tx
+            .update(studentErrorBankEvents)
+            .set({
+              errorBankId: active.id,
+              eventType: "repeated",
+              payload: { ...eventPayload, dedupeKey, raced: true },
+            })
+            .where(
+              eq(
+                studentErrorBankEvents.id,
+                errorBankEventId(input.studentId, dedupeKey)
+              )
+            );
+          return true;
+        }
       });
-      if (!claimed) return false;
-
-      try {
-        await tx.insert(studentErrorBank).values({
-          id,
-          organizationId: input.organizationId,
-          studentId: input.studentId,
-          sourceAssignmentId: input.sourceAssignmentId ?? null,
-          sourceTestId: input.sourceTestId ?? null,
-          sourceQuestionId: question.id,
-          questionSnapshot: snapshot as unknown as Record<string, unknown>,
-          kimNumber,
-          firstErrorAt: now,
-          lastErrorAt: now,
-          incorrectAttemptsCount: 1,
-          availableAt: nextAvailable,
-          status: "waiting",
-        });
-        await tx
-          .update(studentErrorBankEvents)
-          .set({ errorBankId: id })
-          .where(
-            eq(
-              studentErrorBankEvents.id,
-              errorBankEventId(input.studentId, dedupeKey)
-            )
-          );
-        return true;
-      } catch (err) {
-        if (!isUniqueViolation(err)) throw err;
-        active = await findActiveBankRow(txDb, input.studentId, question.id);
-        if (!active) throw err;
-        await tx
-          .update(studentErrorBank)
-          .set({
-            lastErrorAt: now,
-            availableAt: nextAvailable,
-            status: "waiting",
-            incorrectAttemptsCount: active.incorrectAttemptsCount + 1,
-            sourceAssignmentId:
-              input.sourceAssignmentId ?? active.sourceAssignmentId,
-            sourceTestId: input.sourceTestId ?? active.sourceTestId,
-            updatedAt: now,
-          })
-          .where(eq(studentErrorBank.id, active.id));
-        await tx
-          .update(studentErrorBankEvents)
-          .set({
-            errorBankId: active.id,
-            eventType: "repeated",
-            payload: { ...eventPayload, dedupeKey, raced: true },
-          })
-          .where(
-            eq(
-              studentErrorBankEvents.id,
-              errorBankEventId(input.studentId, dedupeKey)
-            )
-          );
-        return true;
+    } catch (err) {
+      // Parallel HTTP retries: peer txn won; treat as idempotent skip when
+      // the dedupe event already exists (PGlite may abort instead of 23505).
+      if (
+        (isConcurrentTxnAbort(err) || isUniqueViolation(err)) &&
+        (await hasDedupeEvent(db, input.studentId, dedupeKey))
+      ) {
+        didRecord = false;
+      } else {
+        throw err;
       }
-    });
+    }
 
     if (didRecord) recorded += 1;
   }

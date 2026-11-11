@@ -1,23 +1,13 @@
 /**
  * Isolated virtual-background processor for LiveKit LocalVideoTrack.setProcessor.
  *
- * Why not @livekit/track-processors BackgroundProcessor (0.8.2)?
- * - BackgroundTransformer.init() calls setupWebGL(this.canvas) then passes the
- *   SAME canvas to MediaPipe ImageSegmenter (`canvas: this.canvas`).
- * - MediaPipe and LiveKit shaders then mutate one WebGL2 context every frame.
- * - segmentForVideo is synchronous on the main thread; modern Insertable Streams
- *   path ignores maxFps.
- * - MediaPipe GPU postprocess can abort the renderer without a JS exception
- *   (google-ai-edge/mediapipe#6296) when float color buffers are missing.
- * - 0.8.2 destroy() releases WebGL before imageSegmenter.close(); main branch
- *   fixed ordering but is unpublished.
- *
- * This adapter:
- * - Runs MediaPipe ImageSegmenter on CPU without sharing a compositor WebGL canvas
- * - Composites on a separate 2D canvas (CSS blur / image)
- * - Throttles frames in transform() so maxFps applies on Chrome modern path
- * - Closes the segmenter before tearing down media pipelines
- * - Tracks a single active instance counter for diagnostics
+ * Architecture (stability-first):
+ * - MediaPipe ImageSegmenter on CPU only — no shared LiveKit/MediaPipe WebGL canvas
+ * - Separate 2D canvases for composite (CSS blur / image)
+ * - Segmentation at CAMERA_BACKGROUND_SEGMENT_MAX_FPS on a downscaled frame
+ * - Output/composite at CAMERA_BACKGROUND_CPU_MAX_FPS reusing the last mask so
+ *   the person keeps moving without flashing the raw camera
+ * - Temporal EMA + feather on the category mask for softer hair/edges
  */
 
 import type {
@@ -31,8 +21,22 @@ import {
   CAMERA_BACKGROUND_ASSETS,
   CAMERA_BACKGROUND_BLUR_RADIUS,
   CAMERA_BACKGROUND_CPU_MAX_FPS,
+  CAMERA_BACKGROUND_MASK_FEATHER,
+  CAMERA_BACKGROUND_MASK_TEMPORAL,
+  CAMERA_BACKGROUND_SEG_MAX_WIDTH,
+  CAMERA_BACKGROUND_SEGMENT_MAX_FPS,
+  noteCameraBackgroundImageLoadError,
+  noteCameraBackgroundPerfFrame,
   recordCameraBackgroundDiag,
 } from "@/lib/video/camera-background";
+import {
+  blendCategoryMasks,
+  featherMaskBytes,
+  personMixFromMaskByte,
+  shouldRunSegmentation,
+  targetSegmentationSize,
+  type MaskBuffer,
+} from "@/lib/video/camera-background-mask";
 import {
   markCameraBackgroundStage,
   noteCameraBackgroundProcessorActive,
@@ -46,16 +50,18 @@ export type IsolatedBackgroundProcessorOptions = {
   imagePath?: string;
   assetPaths?: { tasksVisionFileSet?: string; modelAssetPath?: string };
   maxFps?: number;
+  segmentMaxFps?: number;
   onFrameProcessed?: (stats: {
     processingTimeMs: number;
     segmentationTimeMs: number;
     filterTimeMs: number;
+    segmented: boolean;
   }) => void;
 };
 
 type SegmenterLike = {
   segmentForVideo: (
-    frame: VideoFrame | HTMLVideoElement,
+    frame: VideoFrame | HTMLVideoElement | HTMLCanvasElement,
     timestamp: number,
     callback: (result: {
       categoryMask?: {
@@ -113,6 +119,8 @@ export class IsolatedBackgroundProcessor
   private ctx?: CanvasRenderingContext2D | null;
   private workCanvas?: HTMLCanvasElement;
   private workCtx?: CanvasRenderingContext2D | null;
+  private segCanvas?: HTMLCanvasElement;
+  private segCtx?: CanvasRenderingContext2D | null;
   private segmenter?: SegmenterLike | null;
   private backgroundImage: ImageBitmap | null = null;
   private backgroundPath: string | null = null;
@@ -124,19 +132,17 @@ export class IsolatedBackgroundProcessor
     modelAssetPath: string;
   };
   private readonly maxFps: number;
+  private readonly segmentMaxFps: number;
   private readonly onFrameProcessed?: IsolatedBackgroundProcessorOptions["onFrameProcessed"];
   private minFrameIntervalMs: number;
-  /** Set AFTER a heavy frame finishes so backlog frames skip MediaPipe. */
+  private minSegmentIntervalMs: number;
   private nextFrameDue = 0;
+  private nextSegmentDue = 0;
   private firstFrameDone = false;
-  /**
-   * Canvas pixels hold the last successful composite. When FPS-throttling skips
-   * heavy work we re-emit from this canvas instead of the raw camera frame
-   * (raw passthrough caused ~12 Hz flicker against the processed stream).
-   */
+  private firstSegmentDone = false;
   private hasLastProcessedOutput = false;
+  private lastMask: MaskBuffer | null = null;
   private destroyed = false;
-  /** Bumped on destroy/restart so late async work ignores stale state. */
   private epoch = 0;
   private loadEpoch = 0;
   private transformer?: TransformStream<VideoFrame, VideoFrame>;
@@ -155,7 +161,10 @@ export class IsolatedBackgroundProcessor
         CAMERA_BACKGROUND_ASSETS.modelAssetPath,
     };
     this.maxFps = options.maxFps ?? CAMERA_BACKGROUND_CPU_MAX_FPS;
+    this.segmentMaxFps =
+      options.segmentMaxFps ?? CAMERA_BACKGROUND_SEGMENT_MAX_FPS;
     this.minFrameIntervalMs = 1000 / Math.max(1, this.maxFps);
+    this.minSegmentIntervalMs = 1000 / Math.max(1, this.segmentMaxFps);
     this.onFrameProcessed = options.onFrameProcessed;
   }
 
@@ -168,7 +177,7 @@ export class IsolatedBackgroundProcessor
     try {
       recordCameraBackgroundDiag({
         type: "architecture",
-        detail: "isolated_cpu_2d",
+        detail: "isolated_cpu_2d_mask_reuse",
         delegate: "CPU",
       });
 
@@ -184,8 +193,17 @@ export class IsolatedBackgroundProcessor
       this.workCtx = this.workCanvas.getContext("2d", {
         willReadFrequently: true,
       });
+      this.segCanvas = createOutputCanvas(
+        CAMERA_BACKGROUND_SEG_MAX_WIDTH,
+        Math.round(
+          (CAMERA_BACKGROUND_SEG_MAX_WIDTH * height) / Math.max(1, width)
+        )
+      );
+      this.segCtx = this.segCanvas.getContext("2d", {
+        willReadFrequently: true,
+      });
 
-      if (!this.ctx || !this.workCtx) {
+      if (!this.ctx || !this.workCtx || !this.segCtx) {
         throw new Error("2d canvas unavailable for isolated background");
       }
 
@@ -197,7 +215,6 @@ export class IsolatedBackgroundProcessor
       const fileset = await vision.FilesetResolver.forVisionTasks(
         this.assetPaths.tasksVisionFileSet
       );
-      // CPU delegate, no compositor canvas shared with WebGL shaders.
       this.segmenter = await vision.ImageSegmenter.createFromOptions(fileset, {
         baseOptions: {
           modelAssetPath: this.assetPaths.modelAssetPath,
@@ -227,7 +244,6 @@ export class IsolatedBackgroundProcessor
         {
           transform: (frame, controller) => this.transform(frame, controller),
         },
-        // Limit queued VideoFrames waiting for CPU segmentation.
         { highWaterMark: 1 },
         { highWaterMark: 1 }
       );
@@ -249,7 +265,6 @@ export class IsolatedBackgroundProcessor
       this.processedTrack = this.trackGenerator;
       markCameraBackgroundStage("processor_attached", "isolated_cpu");
     } catch (err) {
-      // Mark destroyed so a later destroy()/stopProcessor is a no-op (no double counter).
       this.destroyed = true;
       this.epoch += 1;
       this.loadEpoch += 1;
@@ -288,18 +303,27 @@ export class IsolatedBackgroundProcessor
     this.trackGenerator = undefined;
     this.processor = undefined;
     this.processedTrack = undefined;
+    this.clearCanvases();
+  }
+
+  private clearCanvases() {
     this.canvas = undefined;
     this.ctx = undefined;
     this.workCanvas = undefined;
     this.workCtx = undefined;
+    this.segCanvas = undefined;
+    this.segCtx = undefined;
   }
 
   async restart(opts: ProcessorOptions<Track.Kind>): Promise<void> {
     await this.destroy();
     this.destroyed = false;
     this.firstFrameDone = false;
+    this.firstSegmentDone = false;
     this.hasLastProcessedOutput = false;
+    this.lastMask = null;
     this.nextFrameDue = 0;
+    this.nextSegmentDue = 0;
     await this.init(opts);
   }
 
@@ -327,7 +351,6 @@ export class IsolatedBackgroundProcessor
     this.pipeAbort = undefined;
     this.transformer = undefined;
 
-    // LiveKit stopProcessor may already have stopped processedTrack — stop is idempotent.
     try {
       this.trackGenerator?.stop();
     } catch {
@@ -347,10 +370,8 @@ export class IsolatedBackgroundProcessor
     this.backgroundImage = null;
     this.backgroundPath = null;
     this.hasLastProcessedOutput = false;
-    this.canvas = undefined;
-    this.ctx = undefined;
-    this.workCanvas = undefined;
-    this.workCtx = undefined;
+    this.lastMask = null;
+    this.clearCanvases();
     this.source = undefined;
     noteCameraBackgroundProcessorActive(-1);
     markCameraBackgroundStage("processor_disposed", "isolated_destroy_done");
@@ -383,11 +404,18 @@ export class IsolatedBackgroundProcessor
     const loadEpoch = ++this.loadEpoch;
     const img = new Image();
     img.crossOrigin = "anonymous";
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve();
-      img.onerror = () => reject(new Error(`bg_image_fail`));
-      img.src = path;
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error(`bg_image_fail`));
+        img.src = path;
+      });
+    } catch (err) {
+      noteCameraBackgroundImageLoadError(
+        err instanceof Error ? err.message : "bg_image_fail"
+      );
+      throw err;
+    }
     if (this.destroyed || loadEpoch !== this.loadEpoch) {
       return;
     }
@@ -405,12 +433,10 @@ export class IsolatedBackgroundProcessor
     frame: VideoFrame,
     controller: TransformStreamDefaultController<VideoFrame>
   ): Promise<void> {
-    /** true when the original `frame` was enqueued (ownership transferred). */
     let passedThrough = false;
     const epoch = this.epoch;
     try {
       if (this.destroyed || !this.canvas || !this.ctx || !this.segmenter) {
-        // After the effect has painted once, never fall back to the raw camera.
         if (
           resolveSkippedBackgroundFrameOutput({
             mode: this.mode,
@@ -437,8 +463,6 @@ export class IsolatedBackgroundProcessor
       }
 
       const now = performance.now();
-      // Skip heavy MediaPipe work under the FPS budget. Never emit the raw
-      // camera frame here — that alternates processed/original and flickers.
       if (
         shouldSkipHeavyCameraBackgroundFrame({
           now,
@@ -451,17 +475,27 @@ export class IsolatedBackgroundProcessor
           hasLastProcessedFrame: this.hasLastProcessedOutput,
         });
         if (policy === "repeat_last_processed") {
-          this.enqueueLastProcessed(frame, controller);
+          noteCameraBackgroundPerfFrame({ processingTimeMs: 0, skipped: true });
+          // Prefer re-composite with last mask on the *current* frame when possible.
+          if (this.lastMask) {
+            this.drawComposite(frame, this.lastMask, frame.displayWidth || frame.codedWidth, frame.displayHeight || frame.codedHeight);
+            const out = new VideoFrame(this.canvas, {
+              timestamp: frame.timestamp || Date.now(),
+            });
+            controller.enqueue(out);
+            this.hasLastProcessedOutput = true;
+          } else {
+            this.enqueueLastProcessed(frame, controller);
+          }
         }
-        // "drop": close input in finally; output keeps showing last enqueued frame.
         return;
       }
 
       const width = frame.displayWidth || frame.codedWidth;
       const height = frame.displayHeight || frame.codedHeight;
       if (this.canvas.width !== width || this.canvas.height !== height) {
-        // Resizing clears pixels — drop the previous hold until we composite again.
         this.hasLastProcessedOutput = false;
+        this.lastMask = null;
         this.canvas.width = width;
         this.canvas.height = height;
         if (this.workCanvas) {
@@ -470,80 +504,57 @@ export class IsolatedBackgroundProcessor
         }
       }
 
-      const segStart = performance.now();
-      const mask = await new Promise<{
-        bytes: Uint8Array;
-        width: number;
-        height: number;
-      } | null>((resolve, reject) => {
-        try {
-          if (this.destroyed || !this.segmenter) {
-            resolve(null);
-            return;
-          }
-          this.segmenter.segmentForVideo(frame, segStart, (result) => {
-            try {
-              const category = result.categoryMask;
-              if (!category) {
-                result.close?.();
-                resolve(null);
-                return;
-              }
-              // Copy before leaving the MediaPipe callback — WASM buffer is freed after.
-              const raw = category.getAsUint8Array();
-              const info = {
-                bytes: raw.slice(),
-                width: category.width,
-                height: category.height,
-              };
-              category.close?.();
-              result.close?.();
-              resolve(info);
-            } catch (err) {
-              reject(err);
-            }
-          });
-        } catch (err) {
-          reject(err);
-        }
+      let segmentationTimeMs = 0;
+      let segmented = false;
+      const runSeg = shouldRunSegmentation({
+        now,
+        nextSegmentDue: this.nextSegmentDue,
+        firstSegmentDone: this.firstSegmentDone,
       });
-      const segmentationTimeMs = performance.now() - segStart;
 
-      if (this.destroyed || epoch !== this.epoch || !this.canvas || !this.ctx) {
-        if (
-          resolveSkippedBackgroundFrameOutput({
-            mode: this.mode,
-            hasLastProcessedFrame: this.hasLastProcessedOutput,
-          }) === "repeat_last_processed"
-        ) {
-          this.enqueueLastProcessed(frame, controller);
+      if (runSeg) {
+        const segStart = performance.now();
+        const mask = await this.segmentFrame(frame, width, height, segStart);
+        segmentationTimeMs = performance.now() - segStart;
+        if (this.destroyed || epoch !== this.epoch || !this.canvas || !this.ctx) {
+          if (this.hasLastProcessedOutput) {
+            this.enqueueLastProcessed(frame, controller);
+          }
+          return;
         }
-        return;
+        if (mask) {
+          const blended = blendCategoryMasks(
+            this.lastMask,
+            mask,
+            CAMERA_BACKGROUND_MASK_TEMPORAL
+          );
+          this.lastMask = featherMaskBytes(
+            blended,
+            CAMERA_BACKGROUND_MASK_FEATHER
+          );
+          this.firstSegmentDone = true;
+          segmented = true;
+          this.nextSegmentDue = performance.now() + this.minSegmentIntervalMs;
+        } else if (!this.lastMask) {
+          // No mask yet — drop rather than flash camera.
+          this.nextFrameDue = performance.now() + this.minFrameIntervalMs;
+          return;
+        }
       }
 
-      const maskUsable =
-        !!mask && mask.bytes.length >= mask.width * mask.height;
-      if (!maskUsable) {
-        // Missing mask must not paint the raw camera over a good composite.
-        const policy = resolveMissingMaskFrameOutput({
-          hasLastProcessedFrame: this.hasLastProcessedOutput,
-        });
-        if (policy === "repeat_last_processed") {
-          this.enqueueLastProcessed(frame, controller);
-          this.nextFrameDue = performance.now() + this.minFrameIntervalMs;
-        }
+      if (!this.lastMask) {
+        this.nextFrameDue = performance.now() + this.minFrameIntervalMs;
         return;
       }
 
       const filterStart = performance.now();
-      this.drawComposite(frame, mask, width, height);
+      this.drawComposite(frame, this.lastMask, width, height);
       const out = new VideoFrame(this.canvas, {
         timestamp: frame.timestamp || Date.now(),
       });
       controller.enqueue(out);
       this.hasLastProcessedOutput = true;
       const filterTimeMs = performance.now() - filterStart;
-      // Stamp after work so frames queued during segmentation skip MediaPipe.
       this.nextFrameDue = performance.now() + this.minFrameIntervalMs;
 
       if (!this.firstFrameDone) {
@@ -554,10 +565,17 @@ export class IsolatedBackgroundProcessor
         );
       }
 
+      const processingTimeMs = segmentationTimeMs + filterTimeMs;
+      noteCameraBackgroundPerfFrame({
+        processingTimeMs,
+        segmentationTimeMs,
+        segmented,
+      });
       this.onFrameProcessed?.({
-        processingTimeMs: segmentationTimeMs + filterTimeMs,
+        processingTimeMs,
         segmentationTimeMs,
         filterTimeMs,
+        segmented,
       });
     } catch (err) {
       recordCameraBackgroundDiag({
@@ -593,10 +611,60 @@ export class IsolatedBackgroundProcessor
     }
   }
 
-  /**
-   * Re-emit the last successful composite with the current frame timestamp.
-   * Captures canvas pixels at construction time; does not keep a live VideoFrame.
-   */
+  private async segmentFrame(
+    frame: VideoFrame,
+    width: number,
+    height: number,
+    timestamp: number
+  ): Promise<MaskBuffer | null> {
+    if (!this.segmenter || !this.segCanvas || !this.segCtx) return null;
+    const size = targetSegmentationSize(
+      width,
+      height,
+      CAMERA_BACKGROUND_SEG_MAX_WIDTH
+    );
+    if (
+      this.segCanvas.width !== size.width ||
+      this.segCanvas.height !== size.height
+    ) {
+      this.segCanvas.width = size.width;
+      this.segCanvas.height = size.height;
+    }
+    this.segCtx.drawImage(frame, 0, 0, size.width, size.height);
+
+    return new Promise<MaskBuffer | null>((resolve, reject) => {
+      try {
+        if (this.destroyed || !this.segmenter) {
+          resolve(null);
+          return;
+        }
+        this.segmenter.segmentForVideo(this.segCanvas!, timestamp, (result) => {
+          try {
+            const category = result.categoryMask;
+            if (!category) {
+              result.close?.();
+              resolve(null);
+              return;
+            }
+            const raw = category.getAsUint8Array();
+            const info: MaskBuffer = {
+              bytes: raw.slice(),
+              width: category.width,
+              height: category.height,
+            };
+            category.close?.();
+            result.close?.();
+            resolve(info);
+          } catch (err) {
+            reject(err);
+          }
+        });
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
   private enqueueLastProcessed(
     frame: VideoFrame,
     controller: TransformStreamDefaultController<VideoFrame>
@@ -609,13 +677,12 @@ export class IsolatedBackgroundProcessor
   }
 
   /**
-   * LiveKit composite treats high mask as background (mix uses 1-smoothAlpha).
-   * Category mask bytes: non-zero ≈ background for selfie_segmenter.
-   * Caller must pass a usable mask — missing masks must not clear a good hold.
+   * Soft-alpha composite using feathered category mask.
+   * Non-zero mask ≈ background (LiveKit / selfie_segmenter convention).
    */
   private drawComposite(
     frame: VideoFrame,
-    mask: { bytes: Uint8Array; width: number; height: number },
+    mask: MaskBuffer,
     width: number,
     height: number
   ) {
@@ -648,13 +715,19 @@ export class IsolatedBackgroundProcessor
       const my = Math.min(mh - 1, Math.floor((y * mh) / height));
       for (let x = 0; x < width; x += 1) {
         const mx = Math.min(mw - 1, Math.floor((x * mw) / width));
-        // Non-zero → background (matches LiveKit composite convention).
-        if (bytes[my * mw + mx]! !== 0) {
-          const o = (y * width + x) * 4;
+        const mix = personMixFromMaskByte(bytes[my * mw + mx]!);
+        if (mix >= 0.999) continue;
+        const o = (y * width + x) * 4;
+        if (mix <= 0.001) {
           pd[o] = bd[o]!;
           pd[o + 1] = bd[o + 1]!;
           pd[o + 2] = bd[o + 2]!;
+          continue;
         }
+        const inv = 1 - mix;
+        pd[o] = Math.round(pd[o]! * mix + bd[o]! * inv);
+        pd[o + 1] = Math.round(pd[o + 1]! * mix + bd[o + 1]! * inv);
+        pd[o + 2] = Math.round(pd[o + 2]! * mix + bd[o + 2]! * inv);
       }
     }
     ctx.putImageData(person, 0, 0);
@@ -675,10 +748,6 @@ export type SkippedBackgroundFrameOutput =
   | "repeat_last_processed"
   | "drop";
 
-/**
- * When FPS-throttling skips segmentation, decide what to put on the output track.
- * Emitting the raw camera frame while the effect is on causes visible flicker.
- */
 export function resolveSkippedBackgroundFrameOutput(input: {
   mode: IsolatedBackgroundProcessorOptions["mode"] | string;
   hasLastProcessedFrame: boolean;
@@ -688,7 +757,6 @@ export function resolveSkippedBackgroundFrameOutput(input: {
   return "drop";
 }
 
-/** Missing segmentation mask after the effect is live must not flash the camera. */
 export function resolveMissingMaskFrameOutput(input: {
   hasLastProcessedFrame: boolean;
 }): Exclude<SkippedBackgroundFrameOutput, "passthrough_original"> {

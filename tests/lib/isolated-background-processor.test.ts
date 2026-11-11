@@ -111,6 +111,7 @@ type TransformHarness = {
   epoch: number;
   canvas: { width: number; height: number };
   ctx: object;
+  workCtx?: object;
   segmenter: {
     segmentForVideo: ReturnType<typeof vi.fn>;
     close: ReturnType<typeof vi.fn>;
@@ -277,7 +278,7 @@ describe("isolated background transform skip path", () => {
     await processor.destroy();
   });
 
-  it("repeats last processed output when mask is missing after the effect is live", async () => {
+  it("re-composites with last mask when segmentation is throttled", async () => {
     const processor = new IsolatedBackgroundProcessor({
       mode: "background-blur",
       maxFps: 12,
@@ -285,16 +286,41 @@ describe("isolated background transform skip path", () => {
     const h = asHarness(processor);
     h.mode = "background-blur";
     h.firstFrameDone = true;
-    h.nextFrameDue = 0;
+    h.nextFrameDue = Number.POSITIVE_INFINITY;
     h.hasLastProcessedOutput = true;
     h.destroyed = false;
     h.canvas = { width: 16, height: 16 };
-    h.ctx = {};
-    h.minFrameIntervalMs = 80;
-    h.segmenter = {
-      segmentForVideo: vi.fn((_frame, _ts, cb: (r: { categoryMask: null }) => void) => {
-        cb({ categoryMask: null });
+    h.ctx = {
+      drawImage: vi.fn(),
+      getImageData: () => ({
+        data: new Uint8ClampedArray(16 * 16 * 4),
+        width: 16,
+        height: 16,
       }),
+      putImageData: vi.fn(),
+    };
+    h.workCtx = {
+      save: vi.fn(),
+      restore: vi.fn(),
+      drawImage: vi.fn(),
+      getImageData: () => ({
+        data: new Uint8ClampedArray(16 * 16 * 4),
+        width: 16,
+        height: 16,
+      }),
+      filter: "none",
+    };
+    (
+      processor as unknown as {
+        lastMask: { bytes: Uint8Array; width: number; height: number };
+      }
+    ).lastMask = {
+      bytes: new Uint8Array(4),
+      width: 2,
+      height: 2,
+    };
+    h.segmenter = {
+      segmentForVideo: vi.fn(),
       close: vi.fn(),
     };
 
@@ -315,7 +341,7 @@ describe("isolated background transform skip path", () => {
     const input = makeFrame({ timestamp: 99 });
     await h.transform(input, controller);
 
-    expect(h.segmenter.segmentForVideo).toHaveBeenCalledTimes(1);
+    expect(h.segmenter.segmentForVideo).not.toHaveBeenCalled();
     expect(enqueued).toHaveLength(1);
     expect((enqueued[0] as unknown as { source: unknown }).source).toBe(h.canvas);
     expect(input.close).toHaveBeenCalledTimes(1);

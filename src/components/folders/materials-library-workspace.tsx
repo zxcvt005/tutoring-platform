@@ -25,12 +25,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  countIntensivesInFolderSubtree,
+  folderTransferIntensiveWarning,
+} from "@/lib/folders/folder-transfer-intensives";
 import { MIXED_MATERIAL_KINDS } from "@/lib/folders/material-routes";
 import { topicStatusLabel } from "@/lib/format";
 import { isCatalogHomeworkPurpose } from "@/lib/homework/source-kind";
+import { apiPlatform } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { Homework, Topic, TopicStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 /**
  * Единый смешанный проводник материалов Кафедры:
@@ -50,6 +56,7 @@ export function MaterialsLibraryWorkspace({
     deleteTopic,
     deleteHomework,
     restoreHomework,
+    reload,
   } = useDemoStore();
   const teacherId = teacherIdProp ?? data.currentTeacherId;
   const teacher = data.teachers.find((t) => t.id === teacherId);
@@ -73,6 +80,7 @@ export function MaterialsLibraryWorkspace({
   const [testOpen, setTestOpen] = useState(false);
   const [editingTest, setEditingTest] = useState<Homework | null>(null);
   const [testFolderId, setTestFolderId] = useState<string | null>(null);
+  const [folderToSchoolBusy, setFolderToSchoolBusy] = useState<string | null>(null);
 
   const topics = topicsForTeacher(teacherId);
   const tests = homeworksForTeacher(teacherId);
@@ -229,6 +237,77 @@ export function MaterialsLibraryWorkspace({
           }
         }}
         renderMaterialActions={(item) => {
+          if (item.kind === "folder" && !showArchived) {
+            return (
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                disabled={folderToSchoolBusy === item.id}
+                onClick={() => {
+                  void (async () => {
+                    const intensiveCount = countIntensivesInFolderSubtree(
+                      data.materialFolders,
+                      data.intensives.filter(
+                        (row) =>
+                          row.libraryScope === "teacher" &&
+                          row.teacherId === teacherId
+                      ),
+                      item.id
+                    );
+                    const intensiveNote =
+                      folderTransferIntensiveWarning(intensiveCount);
+                    const ok = window.confirm(
+                      [
+                        `Передать папку «${item.title}» в Дирекцию со всем содержимым?`,
+                        "Будет создана копия тем, тестов и теории (включая вложенные папки).",
+                        intensiveNote ??
+                          "Интенсивы в этой папке не найдены.",
+                      ].join("\n\n")
+                    );
+                    if (!ok) return;
+                    setFolderToSchoolBusy(item.id);
+                    try {
+                      const result = await apiPlatform<{
+                        created: number;
+                        skipped: number;
+                        foldersCreated: number;
+                        intensivesNotTransferred?: number;
+                      }>(
+                        "transferFolderToSchool",
+                        {
+                          sourceFolderId: item.id,
+                          phase: "commit",
+                          duplicatePolicy: "skip",
+                        },
+                        crypto.randomUUID()
+                      );
+                      const left =
+                        result.intensivesNotTransferred ?? intensiveCount;
+                      toast.success(
+                        `В школьную базу: папок ${result.foldersCreated}, материалов ${result.created}, пропущено ${result.skipped}.${
+                          left > 0
+                            ? ` Интенсивы не копировались (${left}).`
+                            : ""
+                        }`
+                      );
+                      await reload();
+                    } catch (err) {
+                      toast.error(
+                        err instanceof Error
+                          ? err.message
+                          : "Не удалось передать папку"
+                      );
+                    } finally {
+                      setFolderToSchoolBusy(null);
+                    }
+                  })();
+                }}
+              >
+                В Дирекцию
+              </Button>
+            );
+          }
           if (item.kind === "test") {
             if (showArchived) {
               return (

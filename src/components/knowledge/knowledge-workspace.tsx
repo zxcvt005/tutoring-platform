@@ -24,6 +24,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { canManageSchoolKnowledgeBase } from "@/lib/auth/school-knowledge";
+import {
+  countIntensivesInFolderSubtree,
+  folderTransferIntensiveWarning,
+} from "@/lib/folders/folder-transfer-intensives";
 import { formatDate } from "@/lib/format";
 import { isCatalogHomeworkPurpose } from "@/lib/homework/source-kind";
 import { apiPlatform } from "@/lib/store/api-client";
@@ -106,6 +110,8 @@ export function KnowledgeWorkspace({
   const [selected, setSelected] = useState<string[]>([]);
   const [openTeachers, setOpenTeachers] = useState<string[]>([]);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [folderTransferId, setFolderTransferId] = useState<string | null>(null);
+  const [folderTransferTitle, setFolderTransferTitle] = useState("");
   const [removing, setRemoving] = useState<{
     kind: Kind;
     id: string;
@@ -400,7 +406,21 @@ export function KnowledgeWorkspace({
               }
             }}
             renderMaterialActions={(item) => {
-              if (item.kind === "folder") return null;
+              if (item.kind === "folder") {
+                return (
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => {
+                      setFolderTransferId(item.id);
+                      setFolderTransferTitle(item.title);
+                    }}
+                  >
+                    Передать папку
+                  </Button>
+                );
+              }
               const transferKind =
                 item.kind === "topic" ||
                 item.kind === "test" ||
@@ -481,6 +501,33 @@ export function KnowledgeWorkspace({
         onDone={async () => {
           setSelected([]);
           setTransferOpen(false);
+          await reload();
+        }}
+      />
+
+      <FolderTransferDialog
+        open={Boolean(folderTransferId)}
+        folderId={folderTransferId}
+        folderTitle={folderTransferTitle}
+        intensiveCount={
+          folderTransferId
+            ? countIntensivesInFolderSubtree(
+                data.materialFolders,
+                schoolIntensives,
+                folderTransferId
+              )
+            : 0
+        }
+        teachers={data.teachers.filter((teacher) => teacher.status !== "archived")}
+        onOpenChange={(open) => {
+          if (!open) {
+            setFolderTransferId(null);
+            setFolderTransferTitle("");
+          }
+        }}
+        onDone={async () => {
+          setFolderTransferId(null);
+          setFolderTransferTitle("");
           await reload();
         }}
       />
@@ -1072,6 +1119,126 @@ function TransferDialog({
               Передать
             </Button>
           )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function FolderTransferDialog({
+  open,
+  folderId,
+  folderTitle,
+  intensiveCount,
+  teachers,
+  onOpenChange,
+  onDone,
+}: {
+  open: boolean;
+  folderId: string | null;
+  folderTitle: string;
+  intensiveCount: number;
+  teachers: { id: string; fullName: string }[];
+  onOpenChange: (open: boolean) => void;
+  onDone: () => Promise<void>;
+}) {
+  const [picked, setPicked] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const lock = useRef(false);
+  const intensiveWarning = folderTransferIntensiveWarning(intensiveCount);
+
+  async function confirm() {
+    if (!folderId || lock.current || picked.length === 0) return;
+    lock.current = true;
+    setBusy(true);
+    try {
+      const result = await apiPlatform<
+        TransferResult & {
+          foldersCreated?: number;
+          intensivesNotTransferred?: number;
+        }
+      >(
+        "transferFolderToTeachers",
+        {
+          phase: "commit",
+          duplicatePolicy: "skip",
+          sourceFolderId: folderId,
+          teacherIds: picked,
+        },
+        crypto.randomUUID()
+      );
+      const left =
+        result.intensivesNotTransferred ?? intensiveCount;
+      toast.success(
+        `Папка «${folderTitle}»: папок ${result.foldersCreated ?? 0}, материалов ${result.created}, пропущено ${result.skipped}.${
+          left > 0 ? ` Интенсивы не копировались (${left}).` : ""
+        }`
+      );
+      setPicked([]);
+      await onDone();
+      onOpenChange(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Не удалось передать папку");
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && !busy) {
+          setPicked([]);
+          onOpenChange(false);
+        }
+      }}
+    >
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Передать папку преподавателям</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          Будет скопирована папка «{folderTitle}» со всеми вложенными папками,
+          темами, тестами и теорией.
+        </p>
+        {intensiveWarning ? (
+          <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+            {intensiveWarning}
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Интенсивы в этой папке не найдены.
+          </p>
+        )}
+        <ul className="max-h-64 space-y-1 overflow-y-auto">
+          {teachers.map((teacher) => (
+            <li key={teacher.id}>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={picked.includes(teacher.id)}
+                  onCheckedChange={() => {
+                    setPicked((prev) =>
+                      prev.includes(teacher.id)
+                        ? prev.filter((id) => id !== teacher.id)
+                        : [...prev, teacher.id]
+                    );
+                  }}
+                />
+                {teacher.fullName}
+              </label>
+            </li>
+          ))}
+        </ul>
+        <DialogFooter>
+          <Button
+            type="button"
+            disabled={busy || picked.length === 0}
+            onClick={() => void confirm()}
+          >
+            Передать папку
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

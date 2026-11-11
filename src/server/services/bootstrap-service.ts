@@ -87,7 +87,7 @@ export async function buildBootstrap(
     await ensureOrgSchedulesMaterialized(db, orgId);
   }
 
-  const teacherRows = await db
+  let teacherRows = await db
     .select()
     .from(teachers)
     .where(eq(teachers.organizationId, orgId));
@@ -132,19 +132,31 @@ export async function buildBootstrap(
     .from(testAssignments)
     .where(eq(testAssignments.organizationId, orgId));
 
-  if (ctx.role === "teacher" && ctx.teacherId) {
-    const tid = ctx.teacherId;
-    studentRows = studentRows.filter((s) => s.primaryTeacherId === tid);
-    lessonRows = lessonRows.filter((l) => l.teacherId === tid);
-    sectionRows = sectionRows.filter((s) => s.teacherId === tid);
-    folderRows = folderRows.filter(
-      (f) =>
-        f.ownerScope === "school" ||
-        (f.ownerScope === "teacher" && f.teacherId === tid)
-    );
-    topicRows = topicRows.filter((t) => t.teacherId === tid);
-    testRows = testRows.filter((t) => t.teacherId === tid);
-    assignmentRows = assignmentRows.filter((a) => a.teacherId === tid);
+  if (ctx.role === "teacher") {
+    if (!ctx.teacherId) {
+      // Orphan teacher membership (profile deleted): never expose org-wide data.
+      studentRows = [];
+      lessonRows = [];
+      sectionRows = [];
+      folderRows = [];
+      topicRows = [];
+      testRows = [];
+      assignmentRows = [];
+      teacherRows = [];
+    } else {
+      const tid = ctx.teacherId;
+      studentRows = studentRows.filter((s) => s.primaryTeacherId === tid);
+      lessonRows = lessonRows.filter((l) => l.teacherId === tid);
+      sectionRows = sectionRows.filter((s) => s.teacherId === tid);
+      folderRows = folderRows.filter(
+        (f) =>
+          f.ownerScope === "school" ||
+          (f.ownerScope === "teacher" && f.teacherId === tid)
+      );
+      topicRows = topicRows.filter((t) => t.teacherId === tid);
+      testRows = testRows.filter((t) => t.teacherId === tid);
+      assignmentRows = assignmentRows.filter((a) => a.teacherId === tid);
+    }
   }
 
   if (ctx.role === "student" && ctx.studentId) {
@@ -695,7 +707,7 @@ export async function buildBootstrap(
 
   const currentTeacherId =
     ctx.role === "teacher"
-      ? ctx.teacherId ?? mappedTeachers[0]?.id ?? ""
+      ? ctx.teacherId ?? ""
       : mappedTeachers[0]?.id ?? "";
 
   const currentStudentId =

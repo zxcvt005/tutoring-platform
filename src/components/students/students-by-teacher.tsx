@@ -38,6 +38,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 
 import { TariffBalanceNotice } from "@/components/tariff-balance-notice";
+import { nextTeacherFilterAfterStudentSave } from "@/lib/students/teacher-filter-after-save";
 import {
   formatDate,
   personStatusLabel,
@@ -214,6 +215,7 @@ export function StudentsByTeacher({
     if (!form.fullName.trim()) return;
     const id =
       form.id ?? `s_${Math.random().toString(36).slice(2, 9)}`;
+    const teacherId = form.teacherId;
     const saved = await upsertStudent({
       id,
       fullName: form.fullName.trim(),
@@ -221,7 +223,7 @@ export function StudentsByTeacher({
       telegram: form.telegram.trim() || null,
       phone: form.phone.trim() || null,
       status: form.status,
-      teacherId: form.teacherId,
+      teacherId,
       parentContacts: form.parentContacts.trim() || null,
       notes: form.notes.trim() || undefined,
     });
@@ -246,6 +248,18 @@ export function StudentsByTeacher({
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Не удалось назначить тариф");
       }
+    }
+    // Default list filter is «Без преподавателя»; after create with a teacher
+    // switch the filter so the new student is visible in the table.
+    const nextFilter = nextTeacherFilterAfterStudentSave({
+      mode,
+      listSection,
+      savedTeacherId: teacherId,
+      currentFilter: teacherFilter,
+    });
+    if (nextFilter) setTeacherFilter(nextFilter);
+    if (!form.id) {
+      toast.success("Ученик сохранён");
     }
     setOpen(false);
   }

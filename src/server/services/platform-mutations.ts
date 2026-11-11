@@ -45,12 +45,14 @@ import {
   requireTeacherProfile,
 } from "@/server/authz/require";
 import { splitQuestions } from "@/server/db/question-split";
+import { revokeAllUserSessions } from "@/server/auth/session";
 import {
   attendances,
   lessonStudents,
   lessonTopics,
   lessons,
   materialFolders,
+  memberships,
   students,
   teachers,
   testAnswerKeys,
@@ -353,6 +355,19 @@ export async function deleteTeacher(db: AppDb, ctx: AuthContext, id: string) {
       )
     );
   await db.delete(teachers).where(eq(teachers.id, id));
+  // Drop org membership + sessions so a leftover login cannot bootstrap org-wide data
+  // after teacherId becomes null (see buildBootstrap teacher filter).
+  if (row.userId) {
+    await db
+      .delete(memberships)
+      .where(
+        and(
+          eq(memberships.userId, row.userId),
+          eq(memberships.organizationId, ctx.organizationId)
+        )
+      );
+    await revokeAllUserSessions(db, row.userId);
+  }
   return { ok: true };
 }
 
@@ -2305,6 +2320,38 @@ export async function transferKnowledgeAction(
   });
 }
 
+export async function transferFolderToTeachersAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { transferFolderToTeachers } = await import(
+    "@/server/services/knowledge-service"
+  );
+  const teacherIds = Array.isArray(payload.teacherIds) ? payload.teacherIds : [];
+  return transferFolderToTeachers(db, ctx, {
+    sourceFolderId: String(payload.sourceFolderId ?? ""),
+    teacherIds: teacherIds.map((id) => String(id)),
+    duplicatePolicy: payload.duplicatePolicy === "create" ? "create" : "skip",
+    phase: payload.phase === "plan" ? "plan" : "commit",
+  });
+}
+
+export async function transferFolderToSchoolAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { transferFolderToSchool } = await import(
+    "@/server/services/knowledge-service"
+  );
+  return transferFolderToSchool(db, ctx, {
+    sourceFolderId: String(payload.sourceFolderId ?? ""),
+    duplicatePolicy: payload.duplicatePolicy === "create" ? "create" : "skip",
+    phase: payload.phase === "plan" ? "plan" : "commit",
+  });
+}
+
 export async function deleteTheoryAction(
   db: AppDb,
   ctx: AuthContext,
@@ -2478,6 +2525,8 @@ export const platformActions = {
   assignIntensive: assignIntensiveAction,
   removeIntensiveFile: removeIntensiveFileAction,
   transferKnowledge: transferKnowledgeAction,
+  transferFolderToTeachers: transferFolderToTeachersAction,
+  transferFolderToSchool: transferFolderToSchoolAction,
   saveToSchoolLibrary: saveToSchoolLibraryAction,
   getTestGradesStats: getTestGradesStatsAction,
   reportCameraBackgroundDiag: reportCameraBackgroundDiagAction,

@@ -11,44 +11,64 @@ export type CameraBackgroundImage = {
 
 export type CameraBackgroundDelegate = "GPU" | "CPU";
 
-/** Готовые кадры из public/images/video/backgrounds/. Имя background4 на диске — backgroun4.png. */
+/**
+ * Готовые кадры: JPEG ~960px (~80–150 KB) для быстрой загрузки в звонке.
+ * Полные PNG остаются в каталоге как исходники редактирования.
+ */
 export const CAMERA_BACKGROUND_IMAGES: readonly CameraBackgroundImage[] = [
   {
     id: "background1",
-    src: "/images/video/backgrounds/background1.png",
+    src: "/images/video/backgrounds/background1.jpg",
     label: "Фон 1",
   },
   {
     id: "background2",
-    src: "/images/video/backgrounds/background2.png",
+    src: "/images/video/backgrounds/background2.jpg",
     label: "Фон 2",
   },
   {
     id: "background3",
-    src: "/images/video/backgrounds/background3.png",
+    src: "/images/video/backgrounds/background3.jpg",
     label: "Фон 3",
   },
   {
     id: "background4",
-    src: "/images/video/backgrounds/backgroun4.png",
+    src: "/images/video/backgrounds/background4.jpg",
     label: "Фон 4",
   },
   {
     id: "background5",
-    src: "/images/video/backgrounds/background5.png",
+    src: "/images/video/backgrounds/background5.jpg",
     label: "Фон 5",
   },
   {
     id: "background6",
-    src: "/images/video/backgrounds/background6.png",
+    src: "/images/video/backgrounds/background6.jpg",
     label: "Фон 6",
   },
   {
     id: "background7",
-    src: "/images/video/backgrounds/background7.png",
+    src: "/images/video/backgrounds/background7.jpg",
     label: "Фон 7",
   },
 ];
+
+/** Prefetch WASM/model + first background so enabling FX is faster. */
+export function prefetchCameraBackgroundAssets(
+  urls: readonly string[] = [
+    ...CAMERA_BACKGROUND_REQUIRED_ASSET_URLS,
+    CAMERA_BACKGROUND_IMAGES[0]?.src ?? "",
+  ].filter(Boolean)
+): void {
+  if (typeof window === "undefined") return;
+  for (const url of urls) {
+    try {
+      void fetch(url, { method: "GET", credentials: "same-origin", cache: "force-cache" });
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 export const CAMERA_BACKGROUND_ASSETS = {
   tasksVisionFileSet: "/video-processors/wasm",
@@ -66,8 +86,20 @@ export const CAMERA_BACKGROUND_REQUIRED_ASSET_URLS = [
 
 export const CAMERA_BACKGROUND_BLUR_RADIUS = 10;
 export const CAMERA_BACKGROUND_MAX_FPS = 20;
-/** CPU-делегат: ниже FPS, чтобы не перегружать главный поток. */
-export const CAMERA_BACKGROUND_CPU_MAX_FPS = 12;
+/**
+ * Output / composite FPS on CPU path. Segmentation runs at a lower rate
+ * (`CAMERA_BACKGROUND_SEGMENT_MAX_FPS`); skipped segs reuse the last mask on
+ * the current camera frame so motion stays smooth without raw passthrough.
+ */
+export const CAMERA_BACKGROUND_CPU_MAX_FPS = 20;
+/** Heavy MediaPipe passes per second (mask updates). */
+export const CAMERA_BACKGROUND_SEGMENT_MAX_FPS = 12;
+/** Downscale long edge before MediaPipe to cut CPU cost. */
+export const CAMERA_BACKGROUND_SEG_MAX_WIDTH = 320;
+/** EMA weight for new masks (0..1). */
+export const CAMERA_BACKGROUND_MASK_TEMPORAL = 0.4;
+/** Feather radius in mask pixels after temporal blend. */
+export const CAMERA_BACKGROUND_MASK_FEATHER = 2;
 /**
  * На Chrome MediaStreamTrackProcessor path maxFps процессора не действует.
  * Сжимаем захват камеры до применения фона, чтобы снизить нагрузку GPU/CPU.
@@ -75,12 +107,12 @@ export const CAMERA_BACKGROUND_CPU_MAX_FPS = 12;
 export const CAMERA_BACKGROUND_CAPTURE_CONSTRAINTS: MediaTrackConstraints = {
   width: { ideal: 640, max: 960 },
   height: { ideal: 360, max: 540 },
-  frameRate: { ideal: 15, max: 20 },
+  frameRate: { ideal: 20, max: 24 },
 };
-export const CAMERA_BACKGROUND_SLOW_MS = 80;
+export const CAMERA_BACKGROUND_SLOW_MS = 95;
 /** Быстрее выходим на слабых устройствах после cap capture. */
-export const CAMERA_BACKGROUND_WARMUP_FRAMES = 24;
-export const CAMERA_BACKGROUND_SLOW_FRAMES = 8;
+export const CAMERA_BACKGROUND_WARMUP_FRAMES = 30;
+export const CAMERA_BACKGROUND_SLOW_FRAMES = 10;
 
 export const CAMERA_BACKGROUND_SLOW_MESSAGE =
   "Виртуальный фон отключён: устройство не справляется с обработкой.";
@@ -115,6 +147,7 @@ export type CameraBackgroundDiagType =
   | "init_fail"
   | "asset_fail"
   | "asset_ok"
+  | "bg_image_fail"
   | "fallback_cpu"
   | "skip_cpu_fallback"
   | "constraint_ok"
@@ -127,7 +160,8 @@ export type CameraBackgroundDiagType =
   | "unsupported"
   | "stage"
   | "webgl_probe"
-  | "architecture";
+  | "architecture"
+  | "perf_sample";
 
 export type CameraBackgroundDiagEvent = {
   t: number;
@@ -137,10 +171,57 @@ export type CameraBackgroundDiagEvent = {
   delegate?: CameraBackgroundDelegate;
 };
 
+/** Rolling counters for FPS / latency — no frames or PII. */
+export type CameraBackgroundPerfStats = {
+  windowStartedAt: number;
+  outputFrames: number;
+  segmentPasses: number;
+  skippedFrames: number;
+  segMsSum: number;
+  segMsMax: number;
+  processMsSum: number;
+  processMsMax: number;
+  lastAutoDisableReason: string | null;
+  lastBgLoadError: string | null;
+};
+
+export type CameraBackgroundPerfSnapshot = {
+  outputFps: number;
+  segmentationFps: number;
+  avgSegmentationMs: number;
+  maxSegmentationMs: number;
+  avgProcessingMs: number;
+  maxProcessingMs: number;
+  skippedFrames: number;
+  outputFrames: number;
+  segmentPasses: number;
+  windowMs: number;
+  lastAutoDisableReason: string | null;
+  lastBgLoadError: string | null;
+};
+
 const DIAG_LIMIT = 48;
+const PERF_SAMPLE_EVERY = 40;
 let diagEvents: CameraBackgroundDiagEvent[] = [];
 let diagListener: ((event: CameraBackgroundDiagEvent) => void) | null = null;
 let assetProbeCache: { ok: boolean; missing: string[] } | null = null;
+let perfStats: CameraBackgroundPerfStats = emptyPerfStats();
+let perfSampleCounter = 0;
+
+function emptyPerfStats(): CameraBackgroundPerfStats {
+  return {
+    windowStartedAt: Date.now(),
+    outputFrames: 0,
+    segmentPasses: 0,
+    skippedFrames: 0,
+    segMsSum: 0,
+    segMsMax: 0,
+    processMsSum: 0,
+    processMsMax: 0,
+    lastAutoDisableReason: null,
+    lastBgLoadError: null,
+  };
+}
 
 export function cameraBackgroundImageById(
   id: string
@@ -310,12 +391,96 @@ export function getCameraBackgroundDiag(): readonly CameraBackgroundDiagEvent[] 
 
 export function clearCameraBackgroundDiag() {
   diagEvents = [];
+  resetCameraBackgroundPerfStats();
 }
 
 export function setCameraBackgroundDiagListener(
   listener: ((event: CameraBackgroundDiagEvent) => void) | null
 ) {
   diagListener = listener;
+}
+
+export function resetCameraBackgroundPerfStats() {
+  perfStats = emptyPerfStats();
+  perfSampleCounter = 0;
+}
+
+export function getCameraBackgroundPerfStats(): CameraBackgroundPerfStats {
+  return { ...perfStats };
+}
+
+export function summarizeCameraBackgroundPerf(
+  stats: CameraBackgroundPerfStats = perfStats,
+  now: number = Date.now()
+): CameraBackgroundPerfSnapshot {
+  const windowMs = Math.max(1, now - stats.windowStartedAt);
+  const sec = windowMs / 1000;
+  return {
+    outputFps: stats.outputFrames / sec,
+    segmentationFps: stats.segmentPasses / sec,
+    avgSegmentationMs:
+      stats.segmentPasses > 0 ? stats.segMsSum / stats.segmentPasses : 0,
+    maxSegmentationMs: stats.segMsMax,
+    avgProcessingMs:
+      stats.outputFrames > 0 ? stats.processMsSum / stats.outputFrames : 0,
+    maxProcessingMs: stats.processMsMax,
+    skippedFrames: stats.skippedFrames,
+    outputFrames: stats.outputFrames,
+    segmentPasses: stats.segmentPasses,
+    windowMs,
+    lastAutoDisableReason: stats.lastAutoDisableReason,
+    lastBgLoadError: stats.lastBgLoadError,
+  };
+}
+
+/**
+ * Cheap O(1) counters. Emits a rare `perf_sample` diag event (~every 40 frames).
+ */
+export function noteCameraBackgroundPerfFrame(input: {
+  processingTimeMs: number;
+  segmentationTimeMs?: number;
+  segmented?: boolean;
+  skipped?: boolean;
+}): CameraBackgroundPerfSnapshot | null {
+  if (input.skipped) {
+    perfStats.skippedFrames += 1;
+    return null;
+  }
+  const processMs = Math.max(0, input.processingTimeMs);
+  perfStats.outputFrames += 1;
+  perfStats.processMsSum += processMs;
+  if (processMs > perfStats.processMsMax) perfStats.processMsMax = processMs;
+  if (input.segmented) {
+    const segMs = Math.max(0, input.segmentationTimeMs ?? 0);
+    perfStats.segmentPasses += 1;
+    perfStats.segMsSum += segMs;
+    if (segMs > perfStats.segMsMax) perfStats.segMsMax = segMs;
+  }
+  perfSampleCounter += 1;
+  if (perfSampleCounter < PERF_SAMPLE_EVERY) return null;
+  perfSampleCounter = 0;
+  const snap = summarizeCameraBackgroundPerf();
+  recordCameraBackgroundDiag({
+    type: "perf_sample",
+    detail: `out:${snap.outputFps.toFixed(1)} seg:${snap.segmentationFps.toFixed(1)} avgSeg:${Math.round(snap.avgSegmentationMs)} maxSeg:${Math.round(snap.maxSegmentationMs)} skip:${snap.skippedFrames}`,
+    ms: Math.round(snap.avgProcessingMs),
+    delegate: "CPU",
+  });
+  return snap;
+}
+
+export function noteCameraBackgroundAutoDisable(reason: string) {
+  perfStats.lastAutoDisableReason = reason.slice(0, 120);
+}
+
+export function noteCameraBackgroundImageLoadError(detail = "bg_image_fail") {
+  const short = detail.slice(0, 80);
+  perfStats.lastBgLoadError = short;
+  recordCameraBackgroundDiag({
+    type: "bg_image_fail",
+    detail: short,
+    delegate: "CPU",
+  });
 }
 
 /** Классифицируем ошибку init без утечки внутренних стеков пользователю. */

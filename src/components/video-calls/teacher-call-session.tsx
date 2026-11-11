@@ -58,6 +58,7 @@ import { deviceErrorMessage } from "@/lib/video/device-error";
 import { isCurrentCallOp, teacherStageKey } from "@/lib/video/call-op";
 import { CameraBackgroundController } from "@/lib/video/camera-background-controller";
 import {
+  prefetchCameraBackgroundAssets,
   shouldShowCameraBackground,
   type CameraBackgroundChoice,
 } from "@/lib/video/camera-background";
@@ -192,6 +193,7 @@ export function TeacherCallSession({
         supportsProcessors: supportsBackgroundProcessors(),
       })
     );
+    prefetchCameraBackgroundAssets();
     const controller = new CameraBackgroundController();
     const softOff = (message: string) => {
       setBgChoice({ type: "off" });
