@@ -348,18 +348,20 @@ export function KnowledgeWorkspace({
       {block === "school" ? (
         <div className="space-y-3">
           <div className="flex flex-wrap gap-2">
-            <Link
-              href={`${knowledgeBasePath}/theory/new`}
-              className={buttonVariants({ variant: "outline" })}
+            <Button
+              nativeButton={false}
+              variant="outline"
+              render={<Link href={`${knowledgeBasePath}/theory/new`} />}
             >
               Новая теория
-            </Link>
-            <Link
-              href={`${knowledgeBasePath}/intensives/new`}
-              className={buttonVariants({ variant: "outline" })}
+            </Button>
+            <Button
+              nativeButton={false}
+              variant="outline"
+              render={<Link href={`${knowledgeBasePath}/intensives/new`} />}
             >
               Новый интенсив
-            </Link>
+            </Button>
             <Button type="button" variant="outline" onClick={openNewTest}>
               Новый тест
             </Button>
