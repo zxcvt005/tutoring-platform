@@ -24,10 +24,19 @@ export type MaterialsFolderPanelProps = {
   ownerScope?: FolderSpace["ownerScope"];
   teacherId?: string | null;
   canEdit?: boolean;
+  /**
+   * false — только активные материалы (по умолчанию);
+   * true — только архивные (раздел архива).
+   */
+  showArchived?: boolean;
   onOpenMaterial?: (kind: string, id: string) => void;
   renderMaterialActions?: (item: FolderExplorerItem) => ReactNode;
   className?: string;
 };
+
+function materialIsArchived(meta?: Record<string, unknown>): boolean {
+  return meta?.status === "archived";
+}
 
 type MaterialRef = {
   kind: Exclude<MaterialFolderKind, "folder">;
@@ -61,6 +70,7 @@ export function MaterialsFolderPanel({
   ownerScope = "teacher",
   teacherId,
   canEdit = true,
+  showArchived = false,
   onOpenMaterial,
   renderMaterialActions,
   className,
@@ -133,7 +143,9 @@ export function MaterialsFolderPanel({
           libraryScope: t.libraryScope,
           meta: { status: t.status, subject: t.subject },
         };
-        if (materialMatchesSpace(ref, space)) out.push(ref);
+        if (!materialMatchesSpace(ref, space)) continue;
+        if (materialIsArchived(ref.meta) !== showArchived) continue;
+        out.push(ref);
       }
     }
 
@@ -150,7 +162,9 @@ export function MaterialsFolderPanel({
           libraryScope: h.libraryScope,
           meta: { status: h.status },
         };
-        if (materialMatchesSpace(ref, space)) out.push(ref);
+        if (!materialMatchesSpace(ref, space)) continue;
+        if (materialIsArchived(ref.meta) !== showArchived) continue;
+        out.push(ref);
       }
     }
 
@@ -168,7 +182,9 @@ export function MaterialsFolderPanel({
           libraryScope: t.libraryScope,
           meta: { status: t.status },
         };
-        if (materialMatchesSpace(ref, space)) out.push(ref);
+        if (!materialMatchesSpace(ref, space)) continue;
+        if (materialIsArchived(ref.meta) !== showArchived) continue;
+        out.push(ref);
       }
     }
 
@@ -186,12 +202,22 @@ export function MaterialsFolderPanel({
           libraryScope: item.libraryScope,
           meta: { status: item.status },
         };
-        if (materialMatchesSpace(ref, space)) out.push(ref);
+        if (!materialMatchesSpace(ref, space)) continue;
+        if (materialIsArchived(ref.meta) !== showArchived) continue;
+        out.push(ref);
       }
     }
 
     return out;
-  }, [data.topics, data.homeworks, data.theories, data.intensives, kinds, space]);
+  }, [
+    data.topics,
+    data.homeworks,
+    data.theories,
+    data.intensives,
+    kinds,
+    space,
+    showArchived,
+  ]);
 
   const breadcrumbs = useMemo(
     () => buildFolderBreadcrumbs(folders, currentFolderId),

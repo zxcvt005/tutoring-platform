@@ -140,6 +140,24 @@ describe("test question images", () => {
     };
   }
 
+  it("persists imageObjectKey on upload so GET works without a separate upsert", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const { ctx: teacher } = await asRole(t.db, "anna@example.com");
+    const saved = await draftHomework(t.db, teacher);
+    const uploaded = await uploadTestQuestionImage(
+      t.db,
+      teacher,
+      saved.id,
+      "q_img",
+      { bytes: pngBytes(), filename: "shot.png" }
+    );
+    expect(uploaded.imageObjectKey).toContain("questions/");
+    // Без persistImageKey: ключ уже в questions_public.
+    const file = await getTestQuestionImage(t.db, teacher, saved.id, "q_img");
+    expect(file.bytes.equals(pngBytes())).toBe(true);
+  });
+
   it("uploads an image and lets assigned student read it", async () => {
     const t = await createTestDb();
     close = t.close;
@@ -153,7 +171,6 @@ describe("test question images", () => {
       { bytes: pngBytes(), filename: "shot.png" }
     );
     expect(uploaded.imageObjectKey).toContain("questions/");
-    await persistImageKey(t.db, teacher, saved.id, "q_img", uploaded.imageObjectKey);
 
     const { ctx: student } = await asRole(t.db, "s1@demo.local");
     await expect(
@@ -191,13 +208,15 @@ describe("test question images", () => {
       "q_img",
       { bytes: pngBytes(1), filename: "shot.png" }
     );
-    await persistImageKey(t.db, teacher, saved.id, "q_img", uploaded.imageObjectKey);
     await expect(getTestQuestionObject(uploaded.imageObjectKey)).resolves.toBeDefined();
 
     await deleteTestQuestionImage(t.db, teacher, saved.id, "q_img");
     await expect(getTestQuestionObject(uploaded.imageObjectKey)).rejects.toMatchObject({
       status: 404,
     });
+    await expect(
+      getTestQuestionImage(t.db, teacher, saved.id, "q_img")
+    ).rejects.toMatchObject({ status: 404 });
 
     const uploaded2 = await uploadTestQuestionImage(
       t.db,
@@ -206,7 +225,6 @@ describe("test question images", () => {
       "q_img",
       { bytes: pngBytes(2), filename: "shot2.png" }
     );
-    await persistImageKey(t.db, teacher, saved.id, "q_img", uploaded2.imageObjectKey);
 
     const res = await DELETE(
       new Request(
@@ -233,8 +251,9 @@ describe("test question images", () => {
       "q_img",
       { bytes: pngBytes(3), filename: "a.png" }
     );
-    await persistImageKey(t.db, teacher, saved.id, "q_img", first.imageObjectKey);
     await expect(getTestQuestionObject(first.imageObjectKey)).resolves.toBeDefined();
+    const firstGet = await getTestQuestionImage(t.db, teacher, saved.id, "q_img");
+    expect(firstGet.bytes.equals(pngBytes(3))).toBe(true);
 
     const second = await uploadTestQuestionImage(
       t.db,
@@ -248,6 +267,8 @@ describe("test question images", () => {
       status: 404,
     });
     await expect(getTestQuestionObject(second.imageObjectKey)).resolves.toBeDefined();
+    const secondGet = await getTestQuestionImage(t.db, teacher, saved.id, "q_img");
+    expect(secondGet.bytes.equals(jpegBytes(4))).toBe(true);
   });
 
   it("returns Тест не найден for a client-only id that was never saved", async () => {

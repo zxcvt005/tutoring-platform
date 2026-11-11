@@ -597,12 +597,12 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       },
       deleteHomework: async (id) => {
         const r = await run("deleteHomework", { id });
-        if (r.ok) toast.success("Тест в архиве");
+        if (r.ok) toast.success("Тест перемещён в архив");
         return r;
       },
       restoreHomework: async (id) => {
         const r = await run("restoreHomework", { id });
-        if (r.ok) toast.success("Тест возвращён из архива");
+        if (r.ok) toast.success("Тест восстановлен из архива");
         return r;
       },
       publishHomework: async (id) => {
@@ -782,11 +782,17 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
           ),
       homeworksForTopic: (topicId) =>
         data.homeworks.filter(
-          (h) => h.topicId === topicId && isCatalogHomeworkPurpose(h.purpose)
+          (h) =>
+            h.topicId === topicId &&
+            h.status !== "archived" &&
+            isCatalogHomeworkPurpose(h.purpose)
         ),
       homeworksForTeacher: (teacherId) =>
         data.homeworks.filter(
-          (h) => h.teacherId === teacherId && isCatalogHomeworkPurpose(h.purpose)
+          (h) =>
+            h.teacherId === teacherId &&
+            h.status !== "archived" &&
+            isCatalogHomeworkPurpose(h.purpose)
         ),
       publishedHomeworksForTopic: (topicId) =>
         data.homeworks.filter(

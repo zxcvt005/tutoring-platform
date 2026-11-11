@@ -7,6 +7,7 @@ import {
   questionHasBody,
   QuestionImageValidationError,
   sniffQuestionImage,
+  testQuestionImageUrl,
 } from "@/lib/tests/question-image";
 
 function pngBytes(tag = 0) {
@@ -28,6 +29,15 @@ function webpBytes() {
 }
 
 describe("question image helpers", () => {
+  it("builds private preview URL with cache-bust from object key", () => {
+    expect(testQuestionImageUrl("hw1", "q1")).toBe(
+      "/api/tests/hw1/questions/q1/image"
+    );
+    expect(
+      testQuestionImageUrl("hw1", "q1", "questions/org/hw1/q1/abcdef01.png")
+    ).toBe("/api/tests/hw1/questions/q1/image?v=abcdef01.png");
+  });
+
   it("detects text or image as question body", () => {
     expect(questionHasBody({ id: "q", type: "essay", prompt: "", maxScore: 1 })).toBe(
       false

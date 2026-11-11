@@ -27,6 +27,7 @@ import {
   recordCameraBackgroundDiag,
   shouldAutoDisableBackground,
   shouldShowCameraBackground,
+  shouldSkipCpuFallbackAfterGpuFailure,
 } from "@/lib/video/camera-background";
 import type { LocalVideoTrack } from "livekit-client";
 import type {
@@ -208,12 +209,17 @@ describe("camera background asset probe and diagnostics", () => {
     ).toMatchObject({ kind: "gpu" });
     expect(maxFpsForDelegate("GPU")).toBe(CAMERA_BACKGROUND_MAX_FPS);
     expect(maxFpsForDelegate("CPU")).toBe(CAMERA_BACKGROUND_CPU_MAX_FPS);
+    expect(shouldSkipCpuFallbackAfterGpuFailure("gpu")).toBe(true);
+    expect(shouldSkipCpuFallbackAfterGpuFailure("generic")).toBe(false);
   });
 });
 
 function mockTrack() {
   let processor: BackgroundProcessorWrapper | null = null;
   const track = {
+    mediaStreamTrack: {
+      applyConstraints: vi.fn(async () => undefined),
+    },
     getProcessor: () => processor,
     setProcessor: vi.fn(async (next: BackgroundProcessorWrapper) => {
       processor = next;
@@ -274,7 +280,7 @@ describe("camera background controller", () => {
     expect(controller.getChoice()).toEqual({ type: "off" });
   });
 
-  it("falls back to CPU when GPU init fails, then soft-fails if both fail", async () => {
+  it("skips CPU after WebGL/GPU failure and soft-fails without dual init", async () => {
     const track = mockTrack();
     const attempts: string[] = [];
     const failures: string[] = [];
@@ -284,13 +290,37 @@ describe("camera background controller", () => {
       createProcessor: (options) => {
         const delegate = options.segmenterOptions?.delegate ?? "GPU";
         attempts.push(String(delegate));
+        throw new Error("WebGL context lost");
+      },
+    });
+    controller.onFailure = (message) => failures.push(message);
+
+    controller.setDesired({ type: "blur" });
+    const failGpu = await controller.applyTo(track);
+    expect(failGpu.ok).toBe(false);
+    expect(attempts).toEqual(["GPU"]);
+    expect(
+      getCameraBackgroundDiag().some((e) => e.type === "skip_cpu_fallback")
+    ).toBe(true);
+    expect(failures[0]).toBe(CAMERA_BACKGROUND_INIT_FAIL_MESSAGE);
+    await controller.dispose();
+  });
+
+  it("falls back to CPU on non-GPU init errors, then soft-fails if both fail", async () => {
+    const track = mockTrack();
+    const attempts: string[] = [];
+    const controller = new CameraBackgroundController({
+      supportsProcessors: () => true,
+      probeAssets: async () => ({ ok: true, missing: [] }),
+      createProcessor: (options) => {
+        const delegate = options.segmenterOptions?.delegate ?? "GPU";
+        attempts.push(String(delegate));
         if (delegate === "GPU") {
-          throw new Error("GPU delegate unavailable");
+          throw new Error("temporary segmenter race");
         }
         return mockProcessor();
       },
     });
-    controller.onFailure = (message) => failures.push(message);
 
     controller.setDesired({ type: "blur" });
     const ok = await controller.applyTo(track);
@@ -318,6 +348,8 @@ describe("camera background controller", () => {
     expect(failed.choice).toEqual({ type: "off" });
     expect(hardFails[0]).toBe(CAMERA_BACKGROUND_INIT_FAIL_MESSAGE);
     expect(bothFailTrack.setProcessor).not.toHaveBeenCalled();
+    await hard.dispose();
+    await controller.dispose();
   });
 
   it("soft-fails on missing assets without throwing", async () => {

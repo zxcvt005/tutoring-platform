@@ -221,6 +221,13 @@ export async function uploadTestQuestionImage(
     mime
   );
   await putTestQuestionObject(objectKey, file.bytes, mime);
+  const nextQuestions = questions.map((q) =>
+    q.id === questionId ? { ...q, imageObjectKey: objectKey } : q
+  );
+  await db
+    .update(tests)
+    .set({ questionsPublic: nextQuestions, updatedAt: new Date() })
+    .where(and(eq(tests.id, testId), eq(tests.organizationId, ctx.organizationId)));
   if (previous && previous !== objectKey) {
     await deleteTestQuestionObject(previous).catch(() => undefined);
   }
@@ -238,6 +245,16 @@ export async function deleteTestQuestionImage(
   const questions = questionsFromRow(row);
   const question = questions.find((q) => q.id === questionId);
   const key = question?.imageObjectKey;
+  const nextQuestions = questions.map((q) => {
+    if (q.id !== questionId) return q;
+    const { imageObjectKey: _removed, ...rest } = q;
+    void _removed;
+    return rest;
+  });
+  await db
+    .update(tests)
+    .set({ questionsPublic: nextQuestions, updatedAt: new Date() })
+    .where(and(eq(tests.id, testId), eq(tests.organizationId, ctx.organizationId)));
   if (key) {
     await deleteTestQuestionObject(key).catch(() => undefined);
   }

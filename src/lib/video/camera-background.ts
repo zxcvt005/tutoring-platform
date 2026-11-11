@@ -68,9 +68,19 @@ export const CAMERA_BACKGROUND_BLUR_RADIUS = 10;
 export const CAMERA_BACKGROUND_MAX_FPS = 20;
 /** CPU-делегат: ниже FPS, чтобы не перегружать главный поток. */
 export const CAMERA_BACKGROUND_CPU_MAX_FPS = 12;
+/**
+ * На Chrome MediaStreamTrackProcessor path maxFps процессора не действует.
+ * Сжимаем захват камеры до применения фона, чтобы снизить нагрузку GPU/CPU.
+ */
+export const CAMERA_BACKGROUND_CAPTURE_CONSTRAINTS: MediaTrackConstraints = {
+  width: { ideal: 640, max: 960 },
+  height: { ideal: 360, max: 540 },
+  frameRate: { ideal: 15, max: 20 },
+};
 export const CAMERA_BACKGROUND_SLOW_MS = 80;
-export const CAMERA_BACKGROUND_WARMUP_FRAMES = 45;
-export const CAMERA_BACKGROUND_SLOW_FRAMES = 12;
+/** Быстрее выходим на слабых устройствах после cap capture. */
+export const CAMERA_BACKGROUND_WARMUP_FRAMES = 24;
+export const CAMERA_BACKGROUND_SLOW_FRAMES = 8;
 
 export const CAMERA_BACKGROUND_SLOW_MESSAGE =
   "Виртуальный фон отключён: устройство не справляется с обработкой.";
@@ -106,6 +116,10 @@ export type CameraBackgroundDiagType =
   | "asset_fail"
   | "asset_ok"
   | "fallback_cpu"
+  | "skip_cpu_fallback"
+  | "constraint_ok"
+  | "constraint_fail"
+  | "orphan_destroy"
   | "frame_slow_trip"
   | "reinit"
   | "teardown"
@@ -336,4 +350,23 @@ export function maxFpsForDelegate(delegate: CameraBackgroundDelegate): number {
   return delegate === "CPU"
     ? CAMERA_BACKGROUND_CPU_MAX_FPS
     : CAMERA_BACKGROUND_MAX_FPS;
+}
+
+/** Не запускать CPU после явного сбоя WebGL/GPU — иначе двойная нагрузка перед крашем вкладки. */
+export function shouldSkipCpuFallbackAfterGpuFailure(kind: string): boolean {
+  return kind === "gpu" || kind === "unsupported";
+}
+
+export async function constrainCameraTrackForBackground(
+  track: { mediaStreamTrack?: MediaStreamTrack | null },
+  constraints: MediaTrackConstraints = CAMERA_BACKGROUND_CAPTURE_CONSTRAINTS
+): Promise<"ok" | "skip" | "fail"> {
+  const media = track.mediaStreamTrack;
+  if (!media || typeof media.applyConstraints !== "function") return "skip";
+  try {
+    await media.applyConstraints(constraints);
+    return "ok";
+  } catch {
+    return "fail";
+  }
 }

@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 
 import { newId } from "@/lib/format";
 import {
@@ -690,7 +690,7 @@ export async function getFolderContents(
     const rows = await db
       .select()
       .from(topics)
-      .where(and(scopeCond, folderCond));
+      .where(and(scopeCond, folderCond, ne(topics.status, "archived")));
     for (const r of rows) {
       items.push({
         kind: "topic",
@@ -716,7 +716,14 @@ export async function getFolderContents(
     const rows = await db
       .select()
       .from(tests)
-      .where(and(testScope, testFolderCond, eq(tests.purpose, "homework")));
+      .where(
+        and(
+          testScope,
+          testFolderCond,
+          eq(tests.purpose, "homework"),
+          ne(tests.status, "archived")
+        )
+      );
     for (const r of rows) {
       items.push({
         kind: "test",
@@ -747,7 +754,7 @@ export async function getFolderContents(
     const rows = await db
       .select()
       .from(theoryMaterials)
-      .where(and(theoryScope, theoryFolderCond));
+      .where(and(theoryScope, theoryFolderCond, ne(theoryMaterials.status, "archived")));
     for (const r of rows) {
       items.push({
         kind: "theory",
@@ -776,7 +783,7 @@ export async function getFolderContents(
     const rows = await db
       .select()
       .from(intensives)
-      .where(and(intensiveScope, intensiveFolderCond));
+      .where(and(intensiveScope, intensiveFolderCond, ne(intensives.status, "archived")));
     for (const r of rows) {
       items.push({
         kind: "intensive",
@@ -879,7 +886,13 @@ export async function searchFolderSpace(
   const topicRows = await db
     .select()
     .from(topics)
-    .where(and(topicScope, sql`${topics.title} ilike ${pattern}`));
+    .where(
+      and(
+        topicScope,
+        ne(topics.status, "archived"),
+        sql`${topics.title} ilike ${pattern}`
+      )
+    );
   for (const row of topicRows) {
     if (allowedFolderIds && !allowedFolderIds.has(row.folderId)) continue;
     items.push({
@@ -909,6 +922,7 @@ export async function searchFolderSpace(
       and(
         testScope,
         eq(tests.purpose, "homework"),
+        ne(tests.status, "archived"),
         sql`${tests.title} ilike ${pattern}`
       )
     );
@@ -937,7 +951,13 @@ export async function searchFolderSpace(
   const theoryRows = await db
     .select()
     .from(theoryMaterials)
-    .where(and(theoryScope, sql`${theoryMaterials.title} ilike ${pattern}`));
+    .where(
+      and(
+        theoryScope,
+        ne(theoryMaterials.status, "archived"),
+        sql`${theoryMaterials.title} ilike ${pattern}`
+      )
+    );
   for (const row of theoryRows) {
     if (allowedFolderIds && !allowedFolderIds.has(row.folderId)) continue;
     items.push({
@@ -963,7 +983,13 @@ export async function searchFolderSpace(
   const intensiveRows = await db
     .select()
     .from(intensives)
-    .where(and(intensiveScope, sql`${intensives.title} ilike ${pattern}`));
+    .where(
+      and(
+        intensiveScope,
+        ne(intensives.status, "archived"),
+        sql`${intensives.title} ilike ${pattern}`
+      )
+    );
   for (const row of intensiveRows) {
     if (allowedFolderIds && !allowedFolderIds.has(row.folderId)) continue;
     items.push({

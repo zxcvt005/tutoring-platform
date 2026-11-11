@@ -14,14 +14,17 @@ import {
   CAMERA_BACKGROUND_SLOW_MESSAGE,
   CAMERA_BACKGROUND_UNSUPPORTED_MESSAGE,
   EMPTY_SLOW_FRAME_WATCH,
+  cameraBackgroundChoicesEqual,
   cameraBackgroundImageById,
   classifyCameraBackgroundInitError,
+  constrainCameraTrackForBackground,
   isCameraBackgroundActive,
   maxFpsForDelegate,
   noteProcessedFrame,
   probeCameraBackgroundAssets,
   recordCameraBackgroundDiag,
   shouldAutoDisableBackground,
+  shouldSkipCpuFallbackAfterGpuFailure,
   type CameraBackgroundChoice,
   type CameraBackgroundDelegate,
   type SlowFrameWatch,
@@ -71,6 +74,7 @@ export class CameraBackgroundController {
   private desireEpoch = 0;
   private disposed = false;
   private activeDelegate: CameraBackgroundDelegate | null = null;
+  private lastAppliedChoice: CameraBackgroundChoice | null = null;
   private initCount = 0;
   private readonly createProcessor: BackgroundProcessorFactory;
   private readonly supportsProcessors: () => boolean;
@@ -216,9 +220,27 @@ export class CameraBackgroundController {
     }
 
     const current = track.getProcessor();
+    if (
+      this.processor &&
+      current === this.processor &&
+      this.lastAppliedChoice &&
+      cameraBackgroundChoicesEqual(this.lastAppliedChoice, intended)
+    ) {
+      recordCameraBackgroundDiag({
+        type: "apply_skip",
+        detail: "already_active",
+        delegate: this.activeDelegate ?? undefined,
+      });
+      return {
+        ok: true,
+        choice: intended,
+        delegate: this.activeDelegate ?? undefined,
+      };
+    }
     if (this.processor && current === this.processor) {
       try {
         await this.processor.switchTo(options);
+        this.lastAppliedChoice = intended;
         return {
           ok: true,
           choice: intended,
@@ -261,6 +283,12 @@ export class CameraBackgroundController {
       return { ok: true, choice: this.choice };
     }
 
+    const constrained = await constrainCameraTrackForBackground(track);
+    recordCameraBackgroundDiag({
+      type: constrained === "fail" ? "constraint_fail" : "constraint_ok",
+      detail: constrained,
+    });
+
     this.initCount += 1;
     if (this.initCount > 1) {
       recordCameraBackgroundDiag({
@@ -278,6 +306,7 @@ export class CameraBackgroundController {
 
     const gpu = await this.attachWithDelegate(track, options, "GPU", gen);
     if (gpu.ok) {
+      this.lastAppliedChoice = intended;
       recordCameraBackgroundDiag({
         type: "init_ok",
         ms: Date.now() - started,
@@ -290,14 +319,28 @@ export class CameraBackgroundController {
       return { ok: true, choice: { type: "off" } };
     }
 
-    // CPU только после сбоя GPU-инициализации (не как режим по умолчанию).
-    // Медленные кадры по-прежнему гасятся shouldAutoDisableBackground.
+    const gpuKind = gpu.kind ?? "generic";
+    if (shouldSkipCpuFallbackAfterGpuFailure(gpuKind)) {
+      recordCameraBackgroundDiag({
+        type: "skip_cpu_fallback",
+        detail: gpu.message ?? gpuKind,
+        delegate: "GPU",
+      });
+      return this.failSoft(
+        gpu.message ?? CAMERA_BACKGROUND_INIT_FAIL_MESSAGE,
+        "skip_cpu_fallback",
+        epoch
+      );
+    }
+
+    // CPU только при не-GPU ошибках init (не WebGL context lost).
     recordCameraBackgroundDiag({
       type: "fallback_cpu",
       detail: gpu.message ?? "gpu_init_failed",
     });
     const cpu = await this.attachWithDelegate(track, options, "CPU", gen);
     if (cpu.ok) {
+      this.lastAppliedChoice = intended;
       recordCameraBackgroundDiag({
         type: "init_ok",
         ms: Date.now() - started,
@@ -323,7 +366,7 @@ export class CameraBackgroundController {
     options: SwitchBackgroundProcessorOptions,
     delegate: CameraBackgroundDelegate,
     gen: number
-  ): Promise<CameraBackgroundApplyResult> {
+  ): Promise<CameraBackgroundApplyResult & { kind?: string }> {
     if (this.stale(gen)) {
       return { ok: true, choice: this.choice };
     }
@@ -340,6 +383,7 @@ export class CameraBackgroundController {
       });
       await track.setProcessor(created, true);
       if (this.stale(gen) || this.disposed) {
+        await this.destroyCreated(created);
         await this.safeStop(track);
         return { ok: true, choice: { type: "off" } };
       }
@@ -355,13 +399,31 @@ export class CameraBackgroundController {
       });
       this.processor = null;
       this.activeDelegate = null;
+      await this.destroyCreated(created);
       await this.safeStop(track);
       return {
         ok: false,
         choice: this.choice,
         message: classified.message,
         delegate,
+        kind: classified.kind,
       };
+    }
+  }
+
+  private async destroyCreated(
+    created: BackgroundProcessorWrapper | null
+  ): Promise<void> {
+    if (!created) return;
+    try {
+      // LiveKit назначает processor только после успешного init —
+      // при ошибке mid-init уничтожаем сироту сами.
+      if (typeof created.destroy === "function") {
+        await created.destroy();
+        recordCameraBackgroundDiag({ type: "orphan_destroy" });
+      }
+    } catch {
+      /* уже разрушен */
     }
   }
 
@@ -382,6 +444,7 @@ export class CameraBackgroundController {
     this.desireEpoch += 1;
     this.activeDelegate = null;
     this.processor = null;
+    this.lastAppliedChoice = null;
     this.watch = EMPTY_SLOW_FRAME_WATCH;
     recordCameraBackgroundDiag({ type: "apply_skip", detail: reason });
     this.onFailure?.(message);
@@ -395,6 +458,7 @@ export class CameraBackgroundController {
     recordCameraBackgroundDiag({ type: "teardown", detail: reason });
     this.processor = null;
     this.activeDelegate = null;
+    this.lastAppliedChoice = null;
     this.watch = EMPTY_SLOW_FRAME_WATCH;
     await this.safeStop(track);
   }

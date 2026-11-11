@@ -48,8 +48,17 @@ export function clipboardHasImageItem(
   return false;
 }
 
-export function testQuestionImageUrl(testId: string, questionId: string): string {
-  return `/api/tests/${encodeURIComponent(testId)}/questions/${encodeURIComponent(questionId)}/image`;
+export function testQuestionImageUrl(
+  testId: string,
+  questionId: string,
+  imageObjectKey?: string | null
+): string {
+  const base = `/api/tests/${encodeURIComponent(testId)}/questions/${encodeURIComponent(questionId)}/image`;
+  if (!imageObjectKey) return base;
+  const stamp =
+    imageObjectKey.split("/").pop() ||
+    imageObjectKey.slice(Math.max(0, imageObjectKey.length - 16));
+  return `${base}?v=${encodeURIComponent(stamp)}`;
 }
 
 function startsWith(buf: Buffer, magic: Buffer, offset = 0): boolean {

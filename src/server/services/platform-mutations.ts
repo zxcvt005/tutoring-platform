@@ -49,6 +49,7 @@ import {
   lessonStudents,
   lessonTopics,
   lessons,
+  materialFolders,
   students,
   teachers,
   testAnswerKeys,
@@ -1676,11 +1677,29 @@ export async function restoreHomework(db: AppDb, ctx: AuthContext, id: string) {
   const status = restoredTestStatus(
     (row.questionsPublic as { prompt?: string }[]) ?? []
   );
+  let folderId = row.folderId ?? null;
+  let sectionId = row.sectionId ?? null;
+  if (folderId) {
+    const [folder] = await db
+      .select({ id: materialFolders.id })
+      .from(materialFolders)
+      .where(eq(materialFolders.id, folderId))
+      .limit(1);
+    if (!folder) {
+      folderId = null;
+      sectionId = null;
+    }
+  }
   await db
     .update(tests)
-    .set({ status, updatedAt: new Date() })
+    .set({
+      status,
+      folderId,
+      sectionId,
+      updatedAt: new Date(),
+    })
     .where(eq(tests.id, id));
-  return { ok: true as const, status };
+  return { ok: true as const, status, folderId };
 }
 
 export async function publishHomework(db: AppDb, ctx: AuthContext, id: string) {

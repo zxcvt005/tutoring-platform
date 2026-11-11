@@ -27,6 +27,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { MIXED_MATERIAL_KINDS } from "@/lib/folders/material-routes";
 import { topicStatusLabel } from "@/lib/format";
+import { isCatalogHomeworkPurpose } from "@/lib/homework/source-kind";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { Homework, Topic, TopicStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -47,10 +48,13 @@ export function MaterialsLibraryWorkspace({
     homeworksForTeacher,
     saveTopic,
     deleteTopic,
+    deleteHomework,
+    restoreHomework,
   } = useDemoStore();
   const teacherId = teacherIdProp ?? data.currentTeacherId;
   const teacher = data.teachers.find((t) => t.id === teacherId);
 
+  const [showArchived, setShowArchived] = useState(false);
   const [topicOpen, setTopicOpen] = useState(false);
   const [topicSaving, setTopicSaving] = useState(false);
   const [topicForm, setTopicForm] = useState({
@@ -72,6 +76,12 @@ export function MaterialsLibraryWorkspace({
 
   const topics = topicsForTeacher(teacherId);
   const tests = homeworksForTeacher(teacherId);
+  const archivedTests = data.homeworks.filter(
+    (h) =>
+      h.teacherId === teacherId &&
+      h.status === "archived" &&
+      isCatalogHomeworkPurpose(h.purpose)
+  );
 
   function openCreateTopic(folderId: string | null = null) {
     setTopicForm({
@@ -168,11 +178,37 @@ export function MaterialsLibraryWorkspace({
         }
       />
 
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={showArchived ? "outline" : "default"}
+          onClick={() => setShowArchived(false)}
+        >
+          Материалы
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={showArchived ? "default" : "outline"}
+          onClick={() => setShowArchived(true)}
+        >
+          Архив
+          {archivedTests.length > 0 ? (
+            <span className="ml-1 text-xs opacity-80">({archivedTests.length})</span>
+          ) : null}
+        </Button>
+      </div>
+
       <MaterialsFolderPanel
         kinds={MIXED_MATERIAL_KINDS}
         teacherId={teacherId}
-        canEdit
+        canEdit={!showArchived}
+        showArchived={showArchived}
         onOpenMaterial={(kind, id) => {
+          if (showArchived && kind === "test") {
+            return;
+          }
           if (kind === "topic") {
             router.push(`/kafedra/topics/${id}`);
             return;
@@ -193,7 +229,31 @@ export function MaterialsLibraryWorkspace({
           }
         }}
         renderMaterialActions={(item) => {
-          if (item.kind === "topic") {
+          if (item.kind === "test") {
+            if (showArchived) {
+              return (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => void restoreHomework(item.id)}
+                >
+                  Восстановить
+                </Button>
+              );
+            }
+            return (
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                onClick={() => void deleteHomework(item.id)}
+              >
+                В архив
+              </Button>
+            );
+          }
+          if (item.kind === "topic" && !showArchived) {
             const topic = topics.find((t) => t.id === item.id);
             if (!topic) return null;
             return (

@@ -59,7 +59,7 @@ export function QuestionImagePreview({
     setResolvedTestId(testId);
   }, [testId]);
   const src = imageObjectKey
-    ? testQuestionImageUrl(resolvedTestId, questionId)
+    ? testQuestionImageUrl(resolvedTestId, questionId, imageObjectKey)
     : undefined;
 
   async function resolveTestId(): Promise<string> {
