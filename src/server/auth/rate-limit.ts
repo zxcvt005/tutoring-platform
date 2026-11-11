@@ -7,8 +7,44 @@ import { ApiError } from "@/server/errors";
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_FAILURES_PER_KEY = 8;
 
+/** In-memory limiter for authenticated non-DB endpoints (avoids login_attempts spam). */
+const memoryBuckets = new Map<string, number[]>();
+
 export function rateLimited(message = "Слишком много попыток. Подождите 15 минут.") {
   return new ApiError(429, "rate_limited", message);
+}
+
+/**
+ * Sliding-window in-memory rate limit. No DB writes — safe for diagnostic spam paths.
+ * @internal test helper: pass `now` to control time.
+ */
+export function assertMemoryRateLimit(
+  key: string,
+  options: { max: number; windowMs: number; now?: number }
+): void {
+  const now = options.now ?? Date.now();
+  const windowMs = options.windowMs;
+  const prev = memoryBuckets.get(key) ?? [];
+  const recent = prev.filter((t) => now - t < windowMs);
+  if (recent.length >= options.max) {
+    memoryBuckets.set(key, recent);
+    throw rateLimited("Слишком много диагностических запросов. Подождите немного.");
+  }
+  recent.push(now);
+  memoryBuckets.set(key, recent);
+  // Opportunistic cleanup of unrelated stale keys.
+  if (memoryBuckets.size > 2000) {
+    for (const [k, times] of memoryBuckets) {
+      const kept = times.filter((t) => now - t < windowMs);
+      if (kept.length === 0) memoryBuckets.delete(k);
+      else memoryBuckets.set(k, kept);
+    }
+  }
+}
+
+/** Test-only. */
+export function resetMemoryRateLimitForTests() {
+  memoryBuckets.clear();
 }
 
 function normalizeEmail(email: string) {

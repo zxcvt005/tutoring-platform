@@ -124,7 +124,10 @@ export type CameraBackgroundDiagType =
   | "reinit"
   | "teardown"
   | "apply_skip"
-  | "unsupported";
+  | "unsupported"
+  | "stage"
+  | "webgl_probe"
+  | "architecture";
 
 export type CameraBackgroundDiagEvent = {
   t: number;

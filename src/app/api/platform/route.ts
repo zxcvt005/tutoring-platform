@@ -303,6 +303,8 @@ export async function POST(request: Request) {
             String(p.intensiveId ?? ""),
             String(p.fileId ?? "")
           );
+        case "reportCameraBackgroundDiag":
+          return m.reportCameraBackgroundDiagAction(db, ctx, p);
         default:
           throw validationError(`Неизвестное действие: ${raw.action}`);
       }

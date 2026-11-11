@@ -1,9 +1,6 @@
 import {
-  BackgroundProcessor,
-  type BackgroundProcessorOptions,
-  type BackgroundProcessorWrapper,
-  type SwitchBackgroundProcessorOptions,
   supportsBackgroundProcessors,
+  type SwitchBackgroundProcessorOptions,
 } from "@livekit/track-processors";
 import type { LocalVideoTrack } from "livekit-client";
 
@@ -24,15 +21,36 @@ import {
   probeCameraBackgroundAssets,
   recordCameraBackgroundDiag,
   shouldAutoDisableBackground,
-  shouldSkipCpuFallbackAfterGpuFailure,
   type CameraBackgroundChoice,
   type CameraBackgroundDelegate,
   type SlowFrameWatch,
 } from "@/lib/video/camera-background";
+import {
+  abortCameraBackgroundStageRun,
+  beginCameraBackgroundStageRun,
+  completeCameraBackgroundStageRun,
+  markCameraBackgroundStage,
+  noteCameraBackgroundReinit,
+} from "@/lib/video/camera-background-stages";
+import { probeCameraBackgroundWebGl } from "@/lib/video/camera-background-webgl";
+import {
+  createIsolatedBackgroundProcessor,
+  isolatedProcessorSupportsEnvironment,
+  type IsolatedBackgroundProcessor,
+} from "@/lib/video/isolated-background-processor";
+
+export type CameraBackgroundProcessorHandle = {
+  switchTo: (options: SwitchBackgroundProcessorOptions) => Promise<void>;
+  destroy?: () => Promise<void>;
+};
 
 export type BackgroundProcessorFactory = (
-  options: BackgroundProcessorOptions
-) => BackgroundProcessorWrapper;
+  options: SwitchBackgroundProcessorOptions & {
+    assetPaths: typeof CAMERA_BACKGROUND_ASSETS;
+    maxFps: number;
+    onFrameProcessed: (stats: { processingTimeMs: number }) => void;
+  }
+) => CameraBackgroundProcessorHandle;
 
 export type CameraBackgroundApplyResult = {
   ok: boolean;
@@ -63,9 +81,24 @@ function errorDetail(err: unknown): string {
   return "unknown";
 }
 
+function defaultCreateProcessor(
+  options: Parameters<BackgroundProcessorFactory>[0]
+): IsolatedBackgroundProcessor {
+  return createIsolatedBackgroundProcessor({
+    mode: options.mode,
+    blurRadius:
+      options.mode === "background-blur" ? options.blurRadius : undefined,
+    imagePath:
+      options.mode === "virtual-background" ? options.imagePath : undefined,
+    assetPaths: options.assetPaths,
+    maxFps: options.maxFps,
+    onFrameProcessed: options.onFrameProcessed,
+  });
+}
+
 export class CameraBackgroundController {
   private choice: CameraBackgroundChoice = { type: "off" };
-  private processor: BackgroundProcessorWrapper | null = null;
+  private processor: CameraBackgroundProcessorHandle | null = null;
   private track: LocalVideoTrack | null = null;
   private queue: Promise<void> = Promise.resolve();
   private watch: SlowFrameWatch = EMPTY_SLOW_FRAME_WATCH;
@@ -88,9 +121,12 @@ export class CameraBackgroundController {
     supportsProcessors?: () => boolean;
     probeAssets?: typeof probeCameraBackgroundAssets;
   }) {
-    this.createProcessor = options?.createProcessor ?? BackgroundProcessor;
+    this.createProcessor = options?.createProcessor ?? defaultCreateProcessor;
     this.supportsProcessors =
-      options?.supportsProcessors ?? supportsBackgroundProcessors;
+      options?.supportsProcessors ??
+      (() =>
+        supportsBackgroundProcessors() &&
+        isolatedProcessorSupportsEnvironment());
     this.probeAssets = options?.probeAssets ?? probeCameraBackgroundAssets;
   }
 
@@ -201,6 +237,8 @@ export class CameraBackgroundController {
       return { ok: true, choice: intended };
     }
 
+    markCameraBackgroundStage("camera_acquired", track.mediaStreamTrack?.id?.slice(0, 8));
+
     if (!this.supportsProcessors()) {
       return this.failSoft(
         CAMERA_BACKGROUND_UNSUPPORTED_MESSAGE,
@@ -219,10 +257,11 @@ export class CameraBackgroundController {
       return { ok: true, choice: this.choice };
     }
 
-    const current = track.getProcessor();
+    const current = track.getProcessor() as unknown;
+    const sameProcessor =
+      Boolean(this.processor) && current === (this.processor as unknown);
     if (
-      this.processor &&
-      current === this.processor &&
+      sameProcessor &&
       this.lastAppliedChoice &&
       cameraBackgroundChoicesEqual(this.lastAppliedChoice, intended)
     ) {
@@ -237,7 +276,7 @@ export class CameraBackgroundController {
         delegate: this.activeDelegate ?? undefined,
       };
     }
-    if (this.processor && current === this.processor) {
+    if (sameProcessor && this.processor) {
       try {
         await this.processor.switchTo(options);
         this.lastAppliedChoice = intended;
@@ -253,7 +292,6 @@ export class CameraBackgroundController {
           delegate: this.activeDelegate ?? undefined,
         });
         await this.teardownProcessor(track, "switch_fail");
-        // fall through to full re-init
       }
     }
 
@@ -279,6 +317,16 @@ export class CameraBackgroundController {
     }
     recordCameraBackgroundDiag({ type: "asset_ok" });
 
+    const webgl = probeCameraBackgroundWebGl();
+    recordCameraBackgroundDiag({
+      type: "webgl_probe",
+      detail: webgl.detail,
+    });
+    markCameraBackgroundStage("webgl_probed", webgl.detail, {
+      webglFloatOk: webgl.mediapipeGpuSafe,
+      modernApi: true,
+    });
+
     if (this.stale(gen) || epoch !== this.desireEpoch) {
       return { ok: true, choice: this.choice };
     }
@@ -291,80 +339,52 @@ export class CameraBackgroundController {
 
     this.initCount += 1;
     if (this.initCount > 1) {
+      noteCameraBackgroundReinit();
       recordCameraBackgroundDiag({
         type: "reinit",
         detail: `count:${this.initCount}`,
       });
     }
 
+    beginCameraBackgroundStageRun(options.mode);
     const started = Date.now();
+    // Isolated architecture: CPU MediaPipe + separate 2D canvas.
+    // Do not use LiveKit BackgroundProcessor GPU shared-context path.
     recordCameraBackgroundDiag({
       type: "init_start",
-      detail: options.mode,
-      delegate: "GPU",
+      detail: `isolated:${options.mode}`,
+      delegate: "CPU",
     });
 
-    const gpu = await this.attachWithDelegate(track, options, "GPU", gen);
-    if (gpu.ok) {
-      this.lastAppliedChoice = intended;
-      recordCameraBackgroundDiag({
-        type: "init_ok",
-        ms: Date.now() - started,
-        delegate: "GPU",
-      });
-      return { ...gpu, choice: intended };
-    }
-
-    if (this.stale(gen) || this.disposed) {
-      return { ok: true, choice: { type: "off" } };
-    }
-
-    const gpuKind = gpu.kind ?? "generic";
-    if (shouldSkipCpuFallbackAfterGpuFailure(gpuKind)) {
-      recordCameraBackgroundDiag({
-        type: "skip_cpu_fallback",
-        detail: gpu.message ?? gpuKind,
-        delegate: "GPU",
-      });
-      return this.failSoft(
-        gpu.message ?? CAMERA_BACKGROUND_INIT_FAIL_MESSAGE,
-        "skip_cpu_fallback",
-        epoch
-      );
-    }
-
-    // CPU только при не-GPU ошибках init (не WebGL context lost).
-    recordCameraBackgroundDiag({
-      type: "fallback_cpu",
-      detail: gpu.message ?? "gpu_init_failed",
-    });
-    const cpu = await this.attachWithDelegate(track, options, "CPU", gen);
-    if (cpu.ok) {
+    const attached = await this.attachIsolated(track, options, gen);
+    if (attached.ok) {
       this.lastAppliedChoice = intended;
       recordCameraBackgroundDiag({
         type: "init_ok",
         ms: Date.now() - started,
         delegate: "CPU",
       });
-      return { ...cpu, choice: intended };
+      markCameraBackgroundStage("track_published", "processor_on");
+      return { ...attached, choice: intended };
     }
 
+    abortCameraBackgroundStageRun(attached.message ?? "init_fail");
     recordCameraBackgroundDiag({
       type: "init_fail",
       ms: Date.now() - started,
-      detail: cpu.message ?? gpu.message,
+      detail: attached.message,
+      delegate: "CPU",
     });
     return this.failSoft(
-      cpu.message ?? gpu.message ?? CAMERA_BACKGROUND_INIT_FAIL_MESSAGE,
+      attached.message ?? CAMERA_BACKGROUND_INIT_FAIL_MESSAGE,
       "init_fail",
       epoch
     );
   }
 
-  private async attachWithDelegate(
+  private async attachIsolated(
     track: LocalVideoTrack,
     options: SwitchBackgroundProcessorOptions,
-    delegate: CameraBackgroundDelegate,
     gen: number
   ): Promise<CameraBackgroundApplyResult & { kind?: string }> {
     if (this.stale(gen)) {
@@ -372,30 +392,29 @@ export class CameraBackgroundController {
     }
 
     this.watch = EMPTY_SLOW_FRAME_WATCH;
-    let created: BackgroundProcessorWrapper | null = null;
+    let created: CameraBackgroundProcessorHandle | null = null;
     try {
       created = this.createProcessor({
         ...options,
         assetPaths: CAMERA_BACKGROUND_ASSETS,
-        maxFps: maxFpsForDelegate(delegate),
-        segmenterOptions: { delegate },
+        maxFps: maxFpsForDelegate("CPU"),
         onFrameProcessed: (stats) => this.onFrame(stats.processingTimeMs),
       });
-      await track.setProcessor(created, true);
+      await track.setProcessor(created as never, true);
       if (this.stale(gen) || this.disposed) {
         await this.destroyCreated(created);
         await this.safeStop(track);
         return { ok: true, choice: { type: "off" } };
       }
       this.processor = created;
-      this.activeDelegate = delegate;
-      return { ok: true, choice: this.choice, delegate };
+      this.activeDelegate = "CPU";
+      return { ok: true, choice: this.choice, delegate: "CPU" };
     } catch (err) {
       const classified = classifyCameraBackgroundInitError(err);
       recordCameraBackgroundDiag({
         type: "init_fail",
-        detail: `${delegate}:${errorDetail(err)}`,
-        delegate,
+        detail: `CPU:${errorDetail(err)}`,
+        delegate: "CPU",
       });
       this.processor = null;
       this.activeDelegate = null;
@@ -405,25 +424,23 @@ export class CameraBackgroundController {
         ok: false,
         choice: this.choice,
         message: classified.message,
-        delegate,
+        delegate: "CPU",
         kind: classified.kind,
       };
     }
   }
 
   private async destroyCreated(
-    created: BackgroundProcessorWrapper | null
+    created: CameraBackgroundProcessorHandle | null
   ): Promise<void> {
     if (!created) return;
     try {
-      // LiveKit назначает processor только после успешного init —
-      // при ошибке mid-init уничтожаем сироту сами.
       if (typeof created.destroy === "function") {
         await created.destroy();
         recordCameraBackgroundDiag({ type: "orphan_destroy" });
       }
     } catch {
-      /* уже разрушен */
+      /* already destroyed */
     }
   }
 
@@ -432,7 +449,6 @@ export class CameraBackgroundController {
     reason: string,
     epoch: number
   ): CameraBackgroundApplyResult {
-    // Не затираем более новый выбор пользователя, сделанный во время init.
     if (epoch !== this.desireEpoch) {
       recordCameraBackgroundDiag({
         type: "apply_skip",
@@ -461,6 +477,9 @@ export class CameraBackgroundController {
     this.lastAppliedChoice = null;
     this.watch = EMPTY_SLOW_FRAME_WATCH;
     await this.safeStop(track);
+    if (reason === "dispose" || reason === "release" || reason === "inactive") {
+      completeCameraBackgroundStageRun(reason);
+    }
   }
 
   private async safeStop(track: LocalVideoTrack | null): Promise<void> {
@@ -470,7 +489,7 @@ export class CameraBackgroundController {
         await track.stopProcessor();
       }
     } catch {
-      /* трек уже остановлен вместе с процессором */
+      /* track already stopped with processor */
     }
   }
 

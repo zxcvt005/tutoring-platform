@@ -36,6 +36,7 @@ import {
   canManageSchoolKnowledgeBase,
   isOrgKnowledgeStaff,
 } from "@/lib/auth/school-knowledge";
+import { assertMemoryRateLimit } from "@/server/auth/rate-limit";
 import type { AuthContext } from "@/server/authz/context";
 import {
   assertDirectorSeesTeacher,
@@ -2348,6 +2349,76 @@ export async function removeTheoryFileAction(
   return removeTheoryDraftFile(db, ctx, materialId, fileId);
 }
 
+const CAMERA_BG_DIAG_KINDS = new Set(["crash_breadcrumb"]);
+const CAMERA_BG_DIAG_MAX_EVENTS = 24;
+const CAMERA_BG_DIAG_MAX_STAGES = 24;
+const CAMERA_BG_DIAG_MAX_STRING = 80;
+
+function sanitizeDiagString(value: unknown, max = CAMERA_BG_DIAG_MAX_STRING): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return value.slice(0, max);
+}
+
+/**
+ * Authenticated client diagnostics for virtual-background tab crashes.
+ * Accepts only small structured breadcrumbs — no media, secrets, or PII.
+ * Rate-limited in memory (no DB writes) to avoid spam / table growth.
+ */
+export async function reportCameraBackgroundDiagAction(
+  _db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  requireRoles(ctx, ["teacher", "student", "director", "assistant"]);
+  assertMemoryRateLimit(`camera-bg-diag:${ctx.userId}`, {
+    max: 10,
+    windowMs: 15 * 60 * 1000,
+  });
+
+  const kind = sanitizeDiagString(payload.kind, 40) ?? "";
+  if (!CAMERA_BG_DIAG_KINDS.has(kind)) {
+    throw badRequest("Недопустимый тип диагностического события");
+  }
+
+  // Reject oversized blobs before logging (no video/base64 expected).
+  const rawSize = JSON.stringify(payload).length;
+  if (rawSize > 8_000) {
+    throw badRequest("Слишком большой диагностический payload");
+  }
+
+  const eventsIn = Array.isArray(payload.events) ? payload.events : [];
+  if (eventsIn.length > CAMERA_BG_DIAG_MAX_EVENTS) {
+    throw badRequest("Слишком много diagnostic events");
+  }
+  const events = eventsIn.slice(0, CAMERA_BG_DIAG_MAX_EVENTS).map((item) => {
+    const row = (item ?? {}) as Record<string, unknown>;
+    return {
+      type: sanitizeDiagString(row.type, 40),
+      detail: sanitizeDiagString(row.detail),
+      delegate: sanitizeDiagString(row.delegate, 8),
+      ms: typeof row.ms === "number" && Number.isFinite(row.ms) ? Math.round(row.ms) : undefined,
+    };
+  });
+
+  const snapshot = (payload.snapshot ?? null) as Record<string, unknown> | null;
+  const stagesIn = Array.isArray(snapshot?.stages) ? snapshot!.stages : [];
+  if (stagesIn.length > CAMERA_BG_DIAG_MAX_STAGES) {
+    throw badRequest("Слишком много diagnostic stages");
+  }
+
+  console.info("[camera-bg-diag]", {
+    userId: ctx.userId,
+    role: ctx.role,
+    kind,
+    runId: sanitizeDiagString(snapshot?.runId, 48),
+    lastStage: sanitizeDiagString(snapshot?.lastStage, 40),
+    crashedLikely: Boolean(snapshot?.crashedLikely),
+    eventCount: events.length,
+    events,
+  });
+  return { ok: true as const };
+}
+
 /** Dispatch table for /api/platform */
 export const platformActions = {
   upsertTeacher,
@@ -2409,6 +2480,7 @@ export const platformActions = {
   transferKnowledge: transferKnowledgeAction,
   saveToSchoolLibrary: saveToSchoolLibraryAction,
   getTestGradesStats: getTestGradesStatsAction,
+  reportCameraBackgroundDiag: reportCameraBackgroundDiagAction,
 } as const;
 
 export type PlatformAction = keyof typeof platformActions;

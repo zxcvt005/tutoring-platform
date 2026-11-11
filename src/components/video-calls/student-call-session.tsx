@@ -26,7 +26,7 @@ import { useDocumentPip } from "@/components/video-calls/use-document-pip";
 import { VideoTile } from "@/components/video-calls/video-tile";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
-import { HttpStatusError } from "@/lib/store/api-client";
+import { HttpStatusError, apiPlatform } from "@/lib/store/api-client";
 import { connectVideoRoom, createVideoRoom } from "@/lib/video/connect";
 import { deviceErrorMessage } from "@/lib/video/device-error";
 import { CameraBackgroundController } from "@/lib/video/camera-background-controller";
@@ -34,6 +34,10 @@ import {
   shouldShowCameraBackground,
   type CameraBackgroundChoice,
 } from "@/lib/video/camera-background";
+import {
+  flushCameraBackgroundCrashReport,
+  takeCameraBackgroundCrashNotice,
+} from "@/lib/video/camera-background-report";
 import {
   attachLocalCamera,
   attachRemoteMedia,
@@ -131,6 +135,15 @@ export function StudentCallSession({
     controller.onAutoOff = softOff;
     controller.onFailure = softOff;
     bgRef.current = controller;
+
+    const crash = takeCameraBackgroundCrashNotice();
+    if (crash) {
+      setError(crash.message);
+      void flushCameraBackgroundCrashReport(crash.snapshot, (action, payload) =>
+        apiPlatform(action, payload)
+      );
+    }
+
     return () => {
       controller.onAutoOff = null;
       controller.onFailure = null;

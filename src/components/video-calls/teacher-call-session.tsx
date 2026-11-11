@@ -47,7 +47,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { HttpStatusError } from "@/lib/store/api-client";
+import { HttpStatusError, apiPlatform } from "@/lib/store/api-client";
 import {
   connectVideoRoom,
   createVideoRoom,
@@ -61,6 +61,10 @@ import {
   shouldShowCameraBackground,
   type CameraBackgroundChoice,
 } from "@/lib/video/camera-background";
+import {
+  flushCameraBackgroundCrashReport,
+  takeCameraBackgroundCrashNotice,
+} from "@/lib/video/camera-background-report";
 import {
   attachLocalCamera,
   attachPreviewTrack,
@@ -196,6 +200,15 @@ export function TeacherCallSession({
     controller.onAutoOff = softOff;
     controller.onFailure = softOff;
     bgRef.current = controller;
+
+    const crash = takeCameraBackgroundCrashNotice();
+    if (crash) {
+      setError(crash.message);
+      void flushCameraBackgroundCrashReport(crash.snapshot, (action, payload) =>
+        apiPlatform(action, payload)
+      );
+    }
+
     return () => {
       controller.onAutoOff = null;
       controller.onFailure = null;
