@@ -49,8 +49,15 @@
 | `S3_ACCESS_KEY_ID` | для чата | Ключ доступа бакета |
 | `S3_SECRET_ACCESS_KEY` | для чата | Секрет бакета |
 | `S3_FORCE_PATH_STYLE` | нет | `1` (path-style, по умолчанию) |
+| `LIVEKIT_URL` | для видеозвонков | `wss://…` (self-host или LiveKit Cloud). Без `NEXT_PUBLIC_`. |
+| `LIVEKIT_API_KEY` | для видеозвонков | API key LiveKit. Только сервер. |
+| `LIVEKIT_API_SECRET` | для видеозвонков | API secret LiveKit. Только сервер. |
+| `PRIVATE_CALLS_PASSWORD` | для `/private-calls` | Пароль хоста личного приёма (≥24). |
+| `PRIVATE_CALLS_SECRET` | для `/private-calls` | Секрет cookie хоста (≥24). |
 
 Секреты только в панели Timeweb. Не коммитить `.env.local` / реальные токены.
+
+**LiveKit на App Platform:** задайте именно `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`. Имена `LIVEKIT_CLOUD_*` код **не** читает (это локальный шаблон отката в `.env.example`). После сохранения env перезапустите приложение. Значения секретов в UI/логи клиента не попадают.
 
 ## Object Storage (вложения чата и теории)
 

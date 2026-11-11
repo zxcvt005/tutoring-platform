@@ -16,7 +16,43 @@ export type LivekitConfig = {
 export function listMissingLivekitEnv(
   env: NodeJS.ProcessEnv = process.env
 ): string[] {
-  return REQUIRED_KEYS.filter((key) => !env[key]?.trim());
+  return REQUIRED_KEYS.filter((key) => !readLivekitEnvValue(env, key));
+}
+
+function readLivekitEnvValue(
+  env: NodeJS.ProcessEnv,
+  key: (typeof REQUIRED_KEYS)[number]
+): string {
+  // Dynamic lookup keeps values runtime-resolvable (not build-time inlined).
+  return String(env[key] ?? "").trim();
+}
+
+function isProductionRuntime(env: NodeJS.ProcessEnv): boolean {
+  return env.NODE_ENV === "production";
+}
+
+/**
+ * User-facing copy when LiveKit env is incomplete.
+ * Production must not mention .env.local; key names stay in server logs.
+ */
+export function livekitMissingEnvUserMessage(
+  missing: readonly string[],
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  if (isProductionRuntime(env)) {
+    return "Видеосвязь временно недоступна из‑за ошибки конфигурации сервера. Обратитесь к администратору платформы.";
+  }
+  const names = missing.join(", ");
+  return `Не заданы переменные окружения: ${names}. Добавьте их в .env.local и перезапустите локальный сервер.`;
+}
+
+export function livekitInvalidUrlUserMessage(
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  if (isProductionRuntime(env)) {
+    return "Видеосвязь временно недоступна из‑за ошибки конфигурации сервера. Обратитесь к администратору платформы.";
+  }
+  return "LIVEKIT_URL имеет неверный формат. Ожидается WebSocket URL (wss:// или ws://).";
 }
 
 function livekitMisconfigured(message: string) {
@@ -42,19 +78,19 @@ export function getLivekitConfig(
 ): LivekitConfig {
   const missing = listMissingLivekitEnv(env);
   if (missing.length > 0) {
-    throw livekitMisconfigured(
-      `Не заданы переменные окружения: ${missing.join(", ")}. Добавьте их в .env.local и перезапустите локальный сервер.`
+    console.error(
+      `[livekit] missing env keys (values omitted): ${missing.join(", ")}`
     );
+    throw livekitMisconfigured(livekitMissingEnvUserMessage(missing, env));
   }
 
-  const url = env.LIVEKIT_URL!.trim();
-  const apiKey = env.LIVEKIT_API_KEY!.trim();
-  const apiSecret = env.LIVEKIT_API_SECRET!.trim();
+  const url = readLivekitEnvValue(env, "LIVEKIT_URL");
+  const apiKey = readLivekitEnvValue(env, "LIVEKIT_API_KEY");
+  const apiSecret = readLivekitEnvValue(env, "LIVEKIT_API_SECRET");
 
   if (!isLivekitUrl(url)) {
-    throw livekitMisconfigured(
-      "LIVEKIT_URL имеет неверный формат. Ожидается WebSocket URL (wss:// или ws://)."
-    );
+    console.error("[livekit] LIVEKIT_URL has invalid format");
+    throw livekitMisconfigured(livekitInvalidUrlUserMessage(env));
   }
 
   return { url, apiKey, apiSecret };
