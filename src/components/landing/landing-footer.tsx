@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { BrandMark } from "@/components/landing/brand-mark";
 import { LandingContainer } from "@/components/landing/landing-section";
-import { landingNav } from "@/lib/landing/content";
+import { landingFooter, landingNav } from "@/lib/landing/content";
 
 export function LandingFooter() {
   return (
@@ -12,11 +12,13 @@ export function LandingFooter() {
           <div className="min-w-0">
             <BrandMark />
             <p className="mt-3 max-w-xs text-sm leading-relaxed text-muted-foreground">
-              Онлайн-школа подготовки к ЕГЭ по физике. Системная работа в
-              кабинете, а не набор разрозненных уроков.
+              {landingFooter.blurb}
             </p>
           </div>
-          <nav className="flex min-w-0 flex-col gap-2" aria-label="Навигация в подвале">
+          <nav
+            className="flex min-w-0 flex-col gap-2"
+            aria-label="Навигация в подвале"
+          >
             {landingNav.map((item) => (
               <a
                 key={item.href}
@@ -47,9 +49,7 @@ export function LandingFooter() {
               Личный кабинет
             </Link>
             <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
-              Публичные контакты, адрес и юридические документы появятся здесь,
-              когда будут согласованы. Политика конфиденциальности пока не
-              опубликована.
+              {landingFooter.contactsPlaceholder}
             </p>
           </div>
         </div>

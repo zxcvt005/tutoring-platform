@@ -5,6 +5,7 @@ import { ReviewsCarousel } from "@/components/landing/reviews-carousel";
 import { loadLandingResults } from "@/lib/landing/results-media";
 import {
   landingAverageScore,
+  landingScoreCount,
   landingScoreYears,
 } from "@/lib/landing/results";
 
@@ -16,7 +17,7 @@ export function ResultsSection() {
       id="results"
       eyebrow="Доверие"
       title="Результаты, которые можно проверить"
-      description="Средний балл, результаты по годам и истории учеников. Цифры и переписки — из реальной подготовки, без дорисованных показателей."
+      description="Средний балл, результаты по годам и истории учеников. Цифры и переписки — из реальной подготовки."
     >
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(14rem,0.7fr)_minmax(0,1.4fr)]">
         <article className="surface-sand flex min-h-56 flex-col justify-between rounded-3xl p-6 sm:min-h-72 sm:p-8">
@@ -25,6 +26,9 @@ export function ResultsSection() {
           </h3>
           <p className="font-display mt-8 text-7xl leading-none font-semibold tracking-[-0.04em] sm:text-8xl">
             {landingAverageScore}
+          </p>
+          <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
+            По {landingScoreCount()} опубликованным результатам 2023–2026.
           </p>
         </article>
 

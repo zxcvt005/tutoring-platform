@@ -9,14 +9,9 @@ import {
   type ReactNode,
 } from "react";
 
-export type LandingApplyPrefill = {
-  subjectId?: string;
-  tariffId?: string;
-};
-
 type LandingApplyContextValue = {
-  prefill: LandingApplyPrefill;
-  apply: (prefill?: LandingApplyPrefill) => void;
+  prefillNonce: number;
+  apply: () => void;
 };
 
 const LandingApplyContext = createContext<LandingApplyContextValue | null>(
@@ -24,10 +19,10 @@ const LandingApplyContext = createContext<LandingApplyContextValue | null>(
 );
 
 export function LandingApplyProvider({ children }: { children: ReactNode }) {
-  const [prefill, setPrefill] = useState<LandingApplyPrefill>({});
+  const [prefillNonce, setPrefillNonce] = useState(0);
 
-  const apply = useCallback((next?: LandingApplyPrefill) => {
-    setPrefill(next ?? {});
+  const apply = useCallback(() => {
+    setPrefillNonce((n) => n + 1);
     window.requestAnimationFrame(() => {
       document.getElementById("apply")?.scrollIntoView({
         behavior: "smooth",
@@ -38,8 +33,8 @@ export function LandingApplyProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ prefill, apply }),
-    [prefill, apply]
+    () => ({ prefillNonce, apply }),
+    [prefillNonce, apply]
   );
 
   return (

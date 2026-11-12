@@ -13,6 +13,8 @@ describe("landing results", () => {
   it("publishes the given average and yearly scores", () => {
     expect(landingAverageScore).toBe(82);
     expect(landingScoreYears.map((group) => [group.year, [...group.scores]])).toEqual([
+      [2023, [97, 91, 91, 85, 83, 81, 81, 74, 68]],
+      [2024, [94, 88, 86, 84, 80, 79, 79, 77, 76, 74, 65, 64]],
       [2025, [96, 92, 88, 86, 84, 84, 80, 80, 79, 77, 76, 74, 65, 61]],
       [2026, [98, 98, 96, 94, 94, 92, 90, 90, 86, 86, 84, 82, 79, 77, 74, 73, 68]],
     ]);

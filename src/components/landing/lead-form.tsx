@@ -1,15 +1,13 @@
 "use client";
 
-import { useId, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useId, useState, type FormEvent, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { formatRub, tariffById } from "@/lib/landing/content";
 import {
   LANDING_GRADES,
-  LANDING_LEAD_DELIVERY,
   submitLandingLead,
   validateLandingStudentStep,
   type LandingLeadErrors,
@@ -21,7 +19,7 @@ const emptyErrors: LandingLeadErrors = {};
 
 export function LeadForm() {
   const formId = useId();
-  const { prefill } = useLandingApply();
+  const { prefillNonce } = useLandingApply();
   const [step, setStep] = useState<1 | 2>(1);
   const [studentName, setStudentName] = useState("");
   const [gradeId, setGradeId] = useState("");
@@ -29,20 +27,19 @@ export function LeadForm() {
   const [parentName, setParentName] = useState("");
   const [contact, setContact] = useState("");
   const [comment, setComment] = useState("");
-  const [tariffId, setTariffId] = useState(prefill.tariffId ?? "");
   const [errors, setErrors] = useState<LandingLeadErrors>(emptyErrors);
-  const [notDelivered, setNotDelivered] = useState(false);
-  const [seenPrefill, setSeenPrefill] = useState(prefill);
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [seenNonce, setSeenNonce] = useState(prefillNonce);
 
-  if (prefill !== seenPrefill) {
-    setSeenPrefill(prefill);
-    if (prefill.tariffId) setTariffId(prefill.tariffId);
+  if (prefillNonce !== seenNonce) {
+    setSeenNonce(prefillNonce);
     setStep(1);
-    setNotDelivered(false);
+    setDone(false);
+    setSubmitError(null);
     setErrors(emptyErrors);
   }
-
-  const tariff = useMemo(() => tariffById(tariffId), [tariffId]);
 
   function payload() {
     return {
@@ -52,7 +49,6 @@ export function LeadForm() {
       parentName,
       contact,
       comment,
-      tariffId,
     };
   }
 
@@ -60,16 +56,20 @@ export function LeadForm() {
     event.preventDefault();
     const next = validateLandingStudentStep({ studentName, gradeId, level });
     setErrors(next);
-    setNotDelivered(false);
+    setSubmitError(null);
     if (Object.keys(next).length === 0) setStep(2);
   }
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const result = submitLandingLead(payload());
+    setSubmitting(true);
+    setSubmitError(null);
+    const result = await submitLandingLead(payload());
+    setSubmitting(false);
+
     if (result.status === "invalid") {
       setErrors(result.errors);
-      setNotDelivered(false);
+      setDone(false);
       if (
         result.errors.studentName ||
         result.errors.gradeId ||
@@ -79,8 +79,33 @@ export function LeadForm() {
       }
       return;
     }
+
+    if (result.status === "error") {
+      setErrors(emptyErrors);
+      setDone(false);
+      setSubmitError(result.message);
+      return;
+    }
+
     setErrors(emptyErrors);
-    setNotDelivered(true);
+    setDone(true);
+  }
+
+  if (done) {
+    return (
+      <div
+        className="panel-soft surface-sand px-4 py-5 text-sm leading-relaxed text-foreground"
+        role="status"
+      >
+        <p className="font-display text-xl font-semibold tracking-tight">
+          Заявка отправлена
+        </p>
+        <p className="mt-2">
+          Мы получили данные и свяжемся, чтобы назначить диагностику. Ничего не
+          списали и никого автоматически не зачислили.
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -92,12 +117,6 @@ export function LeadForm() {
       <p className="text-xs font-semibold tracking-[0.14em] text-muted-foreground uppercase">
         Шаг {step} из 2
       </p>
-
-      {tariff ? (
-        <p className="rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground">
-          {`Интересующий формат: ${tariff.name}, ${formatRub(tariff.price)} в месяц. Это не оплата и не бронь.`}
-        </p>
-      ) : null}
 
       {step === 1 ? (
         <>
@@ -113,7 +132,7 @@ export function LeadForm() {
               value={studentName}
               onChange={(event) => {
                 setStudentName(event.target.value);
-                setNotDelivered(false);
+                setSubmitError(null);
               }}
               aria-invalid={Boolean(errors.studentName)}
               className="h-10 rounded-xl"
@@ -128,7 +147,7 @@ export function LeadForm() {
               value={gradeId}
               onChange={(event) => {
                 setGradeId(event.target.value);
-                setNotDelivered(false);
+                setSubmitError(null);
               }}
               aria-invalid={Boolean(errors.gradeId)}
               className="h-10 rounded-xl border border-input bg-transparent px-3 text-sm"
@@ -177,7 +196,7 @@ export function LeadForm() {
               value={parentName}
               onChange={(event) => {
                 setParentName(event.target.value);
-                setNotDelivered(false);
+                setSubmitError(null);
               }}
               aria-invalid={Boolean(errors.parentName)}
               className="h-10 rounded-xl"
@@ -196,7 +215,7 @@ export function LeadForm() {
               value={contact}
               onChange={(event) => {
                 setContact(event.target.value);
-                setNotDelivered(false);
+                setSubmitError(null);
               }}
               aria-invalid={Boolean(errors.contact)}
               className="h-10 rounded-xl"
@@ -217,43 +236,45 @@ export function LeadForm() {
             />
           </Field>
 
-          <input type="hidden" name="tariff" value={tariffId} />
-
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button
               type="button"
               variant="outline"
               className="h-10 rounded-xl"
+              disabled={submitting}
               onClick={() => {
                 setStep(1);
-                setNotDelivered(false);
+                setSubmitError(null);
               }}
             >
               Назад
             </Button>
-            <Button type="submit" className="h-10 flex-1 rounded-xl">
-              Проверить заявку
+            <Button
+              type="submit"
+              className="h-10 flex-1 rounded-xl"
+              disabled={submitting}
+            >
+              {submitting ? "Отправляем…" : "Отправить заявку"}
             </Button>
           </div>
         </>
       )}
 
-      {notDelivered ? (
-        <div
-          className="panel-soft surface-sand px-3 py-3 text-sm leading-relaxed text-foreground"
-          role="status"
-        >
-          <p className="font-medium">Заявка в школу не отправлена.</p>
-          <p className="mt-1">
-            Поля заполнены верно, но {LANDING_LEAD_DELIVERY.reason} Данные
-            остаются только в этой вкладке и никуда не передаются.
+      {submitError ? (
+        <p className="text-sm text-destructive" role="alert">
+          {submitError}
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2 text-sm leading-relaxed text-muted-foreground">
+          <p>
+            Кнопка ничего не списывает. После отправки мы напишем, чтобы
+            назначить диагностику.
+          </p>
+          <p>
+            Отправляя заявку, вы оставляете контакт для связи по диагностике.
+            Политика конфиденциальности на сайте пока не опубликована.
           </p>
         </div>
-      ) : (
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          Кнопка не создаёт ученика и не списывает оплату. Приём заявок с сайта
-          ещё не подключён.
-        </p>
       )}
     </form>
   );

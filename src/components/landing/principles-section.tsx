@@ -4,11 +4,11 @@ import { landingPrinciples } from "@/lib/landing/content";
 export function PrinciplesSection() {
   return (
     <LandingSection
-      id="principles"
+      id="system"
       className="bg-muted/40"
-      eyebrow="Атмосфера"
-      title="Подготовка не должна быть каторгой"
-      description="Высокий балл не требует, чтобы выпускной год превратился в постоянную борьбу с собой. «Неодин» держит четыре опоры: прогресс виден, среда спокойная, физика остаётся интересной, а ученик не один."
+      eyebrow="Система"
+      title="Как мы ведём к высокому баллу — без режима выживания"
+      description="Пять опор одной подготовки. Меняется интенсивность занятий под задачу ученика — сам оффер один."
     >
       <ol className="grid gap-10 lg:grid-cols-2">
         {landingPrinciples.map((item, index) => (

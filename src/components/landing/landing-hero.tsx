@@ -40,6 +40,9 @@ export function LandingHero({ formulaCount }: { formulaCount: number }) {
                 {landingHero.secondaryCta}
               </Button>
             </div>
+            <p className="mt-4 max-w-xl text-sm leading-relaxed text-muted-foreground">
+              {landingHero.footnote}
+            </p>
           </div>
 
           <div className="min-w-0">

@@ -4,16 +4,22 @@ import {
   formulaCountPhrase,
   landingBonuses,
   landingFaq,
+  landingFooter,
   landingGuarantees,
   landingHero,
   landingMeta,
-  landingTariffs,
+  landingTeachers,
 } from "@/lib/landing/content";
 import {
   LANDING_LEAD_DELIVERY,
-  submitLandingLead,
+  validateLandingLead,
   validateLandingStudentStep,
 } from "@/lib/landing/lead";
+import {
+  landingAverageScore,
+  landingScoreCount,
+  landingScoreYears,
+} from "@/lib/landing/results";
 
 const REQUIRED_FAQ = [
   "level",
@@ -26,48 +32,44 @@ const REQUIRED_FAQ = [
   "parents",
   "price",
   "unfit",
+  "progress-guarantee",
   "part-two",
   "admission",
+  "not-school",
 ];
 
 describe("landing content", () => {
-  it("keeps the published tariff prices and the same support in every format", () => {
-    expect(landingTariffs.map((item) => [item.id, item.price, item.hoursPerMonth])).toEqual([
-      ["compact", 12_000, 4],
-      ["basic", 24_000, 8],
-      ["extended", 35_000, 12],
-    ]);
-    for (const tariff of landingTariffs) {
-      expect(tariff.features).toContain("Куратор");
-      expect(tariff.features).toContain("Пробные экзамены раз в месяц");
-    }
-  });
-
-  it("does not publish an unconfirmed score, a free diagnostic, or a summer school", () => {
+  it("keeps the brand promise and drops school / price showcase language", () => {
     const blob = JSON.stringify({
       landingHero,
       landingMeta,
-      landingBonuses,
+      landingFooter,
       landingGuarantees,
+      landingBonuses,
     });
-    expect(blob).not.toContain("82");
     expect(landingHero.primaryCta.toLowerCase()).not.toContain("бесплат");
-    expect(landingBonuses.items.map((item) => item.id)).not.toContain("summer");
-    expect(landingBonuses.items.map((item) => item.title).join(" ")).not.toMatch(/летн/i);
-    expect(landingBonuses.notice.length).toBeGreaterThan(40);
+    expect(blob.toLowerCase()).not.toContain("онлайн-школа");
+    expect(blob).not.toMatch(/12\s*000|24\s*000|35\s*000/);
+    expect(landingGuarantees.status).toBe("active");
+    expect(landingGuarantees.items).toHaveLength(2);
   });
 
-  it("uses the shared link-preview description", () => {
-    expect(landingMeta.description).toBe(
-      "Вы не останетесь одни при подготовке."
-    );
+  it("publishes teachers and verified score years", () => {
+    expect(landingTeachers.map((item) => item.id)).toEqual([
+      "anatoly",
+      "georgy",
+      "anya",
+    ]);
+    expect(landingAverageScore).toBe(82);
+    expect(landingScoreCount()).toBe(52);
+    expect(landingScoreYears.map((item) => item.year)).toEqual([
+      2023, 2024, 2025, 2026,
+    ]);
   });
 
-  it("marks guarantees as not yet an offer and answers the required objections", () => {
-    expect(landingGuarantees.status).toBe("needs_agreement");
-    expect(landingGuarantees.notice.length).toBeGreaterThan(40);
+  it("answers the required objections without draft badges", () => {
     expect(landingFaq.map((item) => item.id)).toEqual(REQUIRED_FAQ);
-    expect(landingFaq.find((item) => item.id === "unfit")?.draft).toBe(true);
+    expect(landingFaq.every((item) => item.answer.length > 20)).toBe(true);
   });
 
   it("declines formula counts in Russian", () => {
@@ -86,31 +88,31 @@ describe("landing lead", () => {
     parentName: "Анна",
     contact: "+7 900 111-22-33",
     comment: "",
-    tariffId: "basic",
   };
 
-  it("does not deliver a valid application", () => {
-    expect(LANDING_LEAD_DELIVERY.connected).toBe(false);
-    expect(submitLandingLead(valid)).toEqual({ status: "not_delivered" });
+  it("marks public delivery as connected", () => {
+    expect(LANDING_LEAD_DELIVERY.connected).toBe(true);
+    expect(LANDING_LEAD_DELIVERY.endpoint).toBe("/api/landing/leads");
   });
 
   it("asks for the student before the parent step", () => {
-    expect(validateLandingStudentStep({ studentName: "М", gradeId: "", level: "" })).toMatchObject({
+    expect(
+      validateLandingStudentStep({ studentName: "М", gradeId: "", level: "" })
+    ).toMatchObject({
       studentName: expect.any(String),
       gradeId: expect.any(String),
     });
   });
 
-  it("rejects an unknown tariff and a short contact", () => {
-    const result = submitLandingLead({
+  it("rejects a short contact", () => {
+    const errors = validateLandingLead({
       ...valid,
       contact: "нет",
-      tariffId: "vip",
     });
-    expect(result.status).toBe("invalid");
-    if (result.status === "invalid") {
-      expect(result.errors.contact).toBeTruthy();
-      expect(result.errors.tariffId).toBeTruthy();
-    }
+    expect(errors.contact).toBeTruthy();
+  });
+
+  it("accepts a valid payload shape", () => {
+    expect(validateLandingLead(valid)).toEqual({});
   });
 });

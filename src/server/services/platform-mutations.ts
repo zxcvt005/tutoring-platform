@@ -80,6 +80,7 @@ import {
   conflict,
   forbidden,
   notFound,
+  validationError,
 } from "@/server/errors";
 import { settleLessonPayroll } from "@/server/services/teacher-payroll-service";
 import {
@@ -2174,6 +2175,45 @@ export async function deleteBaseLeadAction(
   return deleteBaseLead(db, ctx, String(payload.id ?? ""));
 }
 
+export async function listSiteLeadsAction(db: AppDb, ctx: AuthContext) {
+  const { listSiteLeads } = await import("@/server/services/site-leads-service");
+  return { leads: await listSiteLeads(db, ctx) };
+}
+
+export async function updateSiteLeadStatusAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { updateSiteLeadStatus } = await import(
+    "@/server/services/site-leads-service"
+  );
+  const { isSiteLeadStatus } = await import("@/lib/site-leads");
+  const status = payload.status;
+  if (!isSiteLeadStatus(status)) {
+    throw validationError("Недопустимый статус заявки");
+  }
+  return {
+    lead: await updateSiteLeadStatus(db, ctx, {
+      id: String(payload.id ?? ""),
+      status,
+      updatedAt:
+        payload.updatedAt === undefined
+          ? undefined
+          : String(payload.updatedAt),
+    }),
+  };
+}
+
+export async function deleteSiteLeadAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { deleteSiteLead } = await import("@/server/services/site-leads-service");
+  return deleteSiteLead(db, ctx, payload.id);
+}
+
 export async function listManualTrialLessonsAction(
   db: AppDb,
   ctx: AuthContext
@@ -2925,6 +2965,9 @@ export const platformActions = {
   createBaseLead: createBaseLeadAction,
   updateBaseLead: updateBaseLeadAction,
   deleteBaseLead: deleteBaseLeadAction,
+  listSiteLeads: listSiteLeadsAction,
+  updateSiteLeadStatus: updateSiteLeadStatusAction,
+  deleteSiteLead: deleteSiteLeadAction,
   listManualTrialLessons: listManualTrialLessonsAction,
   createManualTrialLesson: createManualTrialLessonAction,
   updateManualTrialLesson: updateManualTrialLessonAction,

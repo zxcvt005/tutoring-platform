@@ -59,6 +59,7 @@ const iconsByHref: Record<string, NavItem["icon"]> = {
   "/direkciya/teachers": Users,
   "/direkciya/salaries": Wallet,
   "/direkciya/knowledge": BookOpen,
+  "/direkciya/zayavki": MessageSquare,
   "/direkciya/baza": Table2,
   "/direkciya/probnye-uroki": CalendarClock,
   "/direkciya/rnp-avito": BarChart3,

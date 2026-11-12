@@ -5,22 +5,16 @@ import type { VariantProps } from "class-variance-authority";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-import {
-  useLandingApply,
-  type LandingApplyPrefill,
-} from "./landing-apply-context";
+import { useLandingApply } from "./landing-apply-context";
 
-type ApplyButtonProps = LandingApplyPrefill &
-  VariantProps<typeof buttonVariants> & {
-    children?: string;
-    className?: string;
-    onBeforeApply?: () => void;
-  };
+type ApplyButtonProps = VariantProps<typeof buttonVariants> & {
+  children?: string;
+  className?: string;
+  onBeforeApply?: () => void;
+};
 
 export function ApplyButton({
-    children = "Начать с диагностики",
-  subjectId,
-  tariffId,
+  children = "Начать с диагностики",
   variant = "default",
   size = "default",
   className,
@@ -38,7 +32,7 @@ export function ApplyButton({
       onClick={(event) => {
         event.preventDefault();
         onBeforeApply?.();
-        apply({ subjectId, tariffId });
+        apply();
       }}
     >
       {children}

@@ -1,4 +1,4 @@
-import { AdmissionSection } from "@/components/landing/admission-section";
+import { AudienceSection } from "@/components/landing/audience-section";
 import { BonusesSection } from "@/components/landing/bonuses-section";
 import { CompareSection } from "@/components/landing/compare-section";
 import { EnvironmentSection } from "@/components/landing/environment-section";
@@ -13,8 +13,8 @@ import { MethodSection } from "@/components/landing/method-section";
 import { ParentsSection } from "@/components/landing/parents-section";
 import { PathSection } from "@/components/landing/path-section";
 import { PlatformSection } from "@/components/landing/platform-section";
-import { PricingSection } from "@/components/landing/pricing-section";
 import { PrinciplesSection } from "@/components/landing/principles-section";
+import { ProductSection } from "@/components/landing/product-section";
 import { ResultsSection } from "@/components/landing/results-section";
 import { StudentDemoSection } from "@/components/landing/student-demo-section";
 import { TeacherSection } from "@/components/landing/teacher-section";
@@ -33,7 +33,8 @@ export function LandingPage() {
         <LandingHeader />
         <main className="flex-1">
           <LandingHero formulaCount={formulaCount} />
-          <ResultsSection />
+          <ProductSection />
+          <AudienceSection />
           <PrinciplesSection />
           <PathSection />
           <MethodSection />
@@ -43,13 +44,12 @@ export function LandingPage() {
           />
           <StudentDemoSection />
           <ParentsSection />
+          <TeacherSection />
+          <ResultsSection />
           <EnvironmentSection />
           <BonusesSection />
           <GuaranteesSection />
           <CompareSection />
-          <TeacherSection />
-          <AdmissionSection />
-          <PricingSection />
           <FaqSection />
           <LandingCta />
         </main>

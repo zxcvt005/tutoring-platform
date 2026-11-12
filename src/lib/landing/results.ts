@@ -1,6 +1,15 @@
 export const landingAverageScore = 82;
 
+/** Все опубликованные результаты 2023–2026 (52 балла). Средний — 82. */
 export const landingScoreYears = [
+  {
+    year: 2023,
+    scores: [97, 91, 91, 85, 83, 81, 81, 74, 68],
+  },
+  {
+    year: 2024,
+    scores: [94, 88, 86, 84, 80, 79, 79, 77, 76, 74, 65, 64],
+  },
   {
     year: 2025,
     scores: [96, 92, 88, 86, 84, 84, 80, 80, 79, 77, 76, 74, 65, 61],
@@ -137,4 +146,8 @@ export function reviewSources(
 
 export function reviewRoleLabel(role: LandingReviewRole): string {
   return role === "parent" ? "Родитель" : "Ученик";
+}
+
+export function landingScoreCount(): number {
+  return landingScoreYears.reduce((sum, year) => sum + year.scores.length, 0);
 }

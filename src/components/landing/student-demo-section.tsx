@@ -17,9 +17,9 @@ export function StudentDemoSection() {
       <div className="overflow-hidden rounded-[2rem] border border-border/70 bg-gradient-to-br from-pastel-mint/70 via-background to-pastel-blue/50 px-6 py-8 sm:px-10 sm:py-12">
         <div className="max-w-2xl">
           <p className="text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Расписание, домашние задания, история занятий, тариф и профиль —
-            как у настоящего ученика. Теория и тесты закрыты: материалы школы
-            открываются после подключения к обучению.
+            Расписание, домашние задания, история занятий и профиль — как у
+            настоящего ученика. Теория и тесты закрыты: материалы открываются
+            после подключения к обучению.
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
             <Link

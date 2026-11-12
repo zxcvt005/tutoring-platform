@@ -1,5 +1,3 @@
-import { tariffById } from "@/lib/landing/content";
-
 export const LANDING_GRADES = [
   { id: "10", label: "10 класс" },
   { id: "11", label: "11 класс" },
@@ -15,23 +13,19 @@ export type LandingLeadInput = {
   parentName: string;
   contact: string;
   comment: string;
-  tariffId: string;
 };
 
 export type LandingLeadErrors = Partial<
-  Record<"studentName" | "gradeId" | "level" | "parentName" | "contact" | "comment" | "tariffId", string>
+  Record<
+    "studentName" | "gradeId" | "level" | "parentName" | "contact" | "comment",
+    string
+  >
 >;
 
-/**
- * Публичного приёма заявок в проекте нет.
- * Регистрация ученика создаёт аккаунт и не является заявкой на диагностику.
- * Пробный урок в кабинете «Пресса» требует сотрудника, преподавателя и слот.
- */
 export const LANDING_LEAD_DELIVERY = {
-  connected: false as const,
-  reason:
-    "В проекте нет API и хранилища заявок с публичного сайта. Форма проверяет поля и ничего не сохраняет.",
-};
+  connected: true as const,
+  endpoint: "/api/landing/leads",
+} as const;
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE = /^\+?[0-9][0-9\s\-()]{9,}$/;
@@ -84,19 +78,65 @@ export function validateLandingLead(input: LandingLeadInput): LandingLeadErrors 
   if (input.comment.trim().length > 500) {
     errors.comment = "Комментарий слишком длинный.";
   }
-  if (input.tariffId && !tariffById(input.tariffId)) {
-    errors.tariffId = "Такой формат на сайте не опубликован.";
-  }
   return errors;
 }
 
-export type LandingLeadResult =
+export type LandingLeadSubmitResult =
   | { status: "invalid"; errors: LandingLeadErrors }
-  | { status: "not_delivered" };
+  | { status: "ok" }
+  | { status: "error"; message: string };
 
-/** Не создаёт заявку. Успешная отправка здесь невозможна, пока нет приёма. */
-export function submitLandingLead(input: LandingLeadInput): LandingLeadResult {
+export async function submitLandingLead(
+  input: LandingLeadInput
+): Promise<LandingLeadSubmitResult> {
   const errors = validateLandingLead(input);
   if (Object.keys(errors).length > 0) return { status: "invalid", errors };
-  return { status: "not_delivered" };
+
+  try {
+    const csrfRes = await fetch("/api/auth/csrf", { credentials: "include" });
+    const csrfJson = (await csrfRes.json().catch(() => null)) as {
+      csrfToken?: string;
+    } | null;
+    const csrfToken = csrfJson?.csrfToken?.trim();
+    if (!csrfRes.ok || !csrfToken) {
+      return {
+        status: "error",
+        message: "Не удалось подготовить отправку. Обновите страницу.",
+      };
+    }
+
+    const res = await fetch(LANDING_LEAD_DELIVERY.endpoint, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        "x-csrf-token": csrfToken,
+      },
+      body: JSON.stringify({
+        studentName: input.studentName.trim(),
+        gradeId: input.gradeId,
+        level: input.level.trim(),
+        parentName: input.parentName.trim(),
+        contact: input.contact.trim(),
+        comment: input.comment.trim(),
+      }),
+    });
+    const json = (await res.json().catch(() => null)) as
+      | { error?: { message?: string }; data?: unknown }
+      | null;
+    if (!res.ok) {
+      return {
+        status: "error",
+        message:
+          json?.error?.message?.trim() ||
+          "Не удалось отправить заявку. Попробуйте ещё раз.",
+      };
+    }
+    return { status: "ok" };
+  } catch {
+    return {
+      status: "error",
+      message: "Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.",
+    };
+  }
 }

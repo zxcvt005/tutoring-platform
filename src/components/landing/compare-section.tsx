@@ -5,24 +5,33 @@ export function CompareSection() {
   return (
     <LandingSection
       id="compare"
-      eyebrow="Два подхода"
-      title="Почему это не набор отдельных уроков"
+      eyebrow="Отличия"
+      title="Чем это отличается"
       description={landingCompare.note}
     >
       <div className="overflow-x-auto">
         <table className="w-full min-w-[40rem] border-collapse text-left">
           <caption className="sr-only">
-            Сравнение разрозненных занятий и подготовки в школе «Неодин»
+            Сравнение разрозненных занятий и подготовки в «Неодин»
           </caption>
           <thead>
             <tr className="border-b border-border">
-              <th scope="col" className="w-[22%] py-3 pr-4 text-sm font-medium text-muted-foreground">
+              <th
+                scope="col"
+                className="w-[22%] py-3 pr-4 text-sm font-medium text-muted-foreground"
+              >
                 Что сравниваем
               </th>
-              <th scope="col" className="w-[39%] py-3 pr-4 font-display text-lg font-semibold">
+              <th
+                scope="col"
+                className="w-[39%] py-3 pr-4 font-display text-lg font-semibold"
+              >
                 {landingCompare.left}
               </th>
-              <th scope="col" className="w-[39%] py-3 font-display text-lg font-semibold">
+              <th
+                scope="col"
+                className="w-[39%] py-3 font-display text-lg font-semibold"
+              >
                 {landingCompare.right}
               </th>
             </tr>

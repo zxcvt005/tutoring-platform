@@ -43,6 +43,24 @@ describe("cabinet navigation", () => {
     });
   });
 
+  it("adds site leads next to knowledge in Direkciya", () => {
+    expect(direkciyaNavItems).toContainEqual({
+      href: "/direkciya/zayavki",
+      label: "Заявки",
+    });
+    const knowledgeIdx = direkciyaNavItems.findIndex(
+      (i) => i.href === "/direkciya/knowledge"
+    );
+    const leadsIdx = direkciyaNavItems.findIndex(
+      (i) => i.href === "/direkciya/zayavki"
+    );
+    const bazaIdx = direkciyaNavItems.findIndex(
+      (i) => i.href === "/direkciya/baza"
+    );
+    expect(leadsIdx).toBe(knowledgeIdx + 1);
+    expect(bazaIdx).toBe(leadsIdx + 1);
+  });
+
   it("adds the Base table module to Direkciya", () => {
     expect(direkciyaNavItems).toContainEqual({
       href: "/direkciya/baza",

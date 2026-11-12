@@ -20,7 +20,7 @@ export function rateLimited(message = "Слишком много попыток.
  */
 export function assertMemoryRateLimit(
   key: string,
-  options: { max: number; windowMs: number; now?: number }
+  options: { max: number; windowMs: number; now?: number; message?: string }
 ): void {
   const now = options.now ?? Date.now();
   const windowMs = options.windowMs;
@@ -28,7 +28,10 @@ export function assertMemoryRateLimit(
   const recent = prev.filter((t) => now - t < windowMs);
   if (recent.length >= options.max) {
     memoryBuckets.set(key, recent);
-    throw rateLimited("Слишком много диагностических запросов. Подождите немного.");
+    throw rateLimited(
+      options.message ??
+        "Слишком много диагностических запросов. Подождите немного."
+    );
   }
   recent.push(now);
   memoryBuckets.set(key, recent);

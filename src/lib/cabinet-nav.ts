@@ -9,6 +9,7 @@ export const direkciyaNavItems: CabinetNavItem[] = [
   { href: "/direkciya/teachers", label: "Преподаватели" },
   { href: "/direkciya/salaries", label: "Зарплаты" },
   { href: "/direkciya/knowledge", label: "База знаний" },
+  { href: "/direkciya/zayavki", label: "Заявки" },
   { href: "/direkciya/baza", label: "База" },
   { href: "/direkciya/probnye-uroki", label: "Пробные уроки" },
   { href: "/direkciya/rnp-avito", label: "РНП Авито" },

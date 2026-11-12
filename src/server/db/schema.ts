@@ -2752,6 +2752,40 @@ export const baseLeads = pgTable(
 );
 
 /**
+ * Заявки с публичного лендинга (Дирекция → Заявки).
+ * Не создаёт учеников автоматически; только хранит обращения на диагностику.
+ */
+export const siteLeads = pgTable(
+  "site_leads",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    studentName: text("student_name").notNull(),
+    grade: text("grade").notNull(),
+    level: text("level").notNull().default(""),
+    parentName: text("parent_name").notNull(),
+    contact: text("contact").notNull(),
+    comment: text("comment").notNull().default(""),
+    status: text("status").notNull().default("Новая"),
+    ...timestamps,
+  },
+  (t) => [
+    index("site_leads_org_idx").on(t.organizationId),
+    index("site_leads_org_created_idx").on(t.organizationId, t.createdAt),
+    check(
+      "site_leads_status_check",
+      sql`${t.status} in ('Новая', 'Написали', 'Диагностика', 'Отказ', 'Зачислили')`
+    ),
+    check(
+      "site_leads_grade_check",
+      sql`${t.grade} in ('10', '11', 'other')`
+    ),
+  ]
+);
+
+/**
  * Ручные «Пробные уроки» (Дирекция).
  * Изолировано от Press trial_lessons, base_leads, учеников и расписания.
  */
@@ -2994,6 +3028,7 @@ export const schema = {
   errorPracticeSessions,
   errorPracticeSessionItems,
   baseLeads,
+  siteLeads,
   manualTrialLessons,
   directorExpenses,
   rnpAvitoDailyStats,
