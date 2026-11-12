@@ -27,7 +27,6 @@ export function StudentTourHomeworkDemoPanel() {
   const assignment = data.homeworkAssignments.find((a) => a.id === id);
   const hw = data.homeworks.find((h) => h.id === assignment?.homeworkId);
   const topic = data.topics.find((t) => t.id === hw?.topicId);
-  const section = data.topicSections.find((s) => s.id === hw?.sectionId);
   const teacher =
     data.teachers.find((t) => t.id === assignment?.teacherId)?.fullName ??
     "Преподаватель";
@@ -60,7 +59,7 @@ export function StudentTourHomeworkDemoPanel() {
       <dl className="mt-5 grid gap-3 sm:grid-cols-2">
         <Meta
           label="Тема физики"
-          value={topic?.title ?? section?.title ?? "Физика"}
+          value={topic?.title ?? "Физика"}
         />
         <Meta
           label="Статус"

@@ -15,13 +15,21 @@ export function showSidebarCabinetChrome(role: SidebarRole) {
 /**
  * Внешний слот сайдбара. У Аудитории он прозрачный и с внутренним
  * отступом 12px, чтобы вокруг панели был виден фон страницы.
+ * Дирекция может сворачиваться до узкой полосы иконок.
  */
-export function cabinetAsideClassName(role: SidebarRole) {
+export function cabinetAsideClassName(
+  role: SidebarRole,
+  options?: { collapsed?: boolean }
+) {
+  const collapsed = Boolean(options?.collapsed) && role === "direkciya";
   return cn(
-    "sticky hidden shrink-0 md:block",
+    "sticky hidden shrink-0 overflow-x-hidden md:block",
     role === "auditoria"
       ? "top-0 z-10 h-svh self-start bg-transparent p-3"
-      : "top-0 h-svh w-56 border-r border-sidebar-border bg-sidebar lg:w-[15rem]"
+      : cn(
+          "top-0 h-svh border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-out",
+          collapsed ? "w-14" : "w-56 lg:w-[15rem]"
+        )
   );
 }
 

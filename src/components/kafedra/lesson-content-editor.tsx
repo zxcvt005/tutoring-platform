@@ -73,8 +73,6 @@ export function LessonContentEditor({
   const [dupHint, setDupHint] = useState<string | null>(null);
   const [requiredHint, setRequiredHint] = useState<string | null>(null);
 
-  const sectionTitle = (sectionId?: string | null) =>
-    data.topicSections.find((s) => s.id === sectionId)?.title ?? "Без раздела";
 
   function updateTopic(
     index: number,
@@ -115,9 +113,7 @@ export function LessonContentEditor({
     const hwItem =
       tests.find((t) => t.id === id) ??
       data.homeworks.find((h) => h.id === id);
-    return hwItem
-      ? `${hwItem.title} · ${sectionTitle(hwItem.sectionId)}`
-      : "Тест";
+    return hwItem?.title || "Тест";
   }
 
   async function save() {

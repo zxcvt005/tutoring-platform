@@ -309,7 +309,17 @@ async function ensurePostgres(): Promise<{
       /* exists */
     }
     await admin.end({ timeout: 5 });
-    await migrateAndMaybeSeed(DATABASE_URL);
+    try {
+      await migrateAndMaybeSeed(DATABASE_URL);
+    } catch (e2) {
+      if (!SKIP_SEED) throw e2;
+      // Локальная WIN1251-база может отклонять UTF-8 комментарии в новых
+      // миграциях. При --keep продолжаем на уже существующей схеме.
+      const msg2 = e2 instanceof Error ? e2.message : String(e2);
+      console.warn(
+        `migrate skipped with --keep after encoding/schema error: ${msg2}`
+      );
+    }
   }
 
   return { pg, startedHere: true };

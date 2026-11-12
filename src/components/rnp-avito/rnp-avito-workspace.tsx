@@ -19,6 +19,7 @@ import {
   RNP_AVITO_API_METRICS,
   RNP_AVITO_DERIVED_METRICS,
   RNP_AVITO_MANUAL_METRICS,
+  type AvitoEnvStatus,
   type RnpAvitoDayStats,
   type RnpAvitoDerivedKey,
   type RnpAvitoMetricKey,
@@ -117,6 +118,7 @@ export function RnpAvitoWorkspace() {
   const [month, setMonth] = useState(initial.month);
   const [days, setDays] = useState<RnpAvitoDayStats[]>([]);
   const [apiConnected, setApiConnected] = useState(false);
+  const [avitoEnv, setAvitoEnv] = useState<AvitoEnvStatus | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -169,6 +171,7 @@ export function RnpAvitoWorkspace() {
         setMonth(data.month);
         setDays(data.days);
         setApiConnected(data.apiConnected);
+        setAvitoEnv(data.avitoEnv);
         setLastSyncedAt(data.lastSyncedAt);
         setReady(true);
       });
@@ -191,6 +194,7 @@ export function RnpAvitoWorkspace() {
       }>("syncRnpAvitoMonth", { year, month });
       setDays(data.monthPayload.days);
       setApiConnected(data.monthPayload.apiConnected);
+      setAvitoEnv(data.monthPayload.avitoEnv);
       setLastSyncedAt(data.lastSyncedAt);
       toast.success(
         `Синхронизировано с Avito · ${data.syncedDays} дн. с данными`
@@ -448,8 +452,11 @@ export function RnpAvitoWorkspace() {
         </span>
         {!apiConnected ? (
           <span>
-            На сервере не заданы AVITO_CLIENT_ID / AVITO_CLIENT_SECRET /
-            AVITO_USER_ID
+            {avitoEnv?.missingKeys.length
+              ? `На сервере не заданы: ${avitoEnv.missingKeys.join(", ")}. После сохранения в Timeweb перезапустите приложение.`
+              : avitoEnv && !avitoEnv.userIdIsNumeric
+                ? "AVITO_USER_ID задан, но должен быть числовым идентификатором."
+                : "На сервере не заданы AVITO_CLIENT_ID / AVITO_CLIENT_SECRET / AVITO_USER_ID"}
           </span>
         ) : null}
         {syncError ? (

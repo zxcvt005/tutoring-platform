@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -134,6 +134,8 @@ function CompleteForm({
   );
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const saveLock = useRef(false);
 
   const nameOf = (id: string) =>
     data.students.find((s) => s.id === id)?.fullName ?? "Ученик";
@@ -162,6 +164,7 @@ function CompleteForm({
   }
 
   function save() {
+    if (saveLock.current || saving) return;
     const nextTopics = [...pickedTopics];
     if (creatingTopic) {
       if (!newTitle.trim()) return;
@@ -197,19 +200,26 @@ function CompleteForm({
       dueAt: dueAt ? fromAppDateTimeLocalValue(dueAt) : undefined,
     }));
 
+    saveLock.current = true;
+    setSaving(true);
     void (async () => {
-      const result = await completeLesson({
-        lessonId: lesson.id,
-        topics: nextTopics,
-        attendances: participantIds
-          .filter((studentId) => attendanceByStudent[studentId])
-          .map((studentId) => ({
-            studentId,
-            status: attendanceByStudent[studentId]!,
-          })),
-        homeworkAssigns,
-      });
-      if (result.ok) onClose();
+      try {
+        const result = await completeLesson({
+          lessonId: lesson.id,
+          topics: nextTopics,
+          attendances: participantIds
+            .filter((studentId) => attendanceByStudent[studentId])
+            .map((studentId) => ({
+              studentId,
+              status: attendanceByStudent[studentId]!,
+            })),
+          homeworkAssigns,
+        });
+        if (result.ok) onClose();
+      } finally {
+        saveLock.current = false;
+        setSaving(false);
+      }
     })();
   }
 
@@ -497,8 +507,8 @@ function CompleteForm({
         <Button type="button" variant="outline" onClick={onClose}>
           Отмена
         </Button>
-        <Button type="button" onClick={save} disabled={!canSave}>
-          Сохранить
+        <Button type="button" onClick={save} disabled={!canSave || saving}>
+          {saving ? "Сохранение…" : "Сохранить"}
         </Button>
       </DialogFooter>
     </>

@@ -7,11 +7,12 @@ import {
   useRef,
   useState,
   useTransition,
-  type ChangeEvent,
 } from "react";
 import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { ExpandableTableRow } from "@/components/direkciya/expandable-table-row";
+import { InlineMultilineCell } from "@/components/direkciya/inline-multiline-cell";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -49,6 +50,7 @@ import {
   isAutoExpenseSource,
   todayIsoDate,
 } from "@/lib/expenses";
+import { useExpandedTableRow } from "@/lib/hooks/use-expanded-table-row";
 import { apiPlatform, HttpStatusError } from "@/lib/store/api-client";
 import { cn } from "@/lib/utils";
 
@@ -102,6 +104,7 @@ export function ExpensesWorkspace() {
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [, startTransition] = useTransition();
+  const { isExpanded, toggleExpanded, expand } = useExpandedTableRow();
 
   const rowsRef = useRef(rows);
   const saveGenRef = useRef(new Map<string, number>());
@@ -459,7 +462,11 @@ export function ExpensesWorkspace() {
               {rows.map((row) => {
                 const locked = isAutoExpenseSource(row.source);
                 return (
-                  <TableRow key={row.id} className="h-9">
+                  <ExpandableTableRow
+                    key={row.id}
+                    expanded={isExpanded(row.id)}
+                    onToggle={() => toggleExpanded(row.id)}
+                  >
                     <TableCell className="py-1">
                       {locked ? (
                         <span
@@ -499,26 +506,20 @@ export function ExpensesWorkspace() {
                         </Select>
                       )}
                     </TableCell>
-                    <TableCell className="py-1">
-                      {locked ? (
-                        <span className="text-foreground/85">{row.comment}</span>
-                      ) : (
-                        <Input
-                          value={row.comment}
-                          className="h-7 border-0 bg-transparent px-1 shadow-none focus-visible:ring-1"
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => {
-                            applyLocal(row.id, { comment: e.target.value });
-                            queueSave(row.id, { comment: e.target.value });
-                          }}
-                          onBlur={(e) =>
-                            queueSave(
-                              row.id,
-                              { comment: e.target.value },
-                              true
-                            )
-                          }
-                        />
-                      )}
+                    <TableCell className="max-w-[24rem] align-top py-1 whitespace-normal">
+                      <InlineMultilineCell
+                        value={row.comment}
+                        expanded={isExpanded(row.id)}
+                        readOnly={locked}
+                        onFocusRow={() => expand(row.id)}
+                        onChange={(value) => {
+                          applyLocal(row.id, { comment: value });
+                          queueSave(row.id, { comment: value });
+                        }}
+                        onBlur={(value) =>
+                          queueSave(row.id, { comment: value }, true)
+                        }
+                      />
                     </TableCell>
                     <TableCell className="py-1">
                       {locked ? (
@@ -594,7 +595,7 @@ export function ExpensesWorkspace() {
                         </Button>
                       )}
                     </TableCell>
-                  </TableRow>
+                  </ExpandableTableRow>
                 );
               })}
             </TableBody>

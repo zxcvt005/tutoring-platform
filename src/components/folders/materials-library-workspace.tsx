@@ -656,7 +656,7 @@ export function MaterialsSectionWorkspace({
         open={testOpen}
         onOpenChange={setTestOpen}
         homework={editingTest}
-        sectionId={testFolderId}
+        folderId={testFolderId}
         teacherId={teacherId}
       />
     </div>

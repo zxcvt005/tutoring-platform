@@ -14,6 +14,7 @@ import {
   ListChecks,
   Bell,
   LayoutDashboard,
+  LogOut,
   MessageSquare,
   Package,
   PlayCircle,
@@ -33,6 +34,7 @@ import {
 import type { CabinetRole } from "@/components/layout/cabinet-shell";
 import { BrandMark } from "@/components/landing/brand-mark";
 import { Button } from "@/components/ui/button";
+import { HintTooltip } from "@/components/ui/tooltip";
 import {
   assistentNavItems,
   auditoriaNavItems,
@@ -139,6 +141,7 @@ function NavLinks({
   role,
   alertHrefs,
   navBasePath,
+  collapsed = false,
 }: {
   items: NavItem[];
   role: CabinetRole;
@@ -146,6 +149,7 @@ function NavLinks({
   alertHrefs?: Set<string>;
   /** Для публичного демо Аудитории: `/demo/student` вместо `/auditoria`. */
   navBasePath?: string;
+  collapsed?: boolean;
 }) {
   const pathname = usePathname();
   const homeHref =
@@ -162,7 +166,13 @@ function NavLinks({
   const auditoria = role === "auditoria";
 
   return (
-    <nav className={cn("flex flex-col", auditoria ? "gap-2" : "gap-1")}>
+    <nav
+      className={cn(
+        "flex flex-col",
+        auditoria ? "gap-2" : "gap-1",
+        collapsed && "items-center"
+      )}
+    >
       {items.map((item) => {
         const href = withNavBase(item.href, navBasePath);
         const active =
@@ -171,13 +181,15 @@ function NavLinks({
             : pathname === href || pathname.startsWith(`${href}/`);
         const Icon = item.icon;
         const showAlert = alertHrefs?.has(item.href);
-        return (
+        const link = (
           <Link
-            key={item.href}
             href={href}
+            aria-label={collapsed ? item.label : undefined}
+            title={collapsed ? item.label : undefined}
             className={cn(
               "relative flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[0.9rem] transition-colors",
               auditoria && "py-2.5",
+              collapsed && "size-9 justify-center gap-0 p-0",
               active
                 ? auditoria
                   ? "bg-pastel-blue font-medium text-foreground"
@@ -187,31 +199,49 @@ function NavLinks({
                   : "text-sidebar-foreground/75 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
             )}
           >
-            {active && !auditoria ? (
+            {active && !auditoria && !collapsed ? (
               <span
                 aria-hidden
                 className="absolute top-1/2 left-0 h-5 w-[3px] -translate-y-1/2 rounded-full bg-primary"
               />
             ) : null}
-            <Icon
-              className={cn(
-                "size-[1.05rem] shrink-0",
-                active ? "opacity-90" : "opacity-55"
-              )}
-            />
-            <span className="flex min-w-0 flex-1 items-center gap-1.5">
-              {item.label}
-              {showAlert ? (
+            <span className="relative shrink-0">
+              <Icon
+                className={cn(
+                  "size-[1.05rem] shrink-0",
+                  active ? "opacity-90" : "opacity-55"
+                )}
+              />
+              {showAlert && collapsed ? (
                 <span
-                  className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-full bg-red-500 text-[0.55rem] font-bold text-white"
-                  title="Есть ученики без преподавателя"
+                  className="absolute -top-1 -right-1 size-2 rounded-full bg-red-500"
                   aria-label="Есть ученики без преподавателя"
-                >
-                  !
-                </span>
+                />
               ) : null}
             </span>
+            {collapsed ? null : (
+              <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                {item.label}
+                {showAlert ? (
+                  <span
+                    className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-full bg-red-500 text-[0.55rem] font-bold text-white"
+                    title="Есть ученики без преподавателя"
+                    aria-label="Есть ученики без преподавателя"
+                  >
+                    !
+                  </span>
+                ) : null}
+              </span>
+            )}
           </Link>
+        );
+        if (!collapsed) {
+          return <div key={item.href}>{link}</div>;
+        }
+        return (
+          <HintTooltip key={item.href} text={item.label}>
+            {link}
+          </HintTooltip>
         );
       })}
     </nav>
@@ -223,11 +253,13 @@ export function AppSidebar({
   onNavigate,
   navBasePath,
   logoutLabel = "Выйти",
+  collapsed = false,
 }: {
   role: CabinetRole;
   onNavigate?: () => void;
   navBasePath?: string;
   logoutLabel?: string;
+  collapsed?: boolean;
 }) {
   const { data, auth, logout } = useDemoStore();
   const items =
@@ -255,27 +287,42 @@ export function AppSidebar({
   return (
     <div
       className={cn(
-        "flex h-full flex-col p-4",
-        showChrome ? "gap-5" : "gap-3"
+        "flex h-full flex-col",
+        collapsed ? "items-center gap-3 p-2" : "p-4",
+        !collapsed && (showChrome ? "gap-5" : "gap-3")
       )}
       onClick={onNavigate}
     >
       {showChrome ? (
-        <div className="space-y-3">
-          <div className={cn("panel-soft px-3 py-3", accentClass[role])}>
-            <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
-              Кабинет
-            </p>
-            <p className="font-display text-xl leading-tight font-semibold tracking-tight text-sidebar-foreground">
-              {title}
-            </p>
-            {auth?.fullName ? (
-              <p className="mt-1 truncate text-[11px] text-muted-foreground">
-                {auth.fullName}
+        collapsed ? (
+          <HintTooltip text={title}>
+            <div
+              className={cn(
+                "flex size-9 items-center justify-center rounded-xl text-[0.7rem] font-semibold",
+                accentClass[role]
+              )}
+              aria-label={title}
+            >
+              {title.slice(0, 1)}
+            </div>
+          </HintTooltip>
+        ) : (
+          <div className="space-y-3">
+            <div className={cn("panel-soft px-3 py-3", accentClass[role])}>
+              <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
+                Кабинет
               </p>
-            ) : null}
+              <p className="font-display text-xl leading-tight font-semibold tracking-tight text-sidebar-foreground">
+                {title}
+              </p>
+              {auth?.fullName ? (
+                <p className="mt-1 truncate text-[11px] text-muted-foreground">
+                  {auth.fullName}
+                </p>
+              ) : null}
+            </div>
           </div>
-        </div>
+        )
       ) : (
         <BrandMark className="px-1 pt-1 pb-2 text-[1.65rem] leading-none" />
       )}
@@ -285,18 +332,40 @@ export function AppSidebar({
         role={role}
         alertHrefs={alertHrefs}
         navBasePath={navBasePath}
+        collapsed={collapsed}
       />
 
-      <div className="mt-auto space-y-2 pt-2" onClick={(e) => e.stopPropagation()}>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="w-full rounded-xl"
-          onClick={() => void logout()}
-        >
-          {logoutLabel}
-        </Button>
+      <div
+        className={cn(
+          "mt-auto space-y-2 pt-2",
+          collapsed && "flex w-full justify-center"
+        )}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {collapsed ? (
+          <HintTooltip text={logoutLabel}>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              className="size-9 rounded-xl"
+              aria-label={logoutLabel}
+              onClick={() => void logout()}
+            >
+              <LogOut className="size-3.5" />
+            </Button>
+          </HintTooltip>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-full rounded-xl"
+            onClick={() => void logout()}
+          >
+            {logoutLabel}
+          </Button>
+        )}
       </div>
     </div>
   );

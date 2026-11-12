@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { LessonContentEditor } from "@/components/kafedra/lesson-content-editor";
@@ -24,15 +24,18 @@ import {
   groupLessonsByAppDate,
   isFinalAttendanceStatus,
   lessonHasOccurred,
+  lessonIsAttendanceMarked,
   splitKafedraTodayLessons,
+  splitTodayAttendanceColumns,
   studentNeedsAttendanceMark,
 } from "@/lib/kafedra-today";
+import { topicsForLesson } from "@/lib/lesson-topics";
 import { canCompleteAttendanceMark } from "@/lib/lesson-mark-requirements";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { TariffBalanceNotice } from "@/components/tariff-balance-notice";
 import { currentAssignmentForStudent } from "@/lib/tariff-package";
 import { assignmentTariffAlert } from "@/lib/tariff-warnings";
-import type { Attendance, AttendanceStatus, Lesson } from "@/lib/types";
+import type { Attendance, AttendanceStatus, Lesson, Topic } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export function KafedraDayHome() {
@@ -57,6 +60,8 @@ export function KafedraDayHome() {
   );
   const [resetLesson, setResetLesson] = useState<Lesson | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [openLessonId, setOpenLessonId] = useState<string | null>(null);
+  const inflight = useRef(new Set<string>());
   const [markErrors, setMarkErrors] = useState<Record<string, string>>({});
   const [lastAttempt, setLastAttempt] = useState<
     Record<string, AttendanceStatus>
@@ -70,7 +75,8 @@ export function KafedraDayHome() {
   );
   const overdueGroups = groupLessonsByAppDate(overdue);
 
-  const slots = lessonsByStartTime(dayLessons);
+  const { unmarked: unmarkedToday, marked: markedToday } =
+    splitTodayAttendanceColumns(dayLessons, data.attendances);
   const todayTrials = data.trialLessons
     .filter(
       (t) =>
@@ -115,6 +121,8 @@ export function KafedraDayHome() {
       return;
     }
     const key = `${lesson.id}:${studentId}`;
+    if (inflight.current.has(key)) return;
+    inflight.current.add(key);
     setBusyKey(key);
     setLastAttempt((prev) => ({ ...prev, [key]: status }));
     setMarkErrors((prev) => {
@@ -133,8 +141,19 @@ export function KafedraDayHome() {
             feedback.message ??
             "Не удалось сохранить отметку. Повторите действие.",
         }));
+        return;
+      }
+      toast.success("Посещаемость сохранена");
+      const nextAttendances = data.attendances
+        .filter(
+          (row) => row.lessonId !== lesson.id || row.studentId !== studentId
+        )
+        .concat([{ lessonId: lesson.id, studentId, status }]);
+      if (lessonIsAttendanceMarked(lesson, nextAttendances)) {
+        setOpenLessonId(null);
       }
     } finally {
+      inflight.current.delete(key);
       setBusyKey(null);
     }
   }
@@ -286,38 +305,54 @@ export function KafedraDayHome() {
           На сегодня занятий нет — сначала разберите пропущенные отметки.
         </p>
       ) : (
-        <ul className="space-y-5">
-          {slots.map(([time, lessons]) => (
-            <li key={time} className="space-y-2">
-              <h2 className="font-display text-lg font-semibold tabular-nums tracking-tight">
-                {time}
-              </h2>
-              <ul className="space-y-3">
-                {lessons.map((lesson) => (
-                  <LessonCard
-                    key={lesson.id}
-                    lesson={lesson}
-                    attendances={data.attendances}
-                    nameOf={nameOf}
-                    tariffAssignments={data.tariffAssignments}
-                    now={now}
-                    highlightNeedsMark={false}
-                    showDate={false}
-                    busyKey={busyKey}
-                    markErrors={markErrors}
-                    lastAttempt={lastAttempt}
-                    onMark={mark}
-                    onCancelTeacher={cancelByTeacher}
-                    onReset={() => setResetLesson(lesson)}
-                    resetBusy={busyKey === `reset:${lesson.id}`}
-                    onEdit={() => setEditLesson(lesson)}
-                    onTopics={() => setCompleteLesson(lesson)}
-                  />
-                ))}
-              </ul>
-            </li>
-          ))}
-        </ul>
+        <div className="grid items-start gap-4 lg:grid-cols-2">
+          <TodayColumn
+            title="Не отмеченные"
+            empty="Все занятия на сегодня уже отмечены."
+            lessons={unmarkedToday}
+            attendances={data.attendances}
+            nameOf={nameOf}
+            topicText={(lesson) => lessonTopicText(lesson, data.topics)}
+            openLessonId={openLessonId}
+            onOpen={setOpenLessonId}
+            onClose={() => setOpenLessonId(null)}
+            cardProps={{
+              tariffAssignments: data.tariffAssignments,
+              now,
+              busyKey,
+              markErrors,
+              lastAttempt,
+              onMark: mark,
+              onCancelTeacher: cancelByTeacher,
+              onReset: (lesson) => setResetLesson(lesson),
+              onEdit: (lesson) => setEditLesson(lesson),
+              onTopics: (lesson) => setCompleteLesson(lesson),
+            }}
+          />
+          <TodayColumn
+            title="Отмеченные"
+            empty="Пока нет сохранённых отметок."
+            lessons={markedToday}
+            attendances={data.attendances}
+            nameOf={nameOf}
+            topicText={(lesson) => lessonTopicText(lesson, data.topics)}
+            openLessonId={openLessonId}
+            onOpen={setOpenLessonId}
+            onClose={() => setOpenLessonId(null)}
+            cardProps={{
+              tariffAssignments: data.tariffAssignments,
+              now,
+              busyKey,
+              markErrors,
+              lastAttempt,
+              onMark: mark,
+              onCancelTeacher: cancelByTeacher,
+              onReset: (lesson) => setResetLesson(lesson),
+              onEdit: (lesson) => setEditLesson(lesson),
+              onTopics: (lesson) => setCompleteLesson(lesson),
+            }}
+          />
+        </div>
       )}
 
       {emptyToday ? (
@@ -373,6 +408,160 @@ export function KafedraDayHome() {
   );
 }
 
+function lessonTopicText(lesson: Lesson, topics: Topic[]) {
+  const titles = topicsForLesson(lesson, topics)
+    .map((item) => item.title.trim())
+    .filter(Boolean);
+  return titles.length > 0 ? titles.join(", ") : null;
+}
+
+type TodayCardHandlers = {
+  tariffAssignments: Parameters<typeof currentAssignmentForStudent>[0];
+  now: Date;
+  busyKey: string | null;
+  markErrors: Record<string, string>;
+  lastAttempt: Record<string, AttendanceStatus>;
+  onMark: (lesson: Lesson, studentId: string, status: AttendanceStatus) => void;
+  onCancelTeacher: (lesson: Lesson) => void;
+  onReset: (lesson: Lesson) => void;
+  onEdit: (lesson: Lesson) => void;
+  onTopics: (lesson: Lesson) => void;
+};
+
+function TodayColumn({
+  title,
+  empty,
+  lessons,
+  attendances,
+  nameOf,
+  topicText,
+  openLessonId,
+  onOpen,
+  onClose,
+  cardProps,
+}: {
+  title: string;
+  empty: string;
+  lessons: Lesson[];
+  attendances: Attendance[];
+  nameOf: (id: string) => string;
+  topicText: (lesson: Lesson) => string | null;
+  openLessonId: string | null;
+  onOpen: (lessonId: string) => void;
+  onClose: () => void;
+  cardProps: TodayCardHandlers;
+}) {
+  return (
+    <section className="space-y-3">
+      <h2 className="font-display text-lg font-semibold tracking-tight">{title}</h2>
+      {lessons.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+          {empty}
+        </p>
+      ) : (
+        <ul className="space-y-3">
+          {lessons.map((lesson) =>
+            openLessonId === lesson.id ? (
+              <LessonCard
+                key={lesson.id}
+                lesson={lesson}
+                attendances={attendances}
+                nameOf={nameOf}
+                tariffAssignments={cardProps.tariffAssignments}
+                now={cardProps.now}
+                highlightNeedsMark={false}
+                showDate={false}
+                busyKey={cardProps.busyKey}
+                markErrors={cardProps.markErrors}
+                lastAttempt={cardProps.lastAttempt}
+                onMark={cardProps.onMark}
+                onCancelTeacher={cardProps.onCancelTeacher}
+                onReset={() => cardProps.onReset(lesson)}
+                resetBusy={cardProps.busyKey === `reset:${lesson.id}`}
+                onEdit={() => cardProps.onEdit(lesson)}
+                onTopics={() => cardProps.onTopics(lesson)}
+                onCollapse={onClose}
+              />
+            ) : (
+              <TodayLessonSummary
+                key={lesson.id}
+                lesson={lesson}
+                attendances={attendances}
+                nameOf={nameOf}
+                topicText={topicText(lesson)}
+                onOpen={() => onOpen(lesson.id)}
+              />
+            )
+          )}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function TodayLessonSummary({
+  lesson,
+  attendances,
+  nameOf,
+  topicText,
+  onOpen,
+}: {
+  lesson: Lesson;
+  attendances: Attendance[];
+  nameOf: (id: string) => string;
+  topicText: string | null;
+  onOpen: () => void;
+}) {
+  const marked = lessonIsAttendanceMarked(lesson, attendances);
+  return (
+    <li className="panel space-y-3 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="space-y-1">
+          <p className="text-sm font-medium tabular-nums">
+            {formatTime(lesson.startsAt)}–{formatTime(lesson.endsAt)}
+          </p>
+          {topicText ? <p className="text-sm">{topicText}</p> : null}
+          {lesson.status === "cancelled" ? (
+            <p className="text-xs font-medium text-sky-700 dark:text-sky-400">
+              Отменено преподавателем
+            </p>
+          ) : null}
+        </div>
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          className="h-7 rounded-full px-3 text-xs"
+          onClick={onOpen}
+        >
+          {marked ? "Изменить отметку" : "Отметить"}
+        </Button>
+      </div>
+      <ul className="space-y-1.5">
+        {lesson.studentIds.map((studentId) => {
+          const att = attendances.find(
+            (row) => row.lessonId === lesson.id && row.studentId === studentId
+          );
+          const saved = isFinalAttendanceStatus(att?.status);
+          return (
+            <li
+              key={studentId}
+              className="flex flex-wrap items-center justify-between gap-2 text-sm"
+            >
+              <span>{nameOf(studentId)}</span>
+              {saved && att ? (
+                <AttendanceStatusBadge status={att.status} />
+              ) : (
+                <span className="text-xs text-muted-foreground">Не отмечено</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </li>
+  );
+}
+
 function LessonCard({
   lesson,
   attendances,
@@ -390,6 +579,7 @@ function LessonCard({
   resetBusy,
   onEdit,
   onTopics,
+  onCollapse,
 }: {
   lesson: Lesson;
   attendances: Attendance[];
@@ -411,6 +601,7 @@ function LessonCard({
   resetBusy: boolean;
   onEdit: () => void;
   onTopics: () => void;
+  onCollapse?: () => void;
 }) {
   const needsMark = lesson.studentIds.some((sid) =>
     studentNeedsAttendanceMark(lesson, sid, attendances, now)
@@ -473,6 +664,17 @@ function LessonCard({
           >
             Открыть
           </Button>
+          {onCollapse ? (
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              className="h-6 rounded-full px-2 text-[0.7rem]"
+              onClick={onCollapse}
+            >
+              Свернуть
+            </Button>
+          ) : null}
         </div>
       </div>
       <ul className="divide-y divide-border/70">
@@ -599,17 +801,6 @@ function LessonCard({
       </ul>
     </li>
   );
-}
-
-function lessonsByStartTime(lessons: Lesson[]): [string, Lesson[]][] {
-  const map = new Map<string, Lesson[]>();
-  for (const l of lessons) {
-    const key = formatTime(l.startsAt);
-    const list = map.get(key) ?? [];
-    list.push(l);
-    map.set(key, list);
-  }
-  return [...map.entries()];
 }
 
 function AttendanceControls({

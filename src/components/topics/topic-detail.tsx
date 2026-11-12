@@ -387,7 +387,7 @@ export function TopicDetail({ topicId }: { topicId: string }) {
 
       <TestEditorDialog
         topicId={topicId}
-        sectionId={topic.sectionId}
+        folderId={topic.folderId ?? topic.sectionId ?? null}
         teacherId={topic.teacherId}
         homework={editingHw}
         open={editorOpen}

@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { appDateKey, fromAppWall } from "@/lib/app-time";
 import {
   attendanceMarkFeedback,
+  lessonIsAttendanceMarked,
   lessonNeedsAttendanceMark,
   splitKafedraTodayLessons,
+  splitTodayAttendanceColumns,
 } from "@/lib/kafedra-today";
 import type { Attendance, Lesson } from "@/lib/types";
 
@@ -122,5 +124,35 @@ describe("kafedra today attendance queue", () => {
       saved: true,
       message: null,
     });
+  });
+
+  it("splits today into unmarked and marked without turning a blank mark into an absence", () => {
+    const open = lesson("open", fromAppWall(2026, 10, 22, 9, 0, 0));
+    const done = lesson("done", fromAppWall(2026, 10, 22, 11, 0, 0));
+    const partial = lesson("partial", fromAppWall(2026, 10, 22, 12, 0, 0), {
+      studentIds: ["s1", "s2"],
+    });
+    const att: Attendance[] = [
+      { lessonId: "done", studentId: "s1", status: "present" },
+      { lessonId: "partial", studentId: "s1", status: "absent_excused" },
+    ];
+    const columns = splitTodayAttendanceColumns([open, done, partial], att);
+    expect(columns.unmarked.map((item) => item.id)).toEqual(["open", "partial"]);
+    expect(columns.marked.map((item) => item.id)).toEqual(["done"]);
+    expect(lessonIsAttendanceMarked(open, att)).toBe(false);
+    expect(att.find((row) => row.lessonId === "open")).toBeUndefined();
+  });
+
+  it("keeps a saved lesson in the marked column after the status changes", () => {
+    const done = lesson("done", fromAppWall(2026, 10, 22, 11, 0, 0));
+    const present: Attendance[] = [
+      { lessonId: "done", studentId: "s1", status: "present" },
+    ];
+    const excused: Attendance[] = [
+      { lessonId: "done", studentId: "s1", status: "absent_excused" },
+    ];
+    expect(splitTodayAttendanceColumns([done], present).marked).toHaveLength(1);
+    expect(splitTodayAttendanceColumns([done], excused).marked).toHaveLength(1);
+    expect(splitTodayAttendanceColumns([done], []).unmarked).toHaveLength(1);
   });
 });

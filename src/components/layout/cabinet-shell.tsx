@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import { Menu } from "lucide-react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
+import { Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 import {
   AuditoriaBackgroundLayer,
@@ -13,7 +13,10 @@ import { NotesWidget } from "@/components/notes/notes-widget";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { ImpersonationBanner } from "@/components/layout/impersonation-banner";
 import { Button } from "@/components/ui/button";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import {
+  HintTooltip,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
 import {
   Sheet,
   SheetContent,
@@ -25,6 +28,11 @@ import {
   cabinetAsidePanelClassName,
   cabinetMobileSheetClassName,
 } from "@/lib/cabinet-shell-classes";
+import {
+  readDirekciyaSidebarCollapsed,
+  subscribeDirekciyaSidebarCollapsed,
+  writeDirekciyaSidebarCollapsed,
+} from "@/lib/direkciya-sidebar";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { cn } from "@/lib/utils";
 
@@ -53,18 +61,34 @@ export function CabinetShell({
   const { ready } = useDemoStore();
   const [open, setOpen] = useState(false);
   const title = titles[role];
+  const canCollapseSidebar = role === "direkciya";
+  const sidebarCollapsedStored = useSyncExternalStore(
+    subscribeDirekciyaSidebarCollapsed,
+    readDirekciyaSidebarCollapsed,
+    () => false
+  );
+  const sidebarCollapsed = canCollapseSidebar && sidebarCollapsedStored;
+
+  function toggleSidebarCollapsed() {
+    writeDirekciyaSidebarCollapsed(!sidebarCollapsedStored);
+  }
 
   const frame = (
-    <div className="flex min-h-full flex-1 flex-col bg-background">
+    <TooltipProvider delay={300} closeDelay={80}>
+    <div className="flex min-h-full flex-1 flex-col overflow-x-hidden bg-background">
       <ImpersonationBanner />
       <div
         className={cn(
-          "relative flex min-h-0 flex-1",
+          "relative flex min-h-0 min-w-0 flex-1 overflow-x-hidden",
           role === "auditoria" && "overflow-x-hidden"
         )}
       >
       {role === "auditoria" ? <AuditoriaBackgroundLayer /> : null}
-      <aside className={cabinetAsideClassName(role)}>
+      <aside
+        className={cabinetAsideClassName(role, {
+          collapsed: canCollapseSidebar && sidebarCollapsed,
+        })}
+      >
         {role === "auditoria" ? (
           <div className={cabinetAsidePanelClassName(role)}>
             <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
@@ -72,7 +96,50 @@ export function CabinetShell({
             </div>
           </div>
         ) : (
-          <AppSidebar role={role} />
+          <div className="flex h-full min-h-0 flex-col overflow-x-hidden">
+            <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
+              <AppSidebar
+                role={role}
+                collapsed={canCollapseSidebar && sidebarCollapsed}
+              />
+            </div>
+            {canCollapseSidebar ? (
+              <div
+                className={cn(
+                  "shrink-0 border-t border-sidebar-border p-2",
+                  sidebarCollapsed && "flex justify-center"
+                )}
+              >
+                <HintTooltip
+                  text={
+                    sidebarCollapsed
+                      ? "Развернуть меню"
+                      : "Свернуть меню"
+                  }
+                >
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    className="size-8 rounded-lg text-sidebar-foreground/80"
+                    aria-label={
+                      sidebarCollapsed
+                        ? "Развернуть меню"
+                        : "Свернуть меню"
+                    }
+                    aria-expanded={!sidebarCollapsed}
+                    onClick={toggleSidebarCollapsed}
+                  >
+                    {sidebarCollapsed ? (
+                      <PanelLeftOpen className="size-4" />
+                    ) : (
+                      <PanelLeftClose className="size-4" />
+                    )}
+                  </Button>
+                </HintTooltip>
+              </div>
+            ) : null}
+          </div>
         )}
       </aside>
 
@@ -123,15 +190,14 @@ export function CabinetShell({
         </main>
       </CabinetContentColumn>
       </div>
-      <TooltipProvider delay={300} closeDelay={80}>
-        <NotesWidget
-          offsetForChat={role === "kafedra" || role === "auditoria"}
-        />
-        {role === "kafedra" || role === "auditoria" ? (
-          <ChatWidget role={role} />
-        ) : null}
-      </TooltipProvider>
+      <NotesWidget
+        offsetForChat={role === "kafedra" || role === "auditoria"}
+      />
+      {role === "kafedra" || role === "auditoria" ? (
+        <ChatWidget role={role} />
+      ) : null}
     </div>
+    </TooltipProvider>
   );
 
   if (role !== "auditoria") {

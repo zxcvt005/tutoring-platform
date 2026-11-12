@@ -102,6 +102,36 @@ export function splitKafedraTodayLessons(
   return { overdue, today };
 }
 
+/**
+ * Урок отмечен, когда он отменён или у каждого участника есть итоговый статус.
+ * Частичная и пустая отметка остаются «не отмечено» — это не пропуск.
+ */
+export function lessonIsAttendanceMarked(
+  lesson: Pick<Lesson, "id" | "status" | "studentIds">,
+  attendances: Pick<Attendance, "lessonId" | "studentId" | "status">[]
+): boolean {
+  if (lesson.status === "cancelled") return true;
+  if (lesson.studentIds.length === 0) return false;
+  return lesson.studentIds.every((studentId) =>
+    isFinalAttendanceStatus(
+      attendanceForStudent(attendances, lesson.id, studentId)?.status
+    )
+  );
+}
+
+export function splitTodayAttendanceColumns(
+  lessons: Lesson[],
+  attendances: Pick<Attendance, "lessonId" | "studentId" | "status">[]
+): { unmarked: Lesson[]; marked: Lesson[] } {
+  const unmarked: Lesson[] = [];
+  const marked: Lesson[] = [];
+  for (const lesson of lessons) {
+    if (lessonIsAttendanceMarked(lesson, attendances)) marked.push(lesson);
+    else unmarked.push(lesson);
+  }
+  return { unmarked, marked };
+}
+
 export function groupLessonsByAppDate(lessons: Lesson[]): {
   dateKey: string;
   lessons: Lesson[];

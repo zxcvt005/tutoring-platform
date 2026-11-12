@@ -18,6 +18,7 @@ import {
 } from "@/lib/teacher-slot";
 import { normalizeGrade } from "@/lib/student-contacts";
 import { restoredTestStatus } from "@/lib/tests/archive";
+import { normalizeOptionalDescription } from "@/lib/tests/optional-description";
 import { computeMaxScore, questionHasBody } from "@/lib/tests/helpers";
 import type {
   AttendanceStatus,
@@ -748,25 +749,21 @@ async function writeAttendanceRow(
       and(eq(attendances.lessonId, lessonId), eq(attendances.studentId, studentId))
     )
     .limit(1);
-  if (existing) {
-    await db
-      .update(attendances)
-      .set({ status, updatedAt: new Date() })
-      .where(
-        and(
-          eq(attendances.lessonId, lessonId),
-          eq(attendances.studentId, studentId)
-        )
-      );
-    return { previous: existing.status as AttendanceStatus };
-  }
-  await db.insert(attendances).values({
-    lessonId,
-    studentId,
-    status,
-    updatedAt: new Date(),
-  });
-  return { previous: null };
+  await db
+    .insert(attendances)
+    .values({
+      lessonId,
+      studentId,
+      status,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [attendances.lessonId, attendances.studentId],
+      set: { status, updatedAt: new Date() },
+    });
+  return {
+    previous: (existing?.status as AttendanceStatus | undefined) ?? null,
+  };
 }
 
 async function maybeMarkLessonDone(db: AppDb, lessonId: string): Promise<boolean> {
@@ -1123,25 +1120,41 @@ export async function setAttendance(
   );
 
   const debiting = attendanceDebitsLesson(status);
-  let previous: AttendanceStatus | null | undefined;
-  let balance: Awaited<ReturnType<typeof applyAttendanceBalance>> = null;
-  if (debiting) {
-    balance = await applyAttendanceBalance(db, ctx, {
+  // Сериализуем списание и запись статуса для пары урок+ученик,
+  // чтобы параллельные разные статусы не расходились с журналом.
+  const lockKey = `attendance:${lessonId}:${studentId}`;
+  const { previous, balance } = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${lockKey}))`);
+    const txDb = tx as unknown as AppDb;
+    if (debiting) {
+      const nextBalance = await applyAttendanceBalance(txDb, ctx, {
+        lessonId,
+        studentId,
+        attendanceStatus: status,
+        lessonCancelled: false,
+      });
+      const written = await writeAttendanceRow(
+        txDb,
+        lessonId,
+        studentId,
+        status
+      );
+      return { previous: written.previous, balance: nextBalance };
+    }
+    const written = await writeAttendanceRow(
+      txDb,
+      lessonId,
+      studentId,
+      status
+    );
+    const nextBalance = await applyAttendanceBalance(txDb, ctx, {
       lessonId,
       studentId,
       attendanceStatus: status,
       lessonCancelled: false,
     });
-    ({ previous } = await writeAttendanceRow(db, lessonId, studentId, status));
-  } else {
-    ({ previous } = await writeAttendanceRow(db, lessonId, studentId, status));
-    balance = await applyAttendanceBalance(db, ctx, {
-      lessonId,
-      studentId,
-      attendanceStatus: status,
-      lessonCancelled: false,
-    });
-  }
+    return { previous: written.previous, balance: nextBalance };
+  });
   const becameDone = await maybeMarkLessonDone(db, lessonId);
   if (previous !== status) {
     await emitAttendanceSaved(db, lesson, studentId, status);
@@ -1647,6 +1660,24 @@ export async function reorderTopics(
   return { ok: true };
 }
 
+/**
+ * Папка теста — единственное место в каталоге.
+ * sectionId остаётся legacy-колонкой и не выбирает папку:
+ * пустой раздел не затирает уже сохранённый folderId.
+ */
+function resolveHomeworkFolderId(
+  hw: { folderId?: string | null; sectionId?: string | null },
+  existing: { folderId: string | null } | undefined,
+  libraryScope: LibraryScope,
+  purpose: string
+): string | null {
+  if (libraryScope === "school") return null;
+  if (purpose !== "homework") return existing?.folderId ?? null;
+  if (hw.folderId !== undefined) return hw.folderId ?? null;
+  if (hw.sectionId) return hw.sectionId;
+  return existing?.folderId ?? null;
+}
+
 export async function upsertHomework(
   db: AppDb,
   ctx: AuthContext,
@@ -1664,12 +1695,11 @@ export async function upsertHomework(
     : [];
   const owner = await resolveLibraryOwner(db, ctx, hw, existing);
   const purpose = hw.purpose ?? existing?.purpose ?? "homework";
-  let folderId =
-    owner.libraryScope === "school"
-      ? null
-      : ((hw as { folderId?: string | null }).folderId !== undefined
-          ? (hw as { folderId?: string | null }).folderId ?? null
-          : hw.sectionId ?? existing?.folderId ?? null);
+  const folderId = resolveHomeworkFolderId(hw, existing, owner.libraryScope, purpose);
+  const description =
+    hw.description === undefined
+      ? (existing?.description ?? null)
+      : normalizeOptionalDescription(hw.description);
   if (owner.libraryScope === "teacher" && purpose === "homework" && folderId) {
     const [folder] = await db
       .select()
@@ -1711,7 +1741,7 @@ export async function upsertHomework(
     teacherId: owner.teacherId,
     libraryScope: owner.libraryScope,
     title: hw.title,
-    description: hw.description ?? null,
+    description,
     status: hw.status,
     purpose,
     maxScore: num(maxScore),

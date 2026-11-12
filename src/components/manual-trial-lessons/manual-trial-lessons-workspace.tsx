@@ -11,6 +11,8 @@ import {
 import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { ExpandableTableRow } from "@/components/direkciya/expandable-table-row";
+import { InlineMultilineCell } from "@/components/direkciya/inline-multiline-cell";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -46,6 +48,7 @@ import {
   computeManualTrialSumRub,
   formatManualTrialSumRub,
 } from "@/lib/manual-trial-lessons";
+import { useExpandedTableRow } from "@/lib/hooks/use-expanded-table-row";
 import { apiPlatform, HttpStatusError } from "@/lib/store/api-client";
 import { cn } from "@/lib/utils";
 
@@ -121,6 +124,7 @@ export function ManualTrialLessonsWorkspace() {
   );
   const [deleting, setDeleting] = useState(false);
   const [, startTransition] = useTransition();
+  const { isExpanded, toggleExpanded, expand } = useExpandedTableRow();
 
   const rowsRef = useRef(rows);
   const saveGenRef = useRef(new Map<string, number>());
@@ -294,7 +298,7 @@ export function ManualTrialLessonsWorkspace() {
   function onTextChange(
     id: string,
     field: "name" | "contact" | "comment",
-    e: ChangeEvent<HTMLInputElement>
+    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) {
     const value = e.target.value;
     applyLocal(id, { [field]: value });
@@ -438,7 +442,11 @@ export function ManualTrialLessonsWorkspace() {
                   row.ratePerHourRub
                 );
                 return (
-                  <TableRow key={row.id} className="h-9">
+                  <ExpandableTableRow
+                    key={row.id}
+                    expanded={isExpanded(row.id)}
+                    onToggle={() => toggleExpanded(row.id)}
+                  >
                     <TableCell className="p-1.5">
                       <Input
                         type="date"
@@ -599,14 +607,18 @@ export function ManualTrialLessonsWorkspace() {
                     <TableCell className="p-1.5 tabular-nums text-muted-foreground">
                       {formatManualTrialSumRub(sum) || "—"}
                     </TableCell>
-                    <TableCell className="max-w-[16rem] p-1.5 whitespace-normal">
-                      <Input
+                    <TableCell className="max-w-[16rem] align-top p-1.5 whitespace-normal">
+                      <InlineMultilineCell
                         value={row.comment}
                         placeholder="Комментарий"
-                        className="h-7 border-transparent bg-transparent px-1 shadow-none focus-visible:border-input focus-visible:bg-background"
-                        onChange={(e) => onTextChange(row.id, "comment", e)}
-                        onBlur={(e) =>
-                          queueSave(row.id, { comment: e.target.value }, true)
+                        expanded={isExpanded(row.id)}
+                        onFocusRow={() => expand(row.id)}
+                        onChange={(value) => {
+                          applyLocal(row.id, { comment: value });
+                          queueSave(row.id, { comment: value });
+                        }}
+                        onBlur={(value) =>
+                          queueSave(row.id, { comment: value }, true)
                         }
                       />
                     </TableCell>
@@ -622,7 +634,7 @@ export function ManualTrialLessonsWorkspace() {
                         <Trash2 className="size-3.5" />
                       </Button>
                     </TableCell>
-                  </TableRow>
+                  </ExpandableTableRow>
                 );
               })}
             </TableBody>

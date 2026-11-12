@@ -11,6 +11,8 @@ import {
 import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { ExpandableTableRow } from "@/components/direkciya/expandable-table-row";
+import { InlineMultilineCell } from "@/components/direkciya/inline-multiline-cell";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -48,6 +50,7 @@ import {
   type BaseLeadStatus,
   formatBaseLeadDateDisplay,
 } from "@/lib/base-leads";
+import { useExpandedTableRow } from "@/lib/hooks/use-expanded-table-row";
 import { apiPlatform, HttpStatusError } from "@/lib/store/api-client";
 import { cn } from "@/lib/utils";
 
@@ -100,6 +103,7 @@ export function BaseLeadsWorkspace() {
   const [deleteTarget, setDeleteTarget] = useState<BaseLead | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [, startTransition] = useTransition();
+  const { isExpanded, toggleExpanded, expand } = useExpandedTableRow();
 
   const rowsRef = useRef(rows);
   const saveGenRef = useRef(new Map<string, number>());
@@ -366,7 +370,11 @@ export function BaseLeadsWorkspace() {
             </TableHeader>
             <TableBody>
               {rows.map((row) => (
-                <TableRow key={row.id} className="h-9">
+                <ExpandableTableRow
+                  key={row.id}
+                  expanded={isExpanded(row.id)}
+                  onToggle={() => toggleExpanded(row.id)}
+                >
                   <TableCell className="p-1.5">
                     <Input
                       type="date"
@@ -519,14 +527,18 @@ export function BaseLeadsWorkspace() {
                       />
                     </TableCell>
                   ))}
-                  <TableCell className="max-w-[16rem] p-1.5 whitespace-normal">
-                    <Input
+                  <TableCell className="max-w-[16rem] align-top p-1.5 whitespace-normal">
+                    <InlineMultilineCell
                       value={row.comment}
                       placeholder="Комментарий"
-                      className="h-7 border-transparent bg-transparent px-1 shadow-none focus-visible:border-input focus-visible:bg-background"
-                      onChange={(e) => onTextChange(row.id, "comment", e)}
-                      onBlur={(e) =>
-                        onTextBlur(row.id, "comment", e.target.value)
+                      expanded={isExpanded(row.id)}
+                      onFocusRow={() => expand(row.id)}
+                      onChange={(value) => {
+                        applyLocal(row.id, { comment: value });
+                        queueSave(row.id, { comment: value });
+                      }}
+                      onBlur={(value) =>
+                        onTextBlur(row.id, "comment", value)
                       }
                     />
                   </TableCell>
@@ -553,7 +565,7 @@ export function BaseLeadsWorkspace() {
                       <Trash2 className="size-3.5" />
                     </Button>
                   </TableCell>
-                </TableRow>
+                </ExpandableTableRow>
               ))}
             </TableBody>
           </Table>

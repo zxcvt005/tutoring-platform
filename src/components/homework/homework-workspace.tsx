@@ -194,7 +194,6 @@ export function HomeworkWorkspace() {
               }
               items={section.items}
               homeworks={data.homeworks}
-              sections={data.topicSections}
               locked={learning.locked}
             />
           ))}
@@ -212,7 +211,6 @@ function HomeworkSection({
   onToggle,
   items,
   homeworks,
-  sections,
   locked,
 }: {
   title: string;
@@ -221,8 +219,7 @@ function HomeworkSection({
   open: boolean;
   onToggle: () => void;
   items: HomeworkAssignment[];
-  homeworks: { id: string; title: string; sectionId?: string | null }[];
-  sections: { id: string; title: string }[];
+  homeworks: { id: string; title: string; description?: string | null }[];
   locked: boolean;
 }) {
   return (
@@ -270,7 +267,6 @@ function HomeworkSection({
                   assignment={assignment}
                   tone={tone}
                   homeworks={homeworks}
-                  sections={sections}
                   locked={locked}
                 />
               ))}
@@ -286,19 +282,18 @@ function HomeworkRow({
   assignment,
   tone,
   homeworks,
-  sections,
   locked,
 }: {
   assignment: HomeworkAssignment;
   tone: HomeworkBoardKey;
-  homeworks: { id: string; title: string; sectionId?: string | null }[];
-  sections: { id: string; title: string }[];
+  homeworks: { id: string; title: string; description?: string | null }[];
   locked: boolean;
 }) {
   const href = useStudentCabinetHref();
   const hw = homeworks.find((item) => item.id === assignment.homeworkId);
   const title = assignment.testSnapshot?.title || hw?.title || "Тест";
-  const section = sections.find((item) => item.id === hw?.sectionId);
+  const description =
+    assignment.testSnapshot?.description?.trim() || hw?.description?.trim() || "";
   const allowOpen = !locked || isHomeworkHistoryView(assignment.status);
   const action = tone === "completed" ? "Посмотреть" : "Перейти";
   const meta =
@@ -325,10 +320,14 @@ function HomeworkRow({
         <p className="truncate font-display text-base font-semibold tracking-tight">
           {title}
         </p>
-        <p className="truncate text-sm text-muted-foreground">
-          {section?.title ?? "Без раздела"}
-          {locked && !allowOpen ? " · недоступно до продления тарифа" : ""}
-        </p>
+        {description || (locked && !allowOpen) ? (
+          <p className="truncate text-sm text-muted-foreground">
+            {description}
+            {locked && !allowOpen
+              ? `${description ? " · " : ""}недоступно до продления тарифа`
+              : ""}
+          </p>
+        ) : null}
       </div>
       <div className="flex flex-wrap items-center gap-2 sm:justify-end">
         {meta}

@@ -19,6 +19,15 @@ export type RnpAvitoDayStats = {
   apiSyncedAt: string | null;
 };
 
+/** Безопасная диагностика Avito env: только флаги, без секретов. */
+export type AvitoEnvStatus = {
+  hasClientId: boolean;
+  hasClientSecret: boolean;
+  hasUserId: boolean;
+  userIdIsNumeric: boolean;
+  missingKeys: string[];
+};
+
 export type RnpAvitoMonthPayload = {
   year: number;
   month: number;
@@ -27,6 +36,8 @@ export type RnpAvitoMonthPayload = {
   days: RnpAvitoDayStats[];
   /** Заданы ли AVITO_* переменные на сервере */
   apiConnected: boolean;
+  /** Какие ключи видны процессу (без значений) */
+  avitoEnv: AvitoEnvStatus;
   /** ISO последней успешной синхронизации API-полей за месяц (max apiSyncedAt) */
   lastSyncedAt: string | null;
 };

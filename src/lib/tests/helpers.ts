@@ -120,7 +120,7 @@ export function snapshotFromHomework(hw: Homework): TestSnapshot {
   const questions = structuredClone(hw.questions ?? []);
   return {
     title: hw.title,
-    description: hw.description,
+    description: hw.description || undefined,
     questions,
     maxScore: computeMaxScore(questions) || hw.maxScore || 0,
   };

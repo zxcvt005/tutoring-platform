@@ -14,7 +14,7 @@ import {
   fetchAvitoSpendings,
   type AvitoClientDeps,
 } from "@/server/avito/client";
-import { isAvitoConfigured, requireAvitoEnv } from "@/server/avito/env";
+import { diagnoseAvitoEnv, requireAvitoEnv } from "@/server/avito/env";
 import {
   mergeAvitoDayMetrics,
   parseItemStatsByDay,
@@ -153,12 +153,20 @@ export async function getRnpAvitoMonth(
     }
   }
 
+  const diagnosis = diagnoseAvitoEnv();
   return {
     year,
     month,
     daysInMonth: days.length,
     days,
-    apiConnected: isAvitoConfigured(),
+    apiConnected: diagnosis.configured,
+    avitoEnv: {
+      hasClientId: diagnosis.hasClientId,
+      hasClientSecret: diagnosis.hasClientSecret,
+      hasUserId: diagnosis.hasUserId,
+      userIdIsNumeric: diagnosis.userIdIsNumeric,
+      missingKeys: diagnosis.missingKeys,
+    },
     lastSyncedAt,
   };
 }

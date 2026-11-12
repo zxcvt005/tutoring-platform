@@ -90,14 +90,20 @@ export type Homework = {
   id: string;
   /** Тема, если тест создан из карточки темы; иначе каталог «Тесты». */
   topicId?: string | null;
+  /**
+   * Устаревшая связь с разделом программы. Тесты по папкам не группируются:
+   * место в каталоге задаёт только folderId.
+   */
   sectionId?: string | null;
+  /** Папка каталога. null — корень пространства, не «раздел». */
   folderId?: string | null;
   teacherId: string;
   libraryScope?: LibraryScope;
   origin?: MaterialOrigin | null;
   updatedAt?: string;
   title: string;
-  description?: string;
+  /** null и пустая строка — описание не задано. */
+  description?: string | null;
   status: HomeworkTemplateStatus;
   questions: TestQuestion[];
   /** Сумма maxScore вопросов (кэш; пересчитывается при сохранении) */
