@@ -52,7 +52,7 @@ export function LandingHeader() {
         </Link>
 
         <nav
-          className="mx-auto hidden min-w-0 items-center gap-1 lg:flex"
+          className="mx-auto hidden min-w-0 max-w-full flex-1 items-center justify-center gap-0.5 overflow-x-auto xl:flex 2xl:gap-1"
           aria-label="Разделы страницы"
         >
           {landingNav.map((item) => {
@@ -64,7 +64,7 @@ export function LandingHeader() {
                 href={item.href}
                 aria-current={active ? "true" : undefined}
                 className={cn(
-                  "rounded-xl px-2.5 py-1.5 text-sm transition-colors",
+                  "shrink-0 rounded-xl px-2 py-1.5 text-[13px] whitespace-nowrap transition-colors 2xl:px-2.5 2xl:text-sm",
                   active
                     ? "bg-pastel-blue font-medium text-foreground"
                     : "text-foreground/70 hover:bg-pastel-blue/70 hover:text-foreground"
@@ -77,7 +77,7 @@ export function LandingHeader() {
           })}
         </nav>
 
-        <div className="ml-auto flex items-center gap-2 lg:ml-0">
+        <div className="ml-auto flex items-center gap-2 xl:ml-0">
           <Button
             nativeButton={false}
             variant="ghost"
@@ -93,7 +93,7 @@ export function LandingHeader() {
               type="button"
               variant="outline"
               size="icon"
-              className="rounded-xl border-black/10 bg-white/50 backdrop-blur-md lg:hidden"
+              className="rounded-xl border-black/10 bg-white/50 backdrop-blur-md xl:hidden"
               aria-label="Открыть меню"
               onClick={() => setOpen(true)}
             >

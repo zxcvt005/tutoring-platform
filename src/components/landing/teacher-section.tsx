@@ -44,9 +44,11 @@ export function TeacherSection() {
                   {teacher.name}
                 </h3>
               </div>
-              <ul className="flex flex-col gap-1.5 text-sm leading-relaxed text-foreground/70">
+              <ul className="flex flex-col gap-1.5 text-sm leading-snug text-pretty text-foreground/70 sm:leading-relaxed">
                 {teacher.points.map((point) => (
-                  <li key={point}>{point}</li>
+                  <li key={point} className="min-w-0 break-words">
+                    {point}
+                  </li>
                 ))}
               </ul>
               <p className="mt-auto pt-2 text-sm leading-relaxed text-foreground">

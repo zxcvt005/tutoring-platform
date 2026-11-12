@@ -23,6 +23,7 @@ import { StudentTourPathProvider } from "@/lib/student-tour/paths";
 import { StudentTourProvider } from "@/lib/student-tour/provider";
 import { cn } from "@/lib/utils";
 
+/** Логический размер кабинета до scale; внешний viewport держит тот же aspect-ratio. */
 const FRAME_WIDTH = 1280;
 const FRAME_HEIGHT = 800;
 
@@ -96,11 +97,12 @@ export function EmbeddedStudentCabinet() {
     const viewport = viewportRef.current;
     if (!viewport) return;
 
+    // Scale только от ширины: высота карточки задаётся aspect-ratio = FRAME.
+    // transform не влияет на layout — поэтому высота не vh, а доля ширины.
     const update = () => {
       const width = viewport.clientWidth;
-      const height = viewport.clientHeight;
-      if (width < 40 || height < 40) return;
-      setScale(Math.min(width / FRAME_WIDTH, height / FRAME_HEIGHT));
+      if (width < 40) return;
+      setScale(width / FRAME_WIDTH);
     };
 
     update();
@@ -193,11 +195,12 @@ export function EmbeddedStudentCabinet() {
     <div className="flex min-w-0 flex-col gap-3">
       <div
         ref={viewportRef}
-        className="landing-surface relative h-[min(68vh,42rem)] w-full overflow-hidden sm:h-[min(72vh,46rem)]"
+        className="landing-surface relative w-full overflow-hidden"
+        style={{ aspectRatio: `${FRAME_WIDTH} / ${FRAME_HEIGHT}` }}
       >
         <div
           ref={shellRef}
-          className="relative origin-top-left overflow-hidden bg-transparent"
+          className="absolute top-0 left-0 origin-top-left overflow-hidden bg-transparent"
           style={
             {
               width: FRAME_WIDTH,
@@ -314,4 +317,3 @@ function TourCursor({
     </div>
   );
 }
-

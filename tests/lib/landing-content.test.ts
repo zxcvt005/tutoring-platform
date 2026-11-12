@@ -8,6 +8,7 @@ import {
   landingGuarantees,
   landingHero,
   landingMeta,
+  landingNav,
   landingTeachers,
 } from "@/lib/landing/content";
 import {
@@ -60,10 +61,29 @@ describe("landing content", () => {
       "georgy",
       "anya",
     ]);
+    expect(landingTeachers[0]?.points).toEqual([
+      "Личный результат ЕГЭ — 100 баллов",
+      "Готовит к экзаменам больше 5 лет, из них последние 3 года — только старшие школьники",
+      "100+ подготовленных учеников",
+      "Умеет выстраивать приятную атмосферу на занятиях",
+    ]);
     expect(landingAverageScore).toBe(82);
     expect(landingScoreCount()).toBe(52);
     expect(landingScoreYears.map((item) => item.year)).toEqual([
       2023, 2024, 2025, 2026,
+    ]);
+  });
+
+  it("exposes decision-oriented landing nav anchors", () => {
+    expect(landingNav.map((item) => item.href)).toEqual([
+      "#product",
+      "#method",
+      "#platform",
+      "#teachers",
+      "#results",
+      "#guarantees",
+      "#faq",
+      "#apply",
     ]);
   });
 

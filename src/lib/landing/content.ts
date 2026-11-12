@@ -20,11 +20,21 @@ export type LandingTeacher = {
   blurb: string;
 };
 
+/**
+ * Навигация по смысловым якорям (не по каждой мелкой секции):
+ * product ← product+audience+system; method; platform;
+ * teachers; results ← results+environment; guarantees; faq; apply.
+ * parents/bonuses/compare — без отдельных пунктов.
+ */
 export const landingNav = [
-  { href: "#method", label: "Подготовка" },
+  { href: "#product", label: "Подход" },
+  { href: "#method", label: "Формат" },
   { href: "#platform", label: "Платформа" },
-  { href: "#teachers", label: "Преподаватели" },
+  { href: "#teachers", label: "Команда" },
+  { href: "#results", label: "Результаты" },
+  { href: "#guarantees", label: "Гарантии" },
   { href: "#faq", label: "Вопросы" },
+  { href: "#apply", label: "Запись" },
 ] as const;
 
 export const landingMeta = {
@@ -358,8 +368,8 @@ export const landingTeachers: LandingTeacher[] = [
     photoAlt: "Анатолий — основатель «Неодин»",
     points: [
       "Личный результат ЕГЭ — 100 баллов",
-      "Более 3 лет только с ребятами ЕГЭ",
-      "Более 60 подготовленных учеников",
+      "Готовит к экзаменам больше 5 лет, из них последние 3 года — только старшие школьники",
+      "100+ подготовленных учеников",
       "Умеет выстраивать приятную атмосферу на занятиях",
     ],
     blurb:
