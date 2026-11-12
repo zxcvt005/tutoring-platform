@@ -45,6 +45,7 @@ import {
 import { showSidebarCabinetChrome } from "@/lib/cabinet-shell-classes";
 import { countUnassignedActiveStudents } from "@/lib/students/unassigned";
 import { useDemoStore } from "@/lib/store/demo-store";
+import { useStudentTour, useStudentTourPathname } from "@/lib/student-tour/paths";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -137,6 +138,11 @@ function withNavBase(href: string, navBasePath?: string): string {
   return `${navBasePath}${href.slice("/auditoria".length)}` || navBasePath;
 }
 
+function tourNavKey(auditoriaHref: string): string {
+  if (auditoriaHref === "/auditoria") return "home";
+  return auditoriaHref.replace(/^\/auditoria\//, "").replace(/\//g, "-");
+}
+
 function NavLinks({
   items,
   role,
@@ -152,7 +158,11 @@ function NavLinks({
   navBasePath?: string;
   collapsed?: boolean;
 }) {
-  const pathname = usePathname();
+  const nextPathname = usePathname();
+  const tour = useStudentTour();
+  const tourPathname = useStudentTourPathname();
+  const pathname =
+    tour.active && tour.mode === "embedded" ? tourPathname : nextPathname;
   const homeHref =
     role === "direkciya"
       ? "/direkciya"
@@ -185,6 +195,7 @@ function NavLinks({
         const link = (
           <Link
             href={href}
+            data-tour-nav={auditoria ? tourNavKey(item.href) : undefined}
             aria-label={collapsed ? item.label : undefined}
             title={collapsed ? item.label : undefined}
             className={cn(

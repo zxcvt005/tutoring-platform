@@ -26,7 +26,7 @@ export function LandingHero({ formulaCount }: { formulaCount: number }) {
                 {landingHero.titleRest}
               </span>
             </h1>
-            <p className="mt-6 max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg">
+            <p className="mt-6 max-w-xl text-base leading-relaxed text-foreground/70 sm:text-lg">
               {landingHero.lead}
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -34,19 +34,19 @@ export function LandingHero({ formulaCount }: { formulaCount: number }) {
               <Button
                 nativeButton={false}
                 variant="outline"
-                className="h-10 rounded-xl px-4"
+                className="h-10 rounded-xl border-black/10 bg-auditoria-surface px-4"
                 render={<a href={landingHero.secondaryHref} />}
               >
                 {landingHero.secondaryCta}
               </Button>
             </div>
-            <p className="mt-4 max-w-xl text-sm leading-relaxed text-muted-foreground">
+            <p className="mt-4 max-w-xl text-sm leading-relaxed text-foreground/70">
               {landingHero.footnote}
             </p>
           </div>
 
           <div className="min-w-0">
-            <p className="text-xs font-semibold tracking-[0.16em] text-muted-foreground uppercase">
+            <p className="text-xs font-semibold tracking-[0.16em] text-foreground/55 uppercase">
               Кабинет ученика
             </p>
             <div className="auditoria-home-card mt-3">
@@ -55,7 +55,7 @@ export function LandingHero({ formulaCount }: { formulaCount: number }) {
                 totalCount={50}
                 embedded
               />
-              <p className="mt-5 border-t border-black/10 pt-4 text-sm leading-relaxed text-muted-foreground">
+              <p className="mt-5 border-t border-black/10 pt-4 text-sm leading-relaxed text-foreground/70">
                 {`Тренажёр формул: в каталоге ${formulaCountPhrase(formulaCount)}.`}
               </p>
             </div>

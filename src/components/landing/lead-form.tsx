@@ -94,7 +94,7 @@ export function LeadForm() {
   if (done) {
     return (
       <div
-        className="panel-soft surface-sand px-4 py-5 text-sm leading-relaxed text-foreground"
+        className="landing-surface surface-sand px-4 py-5 text-sm leading-relaxed text-foreground"
         role="status"
       >
         <p className="font-display text-xl font-semibold tracking-tight">
@@ -150,7 +150,7 @@ export function LeadForm() {
                 setSubmitError(null);
               }}
               aria-invalid={Boolean(errors.gradeId)}
-              className="h-10 rounded-xl border border-input bg-transparent px-3 text-sm"
+              className="h-10 rounded-xl border border-black/10 bg-auditoria-surface px-3 text-sm"
             >
               <option value="">Выберите класс</option>
               {LANDING_GRADES.map((grade) => (

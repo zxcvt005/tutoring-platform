@@ -103,7 +103,7 @@ function LightboxStep({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground hover:bg-muted"
+      className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl border border-black/10 bg-auditoria-surface text-foreground hover:bg-pastel-blue/70"
     >
       {children}
     </button>

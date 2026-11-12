@@ -35,22 +35,22 @@ export function LandingSection({
   contentClassName?: string;
 }) {
   return (
-    <section id={id} className={cn("scroll-mt-24 py-16 sm:py-24", className)}>
+    <section id={id} className={cn("scroll-mt-28 py-14 sm:py-20", className)}>
       <LandingContainer className={contentClassName}>
         {title || eyebrow || description ? (
-          <header className="mb-8 max-w-3xl sm:mb-12">
+          <header className="mb-6 max-w-3xl sm:mb-8">
             {eyebrow ? (
-              <p className="text-xs font-semibold tracking-[0.16em] text-muted-foreground uppercase">
+              <p className="text-xs font-semibold tracking-[0.16em] text-foreground/55 uppercase">
                 {eyebrow}
               </p>
             ) : null}
             {title ? (
-              <h2 className="font-display mt-3 text-3xl leading-[1.15] font-semibold tracking-[-0.03em] text-foreground sm:text-4xl">
+              <h2 className="font-display mt-2 text-3xl leading-[1.15] font-semibold tracking-[-0.03em] text-foreground sm:text-4xl">
                 {title}
               </h2>
             ) : null}
             {description ? (
-              <p className="mt-4 max-w-2xl text-base leading-relaxed text-muted-foreground">
+              <p className="mt-3 max-w-2xl text-base leading-relaxed text-foreground/70">
                 {description}
               </p>
             ) : null}

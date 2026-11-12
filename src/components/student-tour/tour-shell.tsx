@@ -31,44 +31,75 @@ import { cn } from "@/lib/utils";
  * Оболочка Аудитории для публичного демо.
  * Без чата, заметок и impersonation — только локальный store.
  */
-export function StudentTourShell({ children }: { children: ReactNode }) {
+export function StudentTourShell({
+  children,
+  variant = "page",
+}: {
+  children: ReactNode;
+  variant?: "page" | "embedded";
+}) {
   const { ready } = useDemoStore();
   const [open, setOpen] = useState(false);
+  const embedded = variant === "embedded";
 
   return (
     <AuditoriaBackgroundProvider>
-      <div className="flex min-h-full flex-1 flex-col bg-background">
-        <StudentTourBanner />
-        <div className="relative flex min-h-0 flex-1 overflow-x-hidden">
+      <div
+        className={cn(
+          "flex flex-1 flex-col bg-background",
+          embedded ? "h-full min-h-0 overflow-hidden" : "min-h-full"
+        )}
+        data-student-tour-shell={variant}
+      >
+        {embedded ? null : <StudentTourBanner />}
+        <div
+          className={cn(
+            "relative flex min-h-0 flex-1 overflow-x-hidden",
+            embedded && "h-full"
+          )}
+        >
           <AuditoriaBackgroundLayer />
-          <aside className={cabinetAsideClassName("auditoria")}>
+          <aside
+            className={cn(
+              cabinetAsideClassName("auditoria"),
+              embedded && "!flex sticky top-0 !h-full self-stretch"
+            )}
+          >
             <div className={cabinetAsidePanelClassName("auditoria")}>
               <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
                 <AppSidebar
                   role="auditoria"
                   navBasePath={STUDENT_TOUR_BASE_PATH}
-                  logoutLabel="На сайт"
+                  logoutLabel={embedded ? "На лендинг" : "На сайт"}
                 />
               </div>
             </div>
           </aside>
 
-          <div className="relative z-10 flex min-w-0 flex-1 flex-col">
+          <div className="relative z-10 flex min-h-0 min-w-0 flex-1 flex-col">
             <header
               data-cabinet-header=""
-              className="relative z-20 flex items-center gap-3 border-b border-border/80 px-4 py-3 md:absolute md:top-3 md:right-3 md:z-30 md:border-0 md:bg-transparent md:p-0"
+              className={cn(
+                "relative z-20 flex items-center gap-3 border-b border-border/80 px-4 py-3 md:absolute md:top-3 md:right-3 md:z-30 md:border-0 md:bg-transparent md:p-0",
+                embedded && "md:top-3 md:right-3"
+              )}
             >
               <Button
                 type="button"
                 size="icon-sm"
                 variant="outline"
-                className="md:hidden"
+                className={cn(embedded ? "hidden" : "md:hidden")}
                 onClick={() => setOpen(true)}
                 aria-label="Открыть меню"
               >
                 <Menu />
               </Button>
-              <span className="min-w-0 flex-1 truncate font-display text-base font-semibold tracking-tight md:hidden">
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate font-display text-base font-semibold tracking-tight",
+                  embedded ? "hidden" : "md:hidden"
+                )}
+              >
                 Аудитория · демо
               </span>
               <div className="ml-auto">
@@ -76,24 +107,34 @@ export function StudentTourShell({ children }: { children: ReactNode }) {
               </div>
             </header>
 
-            <Sheet open={open} onOpenChange={setOpen}>
-              <SheetContent
-                side="left"
-                className={cn("w-72 p-0", cabinetMobileSheetClassName("auditoria"))}
-              >
-                <SheetHeader className="sr-only">
-                  <SheetTitle>Меню демо-кабинета</SheetTitle>
-                </SheetHeader>
-                <AppSidebar
-                  role="auditoria"
-                  navBasePath={STUDENT_TOUR_BASE_PATH}
-                  logoutLabel="На сайт"
-                  onNavigate={() => setOpen(false)}
-                />
-              </SheetContent>
-            </Sheet>
+            {embedded ? null : (
+              <Sheet open={open} onOpenChange={setOpen}>
+                <SheetContent
+                  side="left"
+                  className={cn(
+                    "w-72 p-0",
+                    cabinetMobileSheetClassName("auditoria")
+                  )}
+                >
+                  <SheetHeader className="sr-only">
+                    <SheetTitle>Меню демо-кабинета</SheetTitle>
+                  </SheetHeader>
+                  <AppSidebar
+                    role="auditoria"
+                    navBasePath={STUDENT_TOUR_BASE_PATH}
+                    logoutLabel="На сайт"
+                    onNavigate={() => setOpen(false)}
+                  />
+                </SheetContent>
+              </Sheet>
+            )}
 
-            <main className="relative z-10 flex-1 overflow-x-hidden pt-3 pb-24 pl-4 pr-4 max-md:pr-16 max-md:pb-32 sm:pl-6 sm:pb-20 md:pr-16 md:pb-20 lg:pl-8">
+            <main
+              className={cn(
+                "relative z-10 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pt-3 pb-24 pl-4 pr-4 max-md:pr-16 max-md:pb-32 sm:pl-6 sm:pb-20 md:pr-16 md:pb-20 lg:pl-8",
+                embedded && "min-h-0 pb-10 max-md:pr-4 max-md:pb-10"
+              )}
+            >
               {!ready ? (
                 <p className="relative z-10 inline-flex rounded-xl border border-black/10 bg-auditoria-surface px-3 py-2 text-sm text-muted-foreground">
                   Загрузка демо…

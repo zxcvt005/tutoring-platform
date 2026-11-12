@@ -27,10 +27,12 @@ export function createFreshStudentTourState(): StoredStudentTour {
   };
 }
 
-export function readStudentTourState(): StoredStudentTour {
+export function readStudentTourState(
+  storageKey: string = STUDENT_TOUR_STORAGE_KEY
+): StoredStudentTour {
   if (!canUseStorage()) return createFreshStudentTourState();
   try {
-    const raw = localStorage.getItem(STUDENT_TOUR_STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey);
     if (!raw) return createFreshStudentTourState();
     const parsed = JSON.parse(raw) as Partial<StoredStudentTour>;
     if (
@@ -56,15 +58,20 @@ export function readStudentTourState(): StoredStudentTour {
 }
 
 /** Совместимость со старым API чтения только DemoData. */
-export function readStudentTourData(): DemoData {
-  return readStudentTourState().data;
+export function readStudentTourData(
+  storageKey: string = STUDENT_TOUR_STORAGE_KEY
+): DemoData {
+  return readStudentTourState(storageKey).data;
 }
 
-export function writeStudentTourState(state: StoredStudentTour): void {
+export function writeStudentTourState(
+  state: StoredStudentTour,
+  storageKey: string = STUDENT_TOUR_STORAGE_KEY
+): void {
   if (!canUseStorage()) return;
   try {
     localStorage.setItem(
-      STUDENT_TOUR_STORAGE_KEY,
+      storageKey,
       JSON.stringify({
         version: STUDENT_TOUR_STORAGE_VERSION,
         data: state.data,
@@ -76,15 +83,20 @@ export function writeStudentTourState(state: StoredStudentTour): void {
   }
 }
 
-export function writeStudentTourData(data: DemoData): void {
-  const current = readStudentTourState();
-  writeStudentTourState({ ...current, data });
+export function writeStudentTourData(
+  data: DemoData,
+  storageKey: string = STUDENT_TOUR_STORAGE_KEY
+): void {
+  const current = readStudentTourState(storageKey);
+  writeStudentTourState({ ...current, data }, storageKey);
 }
 
-export function clearStudentTourData(): void {
+export function clearStudentTourData(
+  storageKey: string = STUDENT_TOUR_STORAGE_KEY
+): void {
   if (!canUseStorage()) return;
   try {
-    localStorage.removeItem(STUDENT_TOUR_STORAGE_KEY);
+    localStorage.removeItem(storageKey);
   } catch {
     // ignore
   }

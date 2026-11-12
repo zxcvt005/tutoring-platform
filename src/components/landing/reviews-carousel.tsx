@@ -17,11 +17,11 @@ export function ReviewsCarousel({ reviews }: { reviews: readonly LandingReview[]
 
   if (count === 0) {
     return (
-      <div className="mt-16 border-t border-border pt-12">
+      <div className="mt-16 border-t border-black/10 pt-12">
         <h3 className="font-display text-3xl font-semibold tracking-tight">
           Отзывы учеников и родителей
         </h3>
-        <p className="mt-3 max-w-2xl text-base leading-relaxed text-muted-foreground">
+        <p className="mt-3 max-w-2xl text-base leading-relaxed text-foreground/70">
           Скриншоты отзывов появятся здесь, когда файлы будут добавлены.
         </p>
       </div>
@@ -40,11 +40,11 @@ export function ReviewsCarousel({ reviews }: { reviews: readonly LandingReview[]
   }
 
   return (
-    <div className="mt-16 border-t border-border pt-12">
+    <div className="mt-16 border-t border-black/10 pt-12">
       <h3 className="font-display text-3xl font-semibold tracking-tight">
         Отзывы учеников и родителей
       </h3>
-      <p className="mt-3 max-w-2xl text-base leading-relaxed text-muted-foreground">
+      <p className="mt-3 max-w-2xl text-base leading-relaxed text-foreground/70">
         Скриншоты переписок и отзывов. Текст на картинке не пересказывается.
       </p>
 
@@ -197,7 +197,7 @@ function CarouselButton({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="inline-flex size-10 items-center justify-center rounded-full border border-border bg-background hover:bg-muted"
+      className="inline-flex size-10 items-center justify-center rounded-xl border border-black/10 bg-auditoria-surface hover:bg-pastel-blue/70"
     >
       {children}
     </button>

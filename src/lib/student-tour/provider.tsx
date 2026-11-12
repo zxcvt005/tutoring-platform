@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  startTransition,
   useCallback,
   useEffect,
   useMemo,
@@ -16,6 +17,7 @@ import {
 } from "@/lib/store/demo-store";
 import { StudentTourExtrasContext } from "@/lib/student-tour/extras";
 import {
+  STUDENT_TOUR_STORAGE_KEY,
   STUDENT_TOUR_STORAGE_VERSION,
   STUDENT_TOUR_STUDENT_ID,
   STUDENT_TOUR_TEACHER_ID,
@@ -26,7 +28,10 @@ import {
   readStudentTourState,
   writeStudentTourState,
 } from "@/lib/student-tour/storage";
-import { StudentTourPathProvider } from "@/lib/student-tour/paths";
+import {
+  StudentTourPathProvider,
+  type StudentTourMode,
+} from "@/lib/student-tour/paths";
 import type {
   StudentTourExtras,
   StudentTourTrainerResult,
@@ -192,30 +197,48 @@ function markAssignmentCompleted(
   };
 }
 
-export function StudentTourProvider({ children }: { children: ReactNode }) {
+export function StudentTourProvider({
+  children,
+  mode = "page",
+  storageKey = STUDENT_TOUR_STORAGE_KEY,
+  onLogout,
+  wrapPathProvider = true,
+}: {
+  children: ReactNode;
+  mode?: StudentTourMode;
+  storageKey?: string;
+  onLogout?: () => void;
+  /** false — PathProvider снаружи (embedded-роутер на лендинге). */
+  wrapPathProvider?: boolean;
+}) {
   const router = useRouter();
   const [data, setData] = useState<DemoData>(TOUR_BOOTSTRAP_DATA);
   const [extras, setExtras] = useState<StudentTourExtras>(TOUR_BOOTSTRAP_EXTRAS);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    const stored = readStudentTourState();
-    setData(stored.data);
-    setExtras(stored.extras);
-    setHydrated(true);
-  }, []);
+    const stored = readStudentTourState(storageKey);
+    startTransition(() => {
+      setData(stored.data);
+      setExtras(stored.extras);
+      setHydrated(true);
+    });
+  }, [storageKey]);
 
   const persistAll = useCallback(
     (nextData: DemoData, nextExtras: StudentTourExtras) => {
       setData(nextData);
       setExtras(nextExtras);
-      writeStudentTourState({
-        version: STUDENT_TOUR_STORAGE_VERSION,
-        data: nextData,
-        extras: nextExtras,
-      });
+      writeStudentTourState(
+        {
+          version: STUDENT_TOUR_STORAGE_VERSION,
+          data: nextData,
+          extras: nextExtras,
+        },
+        storageKey
+      );
     },
-    []
+    [storageKey]
   );
 
   const persistData = useCallback(
@@ -260,10 +283,15 @@ export function StudentTourProvider({ children }: { children: ReactNode }) {
       demoLoginEnabled: false,
       reload: async () => undefined,
       logout: async () => {
-        clearStudentTourData();
+        clearStudentTourData(storageKey);
         const reset = createFreshStudentTourState();
         setData(reset.data);
         setExtras(reset.extras);
+        if (onLogout) {
+          onLogout();
+          return;
+        }
+        if (mode === "embedded") return;
         router.push("/");
       },
       setCurrentTeacherId: () => undefined,
@@ -352,20 +380,35 @@ export function StudentTourProvider({ children }: { children: ReactNode }) {
       setMockExamResult: async () => blocked(noopMsg),
       ...selectors(data),
     };
-  }, [data, hydrated, persistAll, persistData, router]);
+  }, [
+    data,
+    hydrated,
+    mode,
+    onLogout,
+    persistAll,
+    persistData,
+    router,
+    storageKey,
+  ]);
 
   const extrasApi = useMemo(
     () => ({ extras, recordTrainerResult }),
     [extras, recordTrainerResult]
   );
 
+  const tree = (
+    <StudentTourExtrasContext.Provider value={extrasApi}>
+      <DemoStoreContext.Provider value={value}>
+        {children}
+      </DemoStoreContext.Provider>
+    </StudentTourExtrasContext.Provider>
+  );
+
+  if (!wrapPathProvider) return tree;
+
   return (
-    <StudentTourPathProvider active>
-      <StudentTourExtrasContext.Provider value={extrasApi}>
-        <DemoStoreContext.Provider value={value}>
-          {children}
-        </DemoStoreContext.Provider>
-      </StudentTourExtrasContext.Provider>
+    <StudentTourPathProvider active mode={mode}>
+      {tree}
     </StudentTourPathProvider>
   );
 }

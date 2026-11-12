@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
@@ -11,7 +10,10 @@ import {
 } from "@/lib/format";
 import { getAssignmentTitle } from "@/lib/tests/helpers";
 import { useDemoStore } from "@/lib/store/demo-store";
-import { useStudentCabinetHref } from "@/lib/student-tour/paths";
+import {
+  useStudentCabinetHref,
+  useStudentTourParams,
+} from "@/lib/student-tour/paths";
 import { isHomeworkHistoryView } from "@/lib/learning-lock";
 import { cn } from "@/lib/utils";
 
@@ -20,7 +22,7 @@ import { cn } from "@/lib/utils";
  * Можно отметить задание выполненным локально.
  */
 export function StudentTourHomeworkDemoPanel() {
-  const params = useParams<{ id: string }>();
+  const params = useStudentTourParams<{ id: string }>();
   const id = params?.id ?? "";
   const { data, submitHomeworkAssignment } = useDemoStore();
   const href = useStudentCabinetHref();

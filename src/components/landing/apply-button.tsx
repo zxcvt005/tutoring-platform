@@ -27,7 +27,11 @@ export function ApplyButton({
       nativeButton={false}
       variant={variant}
       size={size}
-      className={cn("h-10 rounded-xl px-4", className)}
+      className={cn(
+        "h-10 rounded-xl px-4",
+        variant === "outline" && "border-black/10 bg-auditoria-surface",
+        className
+      )}
       render={<a href="#apply" />}
       onClick={(event) => {
         event.preventDefault();

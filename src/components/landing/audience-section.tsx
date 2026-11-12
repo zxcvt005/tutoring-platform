@@ -1,30 +1,33 @@
 import { LandingSection } from "@/components/landing/landing-section";
 import { landingAudience } from "@/lib/landing/content";
+import { landingSurfacePadClass } from "@/lib/landing/ui";
+import { cn } from "@/lib/utils";
 
 export function AudienceSection() {
   return (
     <LandingSection
       id="audience"
-      className="bg-muted/40"
       eyebrow={landingAudience.eyebrow}
       title={landingAudience.title}
     >
       <div className="grid gap-4 lg:grid-cols-2">
-        <article className="panel px-6 py-7">
+        <article className={landingSurfacePadClass}>
           <h3 className="font-display text-2xl font-semibold tracking-tight">
             {landingAudience.parents.title}
           </h3>
-          <ul className="mt-4 flex flex-col gap-3 text-base leading-relaxed text-muted-foreground">
+          <ul className="mt-4 flex flex-col gap-3 text-base leading-relaxed text-foreground/70">
             {landingAudience.parents.items.map((item) => (
               <li key={item}>{item}</li>
             ))}
           </ul>
         </article>
-        <article className="panel-soft surface-sky px-6 py-7">
+        <article
+          className={cn(landingSurfacePadClass, "bg-pastel-blue/55")}
+        >
           <h3 className="font-display text-2xl font-semibold tracking-tight">
             {landingAudience.students.title}
           </h3>
-          <ul className="mt-4 flex flex-col gap-3 text-base leading-relaxed text-muted-foreground">
+          <ul className="mt-4 flex flex-col gap-3 text-base leading-relaxed text-foreground/70">
             {landingAudience.students.items.map((item) => (
               <li key={item}>{item}</li>
             ))}

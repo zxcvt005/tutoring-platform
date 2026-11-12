@@ -1,6 +1,7 @@
 import { ApplyButton } from "@/components/landing/apply-button";
 import { LandingSection } from "@/components/landing/landing-section";
 import { landingProduct } from "@/lib/landing/content";
+import { landingSurfacePadClass } from "@/lib/landing/ui";
 
 export function ProductSection() {
   return (
@@ -12,11 +13,11 @@ export function ProductSection() {
     >
       <ul className="grid gap-4 md:grid-cols-3">
         {landingProduct.points.map((point) => (
-          <li key={point.id} className="panel px-5 py-6">
+          <li key={point.id} className={landingSurfacePadClass}>
             <h3 className="font-display text-xl font-semibold tracking-tight">
               {point.title}
             </h3>
-            <p className="mt-2 text-sm leading-relaxed text-muted-foreground sm:text-base">
+            <p className="mt-2 text-sm leading-relaxed text-foreground/70 sm:text-base">
               {point.text}
             </p>
           </li>

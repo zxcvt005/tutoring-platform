@@ -1,6 +1,7 @@
 import { LandingSection } from "@/components/landing/landing-section";
 import { LeadForm } from "@/components/landing/lead-form";
 import { landingFinal } from "@/lib/landing/content";
+import { landingSurfacePadClass } from "@/lib/landing/ui";
 
 export function LandingCta() {
   return (
@@ -15,7 +16,7 @@ export function LandingCta() {
           <p className="font-display text-3xl leading-snug font-semibold tracking-tight">
             {landingFinal.sideTitle}
           </p>
-          <ol className="mt-6 flex max-w-md flex-col gap-3 text-base leading-relaxed text-muted-foreground">
+          <ol className="mt-6 flex max-w-md flex-col gap-3 text-base leading-relaxed text-foreground/70">
             {landingFinal.steps.map((step, index) => (
               <li key={step}>
                 {index + 1}. {step}
@@ -23,7 +24,7 @@ export function LandingCta() {
             ))}
           </ol>
         </div>
-        <div className="panel min-w-0 p-5 sm:p-6">
+        <div className={`${landingSurfacePadClass} min-w-0 sm:p-6`}>
           <LeadForm />
         </div>
       </div>

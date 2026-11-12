@@ -213,6 +213,10 @@
   .auditoria-home-card {
     @apply rounded-3xl border border-black/10 bg-auditoria-surface p-5;
   }
+  /** Поверхность лендинга (базовые радиус/бордер; прозрачность — под [data-landing]). */
+  .landing-surface {
+    @apply rounded-3xl border border-black/10 bg-auditoria-surface;
+  }
   .neodin-overlay {
     background-color: var(--neodin-overlay);
     -webkit-backdrop-filter: blur(var(--neodin-overlay-blur));
@@ -225,9 +229,57 @@
   background-color: var(--auditoria-surface);
 }
 
-/* Якорные переходы лендинга учитывают sticky-шапку. Токены те же, что у кабинетов. */
+/* Якорные переходы лендинга учитывают sticky-шапку. */
 html:has([data-landing]) {
-  scroll-padding-top: 5.5rem;
+  scroll-padding-top: 6.25rem;
+  scroll-behavior: smooth;
+}
+
+/*
+ * Публичный лендинг: фон #C6B28E и стеклянные поверхности.
+ * Только под [data-landing] — кабинет не затрагивается.
+ */
+[data-landing] {
+  --landing-canvas: #c6b28e;
+  --landing-glass: rgb(255 255 255 / 0.55);
+  --landing-glass-strong: rgb(255 255 255 / 0.68);
+  --landing-glass-blur: 14px;
+  background-color: var(--landing-canvas);
+  color: var(--foreground);
+}
+
+[data-landing] .landing-bg-layer {
+  background-color: var(--landing-canvas);
+  background-image: url("/images/auditoria/backgrounds/colors/C6B28E.png");
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center;
+}
+
+[data-landing] .landing-surface {
+  background-color: var(--landing-glass);
+  border-color: rgb(255 255 255 / 0.42);
+  -webkit-backdrop-filter: blur(var(--landing-glass-blur));
+  backdrop-filter: blur(var(--landing-glass-blur));
+}
+
+/* Карточки витрины кабинета внутри лендинга — тот же glass, без смены глобального токена. */
+[data-landing] .auditoria-home-card {
+  background-color: var(--landing-glass-strong);
+  border-color: rgb(255 255 255 / 0.42);
+  -webkit-backdrop-filter: blur(var(--landing-glass-blur));
+  backdrop-filter: blur(var(--landing-glass-blur));
+}
+
+[data-landing] [data-slot="input"],
+[data-landing] [data-slot="textarea"],
+[data-landing] select {
+  background-color: rgb(255 255 255 / 0.72);
+  border-color: rgb(0 0 0 / 0.1);
+}
+
+[data-landing] .landing-divider {
+  border-color: rgb(0 0 0 / 0.1);
 }
 
 /* Звонок перекрывает кабинет без второго LiveKit-подключения и без переноса video в другой document. */

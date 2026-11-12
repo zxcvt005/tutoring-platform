@@ -353,7 +353,11 @@ function HomeworkRow({
   return (
     <li>
       {allowOpen ? (
-        <Link href={href(`/homework/${assignment.id}`)} className={className}>
+        <Link
+          href={href(`/homework/${assignment.id}`)}
+          data-tour-homework-link=""
+          className={className}
+        >
           {body}
         </Link>
       ) : (

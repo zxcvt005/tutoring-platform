@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { scrollToLandingSection } from "@/lib/landing/use-active-section";
+
 type LandingApplyContextValue = {
   prefillNonce: number;
   apply: () => void;
@@ -24,11 +26,10 @@ export function LandingApplyProvider({ children }: { children: ReactNode }) {
   const apply = useCallback(() => {
     setPrefillNonce((n) => n + 1);
     window.requestAnimationFrame(() => {
-      document.getElementById("apply")?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
-      document.getElementById("lead-student-name")?.focus({ preventScroll: true });
+      scrollToLandingSection("apply");
+      document
+        .getElementById("lead-student-name")
+        ?.focus({ preventScroll: true });
     });
   }, []);
 

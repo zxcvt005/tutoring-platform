@@ -6,6 +6,8 @@ import {
   landingTeacherSection,
   landingTeachers,
 } from "@/lib/landing/content";
+import { landingSurfaceClass } from "@/lib/landing/ui";
+import { cn } from "@/lib/utils";
 
 export function TeacherSection() {
   return (
@@ -17,8 +19,14 @@ export function TeacherSection() {
     >
       <ul className="grid gap-4 lg:grid-cols-3">
         {landingTeachers.map((teacher) => (
-          <li key={teacher.id} className="panel flex min-w-0 flex-col overflow-hidden">
-            <div className="relative aspect-[4/5] w-full bg-muted">
+          <li
+            key={teacher.id}
+            className={cn(
+              landingSurfaceClass,
+              "flex min-w-0 flex-col overflow-hidden"
+            )}
+          >
+            <div className="relative aspect-[4/5] w-full bg-pastel-beige/80">
               <Image
                 src={teacher.photo}
                 alt={teacher.photoAlt}
@@ -29,14 +37,14 @@ export function TeacherSection() {
             </div>
             <div className="flex flex-1 flex-col gap-3 px-5 py-5">
               <div>
-                <p className="text-xs font-semibold tracking-[0.14em] text-muted-foreground uppercase">
+                <p className="text-xs font-semibold tracking-[0.14em] text-foreground/55 uppercase">
                   {teacher.role}
                 </p>
                 <h3 className="font-display mt-1 text-2xl font-semibold tracking-tight">
                   {teacher.name}
                 </h3>
               </div>
-              <ul className="flex flex-col gap-1.5 text-sm leading-relaxed text-muted-foreground">
+              <ul className="flex flex-col gap-1.5 text-sm leading-relaxed text-foreground/70">
                 {teacher.points.map((point) => (
                   <li key={point}>{point}</li>
                 ))}
