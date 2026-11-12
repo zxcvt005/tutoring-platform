@@ -261,6 +261,14 @@ export async function POST(request: Request) {
           return m.upsertRnpAvitoManualDayAction(db, ctx, p);
         case "syncRnpAvitoMonth":
           return m.syncRnpAvitoMonthAction(db, ctx, p);
+        case "listExpenses":
+          return m.listExpensesAction(db, ctx, p);
+        case "createManualExpense":
+          return m.createManualExpenseAction(db, ctx, p);
+        case "updateManualExpense":
+          return m.updateManualExpenseAction(db, ctx, p);
+        case "deleteManualExpense":
+          return m.deleteManualExpenseAction(db, ctx, p);
         case "archiveTariff":
           return m.archiveTariffAction(db, ctx, String(p.id));
         case "assignTariff":

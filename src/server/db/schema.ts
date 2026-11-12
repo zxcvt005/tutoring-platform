@@ -2808,6 +2808,62 @@ export const manualTrialLessons = pgTable(
 );
 
 /**
+ * Расходы Дирекции: ручные + импорт Avito (из rnp_avito_daily_stats) и выплат зарплат.
+ * Не связано с CRM, учениками, заявками и занятиями.
+ */
+export const directorExpenses = pgTable(
+  "director_expenses",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    category: text("category").notNull(),
+    comment: text("comment").notNull().default(""),
+    /** Календарный день YYYY-MM-DD */
+    expenseDate: text("expense_date").notNull(),
+    amountRub: integer("amount_rub").notNull(),
+    /** manual | avito | salary */
+    source: text("source").notNull(),
+    /** Для avito — dayDate; для salary — teacher_payroll_entries.id */
+    externalId: text("external_id"),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("director_expenses_org_source_ext_uidx").on(
+      t.organizationId,
+      t.source,
+      t.externalId
+    ),
+    index("director_expenses_org_date_idx").on(t.organizationId, t.expenseDate),
+    index("director_expenses_org_category_idx").on(
+      t.organizationId,
+      t.category
+    ),
+    check(
+      "director_expenses_category_check",
+      sql`${t.category} in ('Авито', 'Профи', 'Зарплата', 'Сервисы', 'Налоги', 'Подарки')`
+    ),
+    check(
+      "director_expenses_source_check",
+      sql`${t.source} in ('manual', 'avito', 'salary')`
+    ),
+    check(
+      "director_expenses_date_check",
+      sql`${t.expenseDate} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`
+    ),
+    check("director_expenses_amount_check", sql`${t.amountRub} > 0`),
+    check(
+      "director_expenses_external_check",
+      sql`(
+        (${t.source} = 'manual' and ${t.externalId} is null)
+        or (${t.source} <> 'manual' and ${t.externalId} is not null)
+      )`
+    ),
+  ]
+);
+
+/**
  * Ежедневная статистика «РНП Авито» (Дирекция).
  * API-поля и ручные поля независимы; не связано с base_leads / manual_trial_lessons.
  */
@@ -2939,5 +2995,6 @@ export const schema = {
   errorPracticeSessionItems,
   baseLeads,
   manualTrialLessons,
+  directorExpenses,
   rnpAvitoDailyStats,
 };

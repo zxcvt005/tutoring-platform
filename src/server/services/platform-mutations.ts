@@ -2276,6 +2276,72 @@ export async function syncRnpAvitoMonthAction(
   });
 }
 
+export async function listExpensesAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { listExpenses } = await import("@/server/services/expenses-service");
+  return listExpenses(db, ctx, {
+    year: payload.year == null || payload.year === "" ? null : Number(payload.year),
+    month:
+      payload.month == null || payload.month === ""
+        ? null
+        : Number(payload.month),
+    category: (payload.category as never) ?? null,
+  });
+}
+
+export async function createManualExpenseAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { createManualExpense } = await import(
+    "@/server/services/expenses-service"
+  );
+  return {
+    expense: await createManualExpense(db, ctx, {
+      category: payload.category,
+      comment: payload.comment,
+      expenseDate: payload.expenseDate,
+      amountRub: payload.amountRub,
+    }),
+  };
+}
+
+export async function updateManualExpenseAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { updateManualExpense } = await import(
+    "@/server/services/expenses-service"
+  );
+  return {
+    expense: await updateManualExpense(db, ctx, {
+      id: String(payload.id ?? ""),
+      expectedUpdatedAt: String(payload.expectedUpdatedAt ?? ""),
+      category: payload.category,
+      comment: payload.comment,
+      expenseDate: payload.expenseDate,
+      amountRub: payload.amountRub,
+    }),
+  };
+}
+
+export async function deleteManualExpenseAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { deleteManualExpense } = await import(
+    "@/server/services/expenses-service"
+  );
+  await deleteManualExpense(db, ctx, { id: String(payload.id ?? "") });
+  return { ok: true as const };
+}
+
 export async function upsertProductAction(
   db: AppDb,
   ctx: AuthContext,
@@ -2836,6 +2902,10 @@ export const platformActions = {
   getRnpAvitoMonth: getRnpAvitoMonthAction,
   upsertRnpAvitoManualDay: upsertRnpAvitoManualDayAction,
   syncRnpAvitoMonth: syncRnpAvitoMonthAction,
+  listExpenses: listExpensesAction,
+  createManualExpense: createManualExpenseAction,
+  updateManualExpense: updateManualExpenseAction,
+  deleteManualExpense: deleteManualExpenseAction,
   archiveTariff: archiveTariffAction,
   assignTariff: assignTariffAction,
   setStudentPurchaseTariff: setStudentPurchaseTariffAction,

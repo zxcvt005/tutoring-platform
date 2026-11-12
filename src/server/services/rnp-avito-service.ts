@@ -429,6 +429,19 @@ export async function syncRnpAvitoMonth(
       }
     });
 
+    // Обновить автозаписи «Расходы» из актуальных дневных сумм (без повторного вызова Avito API).
+    try {
+      const { refreshAvitoExpensesFromRnp } = await import(
+        "@/server/services/expenses-service"
+      );
+      await refreshAvitoExpensesFromRnp(db, ctx.organizationId);
+    } catch (err) {
+      console.error(
+        "[rnp-avito] failed to refresh director expenses after sync",
+        err instanceof Error ? err.message : "unknown"
+      );
+    }
+
     const monthPayload = await getRnpAvitoMonth(db, ctx, { year, month });
     return {
       year,

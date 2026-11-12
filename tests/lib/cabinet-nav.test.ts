@@ -78,6 +78,20 @@ describe("cabinet navigation", () => {
     expect(rnpIdx).toBe(trialsIdx + 1);
   });
 
+  it("adds Expenses after RNP Avito in Direkciya", () => {
+    expect(direkciyaNavItems).toContainEqual({
+      href: "/direkciya/rashody",
+      label: "Расходы",
+    });
+    const rnpIdx = direkciyaNavItems.findIndex(
+      (i) => i.href === "/direkciya/rnp-avito"
+    );
+    const expensesIdx = direkciyaNavItems.findIndex(
+      (i) => i.href === "/direkciya/rashody"
+    );
+    expect(expensesIdx).toBe(rnpIdx + 1);
+  });
+
   it("adds monthly feedback to teacher and press cabinets", () => {
     expect(kafedraNavItems).toContainEqual({
       href: "/kafedra/feedback",
