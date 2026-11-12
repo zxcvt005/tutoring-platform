@@ -157,14 +157,19 @@ describe("homework archive restore", () => {
     expect(topicAfter?.status).toBe("archived");
   });
 
-  it("forbids restoring another teacher's test", async () => {
+  it("forbids restoring another teacher's archived test", async () => {
     const t = await createTestDb();
     close = t.close;
     const anna = await login(t.db, "anna@example.com");
     const igor = await login(t.db, "igor@example.com");
+    const { ensureTeacherSubsection } = await import(
+      "../helpers/material-subsection"
+    );
+    const { folderId } = await ensureTeacherSubsection(t.db, anna, "test");
     await upsertHomework(t.db, anna, {
       id: "hw_anna_only",
       teacherId: "t1",
+      folderId,
       title: "Чужой",
       status: "draft",
       questions: [
@@ -177,7 +182,14 @@ describe("homework archive restore", () => {
         },
       ],
     });
-    await deleteHomework(t.db, anna, "hw_anna_only");
+    await publishHomework(t.db, anna, "hw_anna_only");
+    await assignHomework(t.db, anna, {
+      homeworkId: "hw_anna_only",
+      teacherId: "t1",
+      studentIds: ["s1"],
+    });
+    const archived = await deleteHomework(t.db, anna, "hw_anna_only");
+    expect(archived.archived).toBe(true);
     await expect(restoreHomework(t.db, igor, "hw_anna_only")).rejects.toMatchObject({
       status: 403,
     });

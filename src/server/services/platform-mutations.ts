@@ -1546,15 +1546,58 @@ export async function deleteTopic(db: AppDb, ctx: AuthContext, id: string) {
   } else if (isOrgKnowledgeStaff(ctx.role) && row.teacherId) {
     await assertDirectorSeesTeacher(db, ctx, row.teacherId);
   }
-  await db
-    .update(topics)
-    .set({ status: "archived", updatedAt: new Date() })
-    .where(eq(topics.id, id));
-  await db
-    .update(tests)
-    .set({ status: "archived", updatedAt: new Date() })
+
+  const linkedTests = await db
+    .select({ id: tests.id })
+    .from(tests)
     .where(eq(tests.topicId, id));
-  return { ok: true };
+  const [assignmentOnTopic] = await db
+    .select({ id: testAssignments.id })
+    .from(testAssignments)
+    .where(eq(testAssignments.topicId, id))
+    .limit(1);
+  const [lessonTopicLink] = await db
+    .select({ id: lessonTopics.id })
+    .from(lessonTopics)
+    .where(eq(lessonTopics.topicId, id))
+    .limit(1);
+  const [lessonRef] = await db
+    .select({ id: lessons.id })
+    .from(lessons)
+    .where(eq(lessons.topicId, id))
+    .limit(1);
+
+  // Связанные тесты / уроки / назначения нельзя удалять «заодно» —
+  // архивируем тему (и связанные тесты), чтобы не ломать историю и FK.
+  if (
+    linkedTests.length > 0 ||
+    assignmentOnTopic ||
+    lessonTopicLink ||
+    lessonRef
+  ) {
+    await db
+      .update(topics)
+      .set({ status: "archived", updatedAt: new Date() })
+      .where(eq(topics.id, id));
+    if (linkedTests.length > 0) {
+      await db
+        .update(tests)
+        .set({ status: "archived", updatedAt: new Date() })
+        .where(eq(tests.topicId, id));
+    }
+    return {
+      ok: true as const,
+      archived: true as const,
+      relatedTestsArchived: linkedTests.length,
+    };
+  }
+
+  await db.delete(topics).where(eq(topics.id, id));
+  return {
+    ok: true as const,
+    archived: false as const,
+    relatedTestsArchived: 0,
+  };
 }
 
 export async function moveTopic(
@@ -1719,11 +1762,39 @@ export async function deleteHomework(db: AppDb, ctx: AuthContext, id: string) {
   } else if (isOrgKnowledgeStaff(ctx.role) && row.teacherId) {
     await assertDirectorSeesTeacher(db, ctx, row.teacherId);
   }
-  await db
-    .update(tests)
-    .set({ status: "archived", updatedAt: new Date() })
-    .where(eq(tests.id, id));
-  return { ok: true, status: "archived" as const };
+
+  const [assigned] = await db
+    .select({ id: testAssignments.id })
+    .from(testAssignments)
+    .where(eq(testAssignments.testId, id))
+    .limit(1);
+  if (assigned) {
+    await db
+      .update(tests)
+      .set({ status: "archived", updatedAt: new Date() })
+      .where(eq(tests.id, id));
+    return { ok: true as const, archived: true as const, status: "archived" as const };
+  }
+
+  const questions = (row.questionsPublic as TestQuestion[]) ?? [];
+  await db.delete(tests).where(eq(tests.id, id));
+  const { collectOrphanQuestionImageKeys } = await import(
+    "@/server/services/test-question-image-service"
+  );
+  const { deleteTestQuestionObject } = await import(
+    "@/server/media/test-question-storage"
+  );
+  // После DELETE текущий тест уже не учитывается в «ещё используется».
+  const imageKeys = await collectOrphanQuestionImageKeys(
+    db,
+    ctx.organizationId,
+    questions,
+    []
+  );
+  for (const key of imageKeys) {
+    await deleteTestQuestionObject(key).catch(() => undefined);
+  }
+  return { ok: true as const, archived: false as const, status: "deleted" as const };
 }
 
 export async function restoreHomework(db: AppDb, ctx: AuthContext, id: string) {

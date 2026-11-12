@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { MaterialsFolderPanel } from "@/components/folders/materials-folder-panel";
 import { PageHeader } from "@/components/layout/page-header";
 import { TestEditorDialog } from "@/components/tests/test-editor-dialog";
@@ -41,6 +42,12 @@ import { useDemoStore } from "@/lib/store/demo-store";
 import type { Homework, Topic, TopicStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+
+type RemovingTarget = {
+  kind: "topic" | "test" | "theory" | "intensive";
+  id: string;
+  title: string;
+};
 
 const SECTION_META: Record<
   MaterialsSection,
@@ -97,6 +104,8 @@ export function MaterialsSectionWorkspace({
     saveTopic,
     deleteTopic,
     deleteHomework,
+    deleteTheory,
+    deleteIntensive,
     restoreHomework,
     reload,
   } = useDemoStore();
@@ -126,6 +135,8 @@ export function MaterialsSectionWorkspace({
   const [folderToSchoolBusy, setFolderToSchoolBusy] = useState<string | null>(
     null
   );
+  const [removing, setRemoving] = useState<RemovingTarget | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
 
   const topics = topicsForTeacher(teacherId);
   const tests = homeworksForTeacher(teacherId);
@@ -411,9 +422,15 @@ export function MaterialsSectionWorkspace({
                 type="button"
                 size="xs"
                 variant="ghost"
-                onClick={() => void deleteHomework(item.id)}
+                onClick={() =>
+                  setRemoving({
+                    kind: "test",
+                    id: item.id,
+                    title: item.title,
+                  })
+                }
               >
-                В архив
+                Удалить
               </Button>
             );
           }
@@ -421,14 +438,30 @@ export function MaterialsSectionWorkspace({
             const topic = topics.find((t) => t.id === item.id);
             if (!topic) return null;
             return (
-              <Button
-                type="button"
-                size="xs"
-                variant="ghost"
-                onClick={() => openEditTopic(topic)}
-              >
-                Изменить
-              </Button>
+              <div className="flex gap-1">
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => openEditTopic(topic)}
+                >
+                  Изменить
+                </Button>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  onClick={() =>
+                    setRemoving({
+                      kind: "topic",
+                      id: item.id,
+                      title: item.title,
+                    })
+                  }
+                >
+                  Удалить
+                </Button>
+              </div>
             );
           }
           if (
@@ -440,14 +473,30 @@ export function MaterialsSectionWorkspace({
                 ? `/kafedra/theory/${item.id}`
                 : `/kafedra/intensivy/${item.id}`;
             return (
-              <Link
-                href={href}
-                className={cn(
-                  buttonVariants({ variant: "ghost", size: "xs" })
-                )}
-              >
-                Открыть
-              </Link>
+              <div className="flex gap-1">
+                <Link
+                  href={href}
+                  className={cn(
+                    buttonVariants({ variant: "ghost", size: "xs" })
+                  )}
+                >
+                  Открыть
+                </Link>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  onClick={() =>
+                    setRemoving({
+                      kind: item.kind as "theory" | "intensive",
+                      id: item.id,
+                      title: item.title,
+                    })
+                  }
+                >
+                  Удалить
+                </Button>
+              </div>
             );
           }
           return null;
@@ -519,11 +568,15 @@ export function MaterialsSectionWorkspace({
                 type="button"
                 variant="outline"
                 onClick={() => {
-                  deleteTopic(topicForm.id!);
+                  setRemoving({
+                    kind: "topic",
+                    id: topicForm.id!,
+                    title: topicForm.title.trim() || "Без названия",
+                  });
                   setTopicOpen(false);
                 }}
               >
-                В архив
+                Удалить
               </Button>
             ) : (
               <span />
@@ -547,6 +600,57 @@ export function MaterialsSectionWorkspace({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!removing}
+        title={
+          removing
+            ? `Удалить «${removing.title}»?`
+            : "Удалить материал?"
+        }
+        description={
+          removing?.kind === "topic"
+            ? "Если у темы есть связанные тесты, уроки или назначения, тема (и связанные тесты) будут архивированы, а не удалены. Другие материалы не затрагиваются."
+            : removing?.kind === "test"
+              ? "Если тест уже назначался ученикам, он будет архивирован (история сохраняется). Иначе тест удаляется из базы безвозвратно."
+              : removing?.kind === "theory" || removing?.kind === "intensive"
+                ? "Если материал уже назначался ученикам, он будет архивирован. Иначе будет удалён из базы вместе с файлами, на которые больше нет ссылок."
+                : undefined
+        }
+        busy={removeBusy}
+        onOpenChange={(open) => {
+          if (!open && !removeBusy) setRemoving(null);
+        }}
+        onConfirm={() => {
+          if (!removing) return;
+          setRemoveBusy(true);
+          const action =
+            removing.kind === "intensive"
+              ? deleteIntensive(removing.id)
+              : removing.kind === "theory"
+                ? deleteTheory(removing.id)
+                : removing.kind === "test"
+                  ? deleteHomework(removing.id)
+                  : deleteTopic(removing.id);
+          void Promise.resolve(action)
+            .then(async (result) => {
+              if (result?.ok === false) {
+                toast.error(result.error ?? "Не удалось удалить");
+                return;
+              }
+              await reload();
+            })
+            .catch((err: unknown) => {
+              toast.error(
+                err instanceof Error ? err.message : "Не удалось удалить"
+              );
+            })
+            .finally(() => {
+              setRemoveBusy(false);
+              setRemoving(null);
+            });
+        }}
+      />
 
       <TestEditorDialog
         open={testOpen}

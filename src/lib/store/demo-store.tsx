@@ -166,7 +166,7 @@ export type DemoStoreValue = {
       sortOrder?: number;
     }
   ) => string;
-  deleteTopic: (id: string) => void;
+  deleteTopic: (id: string) => Promise<OkResult>;
   moveTopic: (
     topicId: string,
     sectionId: string | null,
@@ -578,8 +578,16 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         void run("upsertTopic", { ...topic, id });
         return id;
       },
-      deleteTopic: (id) => {
-        void run("deleteTopic", { id });
+      deleteTopic: async (id) => {
+        const r = await run("deleteTopic", { id });
+        if (r.ok) {
+          toast.success(
+            r.archived
+              ? "Тема архивирована (есть связанные тесты или назначения)"
+              : "Тема удалена"
+          );
+        }
+        return r;
       },
       moveTopic: (topicId, sectionId, sortOrder) => {
         void run("moveTopic", { topicId, sectionId, sortOrder });
@@ -607,7 +615,13 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       },
       deleteHomework: async (id) => {
         const r = await run("deleteHomework", { id });
-        if (r.ok) toast.success("Тест перемещён в архив");
+        if (r.ok) {
+          toast.success(
+            r.archived
+              ? "Тест архивирован (есть назначения ученикам)"
+              : "Тест удалён"
+          );
+        }
         return r;
       },
       restoreHomework: async (id) => {

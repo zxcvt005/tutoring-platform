@@ -303,7 +303,7 @@ export function StudentTourProvider({ children }: { children: ReactNode }) {
       deleteTopicSection: async () => blocked(noopMsg),
       reorderTopicSections: () => undefined,
       upsertTopic: () => "",
-      deleteTopic: () => undefined,
+      deleteTopic: async () => blocked(noopMsg),
       moveTopic: () => undefined,
       reorderTopics: () => undefined,
       upsertMaterialFolder: async () => blocked(noopMsg),
