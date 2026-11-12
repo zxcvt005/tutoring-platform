@@ -2708,6 +2708,153 @@ export const errorPracticeSessionItems = pgTable(
   ]
 );
 
+/**
+ * Ручная «База» потенциальных учеников (Дирекция).
+ * Изолированное хранилище: не создаёт учеников, заявки, занятия и не влияет на продажи.
+ */
+export const baseLeads = pgTable(
+  "base_leads",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Дата добавления записи (календарный день, YYYY-MM-DD). */
+    entryDate: text("entry_date").notNull(),
+    source: text("source"),
+    status: text("status"),
+    name: text("name").notNull().default(""),
+    avitoUrl: text("avito_url").notNull().default(""),
+    contact: text("contact").notNull().default(""),
+    path1: boolean("path_1").notNull().default(false),
+    path2: boolean("path_2").notNull().default(false),
+    path3: boolean("path_3").notNull().default(false),
+    comment: text("comment").notNull().default(""),
+    reconciliation: boolean("reconciliation").notNull().default(false),
+    ...timestamps,
+  },
+  (t) => [
+    index("base_leads_org_idx").on(t.organizationId),
+    index("base_leads_org_created_idx").on(t.organizationId, t.createdAt),
+    check(
+      "base_leads_source_check",
+      sql`${t.source} is null or ${t.source} in ('Профи', 'Авито', 'Реклама', 'Сарафан', 'Блог')`
+    ),
+    check(
+      "base_leads_status_check",
+      sql`${t.status} is null or ${t.status} in ('Получен контакт', 'Игнор', 'Назначен пробный', 'Проведен пробный', 'Отказ', 'Отказище', 'Купил')`
+    ),
+    check(
+      "base_leads_entry_date_check",
+      sql`${t.entryDate} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`
+    ),
+  ]
+);
+
+/**
+ * Ручные «Пробные уроки» (Дирекция).
+ * Изолировано от Press trial_lessons, base_leads, учеников и расписания.
+ */
+export const manualTrialLessons = pgTable(
+  "manual_trial_lessons",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Дата пробного урока (YYYY-MM-DD). */
+    lessonDate: text("lesson_date").notNull(),
+    /** Время пробного урока (HH:MM). */
+    lessonTime: text("lesson_time").notNull().default("12:00"),
+    source: text("source"),
+    name: text("name").notNull().default(""),
+    contact: text("contact").notNull().default(""),
+    attended: boolean("attended").notNull().default(false),
+    purchased: boolean("purchased").notNull().default(false),
+    /** Занятий в неделю; null — не указано. */
+    hoursPerWeek: integer("hours_per_week"),
+    /** Ставка за час в целых рублях; null — не указано. */
+    ratePerHourRub: integer("rate_per_hour_rub"),
+    comment: text("comment").notNull().default(""),
+    ...timestamps,
+  },
+  (t) => [
+    index("manual_trial_lessons_org_idx").on(t.organizationId),
+    index("manual_trial_lessons_org_created_idx").on(
+      t.organizationId,
+      t.createdAt
+    ),
+    check(
+      "manual_trial_lessons_source_check",
+      sql`${t.source} is null or ${t.source} in ('Профи', 'Авито', 'Реклама', 'Сарафан', 'Блог')`
+    ),
+    check(
+      "manual_trial_lessons_lesson_date_check",
+      sql`${t.lessonDate} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`
+    ),
+    check(
+      "manual_trial_lessons_lesson_time_check",
+      sql`${t.lessonTime} ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'`
+    ),
+    check(
+      "manual_trial_lessons_hours_check",
+      sql`${t.hoursPerWeek} is null or ${t.hoursPerWeek} >= 0`
+    ),
+    check(
+      "manual_trial_lessons_rate_check",
+      sql`${t.ratePerHourRub} is null or ${t.ratePerHourRub} >= 0`
+    ),
+  ]
+);
+
+/**
+ * Ежедневная статистика «РНП Авито» (Дирекция).
+ * API-поля и ручные поля независимы; не связано с base_leads / manual_trial_lessons.
+ */
+export const rnpAvitoDailyStats = pgTable(
+  "rnp_avito_daily_stats",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Календарный день YYYY-MM-DD */
+    dayDate: text("day_date").notNull(),
+    /** API-поля (nullable, пока API не подключён) */
+    budgetSpentRub: integer("budget_spent_rub"),
+    impressions: integer("impressions"),
+    views: integer("views"),
+    contacts: integer("contacts"),
+    apiSyncedAt: timestamp("api_synced_at", { withTimezone: true }),
+    /** Ручные поля */
+    trialsScheduled: integer("trials_scheduled"),
+    trialsCompleted: integer("trials_completed"),
+    manualUpdatedAt: timestamp("manual_updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("rnp_avito_daily_org_date_uidx").on(t.organizationId, t.dayDate),
+    index("rnp_avito_daily_org_idx").on(t.organizationId),
+    check(
+      "rnp_avito_daily_date_check",
+      sql`${t.dayDate} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`
+    ),
+    check(
+      "rnp_avito_daily_nonneg_check",
+      sql`(
+        (${t.budgetSpentRub} is null or ${t.budgetSpentRub} >= 0)
+        and (${t.impressions} is null or ${t.impressions} >= 0)
+        and (${t.views} is null or ${t.views} >= 0)
+        and (${t.contacts} is null or ${t.contacts} >= 0)
+        and (${t.trialsScheduled} is null or ${t.trialsScheduled} >= 0)
+        and (${t.trialsCompleted} is null or ${t.trialsCompleted} >= 0)
+      )`
+    ),
+  ]
+);
+
 export const schema = {
   organizations,
   users,
@@ -2790,4 +2937,7 @@ export const schema = {
   studentErrorBankEvents,
   errorPracticeSessions,
   errorPracticeSessionItems,
+  baseLeads,
+  manualTrialLessons,
+  rnpAvitoDailyStats,
 };

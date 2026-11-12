@@ -239,6 +239,28 @@ export async function POST(request: Request) {
           return m.listProductsAction(db, ctx);
         case "upsertProduct":
           return m.upsertProductAction(db, ctx, p);
+        case "listBaseLeads":
+          return m.listBaseLeadsAction(db, ctx);
+        case "createBaseLead":
+          return m.createBaseLeadAction(db, ctx);
+        case "updateBaseLead":
+          return m.updateBaseLeadAction(db, ctx, p);
+        case "deleteBaseLead":
+          return m.deleteBaseLeadAction(db, ctx, p);
+        case "listManualTrialLessons":
+          return m.listManualTrialLessonsAction(db, ctx);
+        case "createManualTrialLesson":
+          return m.createManualTrialLessonAction(db, ctx);
+        case "updateManualTrialLesson":
+          return m.updateManualTrialLessonAction(db, ctx, p);
+        case "deleteManualTrialLesson":
+          return m.deleteManualTrialLessonAction(db, ctx, p);
+        case "getRnpAvitoMonth":
+          return m.getRnpAvitoMonthAction(db, ctx, p);
+        case "upsertRnpAvitoManualDay":
+          return m.upsertRnpAvitoManualDayAction(db, ctx, p);
+        case "syncRnpAvitoMonth":
+          return m.syncRnpAvitoMonthAction(db, ctx, p);
         case "archiveTariff":
           return m.archiveTariffAction(db, ctx, String(p.id));
         case "assignTariff":

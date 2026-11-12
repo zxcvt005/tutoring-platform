@@ -43,6 +43,41 @@ describe("cabinet navigation", () => {
     });
   });
 
+  it("adds the Base table module to Direkciya", () => {
+    expect(direkciyaNavItems).toContainEqual({
+      href: "/direkciya/baza",
+      label: "База",
+    });
+  });
+
+  it("adds trial lessons table next to Base in Direkciya", () => {
+    expect(direkciyaNavItems).toContainEqual({
+      href: "/direkciya/probnye-uroki",
+      label: "Пробные уроки",
+    });
+    const bazaIdx = direkciyaNavItems.findIndex(
+      (i) => i.href === "/direkciya/baza"
+    );
+    const trialsIdx = direkciyaNavItems.findIndex(
+      (i) => i.href === "/direkciya/probnye-uroki"
+    );
+    expect(trialsIdx).toBe(bazaIdx + 1);
+  });
+
+  it("adds RNP Avito next to the other Direkciya tables", () => {
+    expect(direkciyaNavItems).toContainEqual({
+      href: "/direkciya/rnp-avito",
+      label: "РНП Авито",
+    });
+    const trialsIdx = direkciyaNavItems.findIndex(
+      (i) => i.href === "/direkciya/probnye-uroki"
+    );
+    const rnpIdx = direkciyaNavItems.findIndex(
+      (i) => i.href === "/direkciya/rnp-avito"
+    );
+    expect(rnpIdx).toBe(trialsIdx + 1);
+  });
+
   it("adds monthly feedback to teacher and press cabinets", () => {
     expect(kafedraNavItems).toContainEqual({
       href: "/kafedra/feedback",

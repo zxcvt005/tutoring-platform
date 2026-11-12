@@ -2085,6 +2085,197 @@ export async function listProductsAction(db: AppDb, ctx: AuthContext) {
   return { products: await listProducts(db, ctx) };
 }
 
+export async function listBaseLeadsAction(db: AppDb, ctx: AuthContext) {
+  const { listBaseLeads } = await import("@/server/services/base-leads-service");
+  return { leads: await listBaseLeads(db, ctx) };
+}
+
+export async function createBaseLeadAction(db: AppDb, ctx: AuthContext) {
+  const { createBaseLead } = await import("@/server/services/base-leads-service");
+  return { lead: await createBaseLead(db, ctx) };
+}
+
+export async function updateBaseLeadAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { updateBaseLead } = await import("@/server/services/base-leads-service");
+  return {
+    lead: await updateBaseLead(db, ctx, {
+      id: String(payload.id ?? ""),
+      expectedUpdatedAt: String(payload.expectedUpdatedAt ?? ""),
+      entryDate:
+        payload.entryDate === undefined
+          ? undefined
+          : String(payload.entryDate),
+      source:
+        payload.source === undefined
+          ? undefined
+          : (payload.source as never),
+      status:
+        payload.status === undefined
+          ? undefined
+          : (payload.status as never),
+      name: payload.name === undefined ? undefined : String(payload.name),
+      avitoUrl:
+        payload.avitoUrl === undefined ? undefined : String(payload.avitoUrl),
+      contact:
+        payload.contact === undefined ? undefined : String(payload.contact),
+      path1: payload.path1 === undefined ? undefined : Boolean(payload.path1),
+      path2: payload.path2 === undefined ? undefined : Boolean(payload.path2),
+      path3: payload.path3 === undefined ? undefined : Boolean(payload.path3),
+      comment:
+        payload.comment === undefined ? undefined : String(payload.comment),
+      reconciliation:
+        payload.reconciliation === undefined
+          ? undefined
+          : Boolean(payload.reconciliation),
+    }),
+  };
+}
+
+export async function deleteBaseLeadAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { deleteBaseLead } = await import("@/server/services/base-leads-service");
+  return deleteBaseLead(db, ctx, String(payload.id ?? ""));
+}
+
+export async function listManualTrialLessonsAction(
+  db: AppDb,
+  ctx: AuthContext
+) {
+  const { listManualTrialLessons } = await import(
+    "@/server/services/manual-trial-lessons-service"
+  );
+  return { lessons: await listManualTrialLessons(db, ctx) };
+}
+
+export async function createManualTrialLessonAction(
+  db: AppDb,
+  ctx: AuthContext
+) {
+  const { createManualTrialLesson } = await import(
+    "@/server/services/manual-trial-lessons-service"
+  );
+  return { lesson: await createManualTrialLesson(db, ctx) };
+}
+
+export async function updateManualTrialLessonAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { updateManualTrialLesson } = await import(
+    "@/server/services/manual-trial-lessons-service"
+  );
+  return {
+    lesson: await updateManualTrialLesson(db, ctx, {
+      id: String(payload.id ?? ""),
+      expectedUpdatedAt: String(payload.expectedUpdatedAt ?? ""),
+      lessonDate:
+        payload.lessonDate === undefined
+          ? undefined
+          : String(payload.lessonDate),
+      lessonTime:
+        payload.lessonTime === undefined
+          ? undefined
+          : String(payload.lessonTime),
+      source:
+        payload.source === undefined ? undefined : (payload.source as never),
+      name: payload.name === undefined ? undefined : String(payload.name),
+      contact:
+        payload.contact === undefined ? undefined : String(payload.contact),
+      attended:
+        payload.attended === undefined ? undefined : Boolean(payload.attended),
+      purchased:
+        payload.purchased === undefined
+          ? undefined
+          : Boolean(payload.purchased),
+      hoursPerWeek:
+        payload.hoursPerWeek === undefined
+          ? undefined
+          : (payload.hoursPerWeek as never),
+      ratePerHourRub:
+        payload.ratePerHourRub === undefined
+          ? undefined
+          : (payload.ratePerHourRub as never),
+      comment:
+        payload.comment === undefined ? undefined : String(payload.comment),
+    }),
+  };
+}
+
+export async function deleteManualTrialLessonAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { deleteManualTrialLesson } = await import(
+    "@/server/services/manual-trial-lessons-service"
+  );
+  return deleteManualTrialLesson(db, ctx, String(payload.id ?? ""));
+}
+
+export async function getRnpAvitoMonthAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { getRnpAvitoMonth } = await import(
+    "@/server/services/rnp-avito-service"
+  );
+  return getRnpAvitoMonth(db, ctx, {
+    year: Number(payload.year),
+    month: Number(payload.month),
+  });
+}
+
+export async function upsertRnpAvitoManualDayAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { upsertRnpAvitoManualDay } = await import(
+    "@/server/services/rnp-avito-service"
+  );
+  return {
+    day: await upsertRnpAvitoManualDay(db, ctx, {
+      date: String(payload.date ?? ""),
+      expectedManualUpdatedAt:
+        payload.expectedManualUpdatedAt == null ||
+        payload.expectedManualUpdatedAt === ""
+          ? null
+          : String(payload.expectedManualUpdatedAt),
+      trialsScheduled:
+        payload.trialsScheduled === undefined
+          ? undefined
+          : (payload.trialsScheduled as never),
+      trialsCompleted:
+        payload.trialsCompleted === undefined
+          ? undefined
+          : (payload.trialsCompleted as never),
+    }),
+  };
+}
+
+export async function syncRnpAvitoMonthAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { syncRnpAvitoMonth } = await import(
+    "@/server/services/rnp-avito-service"
+  );
+  return syncRnpAvitoMonth(db, ctx, {
+    year: Number(payload.year),
+    month: Number(payload.month),
+  });
+}
+
 export async function upsertProductAction(
   db: AppDb,
   ctx: AuthContext,
@@ -2634,6 +2825,17 @@ export const platformActions = {
   upsertTariff: upsertTariffAction,
   listProducts: listProductsAction,
   upsertProduct: upsertProductAction,
+  listBaseLeads: listBaseLeadsAction,
+  createBaseLead: createBaseLeadAction,
+  updateBaseLead: updateBaseLeadAction,
+  deleteBaseLead: deleteBaseLeadAction,
+  listManualTrialLessons: listManualTrialLessonsAction,
+  createManualTrialLesson: createManualTrialLessonAction,
+  updateManualTrialLesson: updateManualTrialLessonAction,
+  deleteManualTrialLesson: deleteManualTrialLessonAction,
+  getRnpAvitoMonth: getRnpAvitoMonthAction,
+  upsertRnpAvitoManualDay: upsertRnpAvitoManualDayAction,
+  syncRnpAvitoMonth: syncRnpAvitoMonthAction,
   archiveTariff: archiveTariffAction,
   assignTariff: assignTariffAction,
   setStudentPurchaseTariff: setStudentPurchaseTariffAction,

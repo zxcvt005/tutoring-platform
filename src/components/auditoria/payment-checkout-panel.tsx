@@ -1,7 +1,6 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import {
   CreditCard,
   FileCheck,
@@ -19,7 +18,6 @@ import {
   CHANGE_TARIFF_HINT,
   checkoutBannerPayment,
   checkoutBannerStatus,
-  STUDENT_PAY_PATH,
   TOCHKA_CHECKOUT_URL,
   type PaymentFlowStatus,
 } from "@/lib/payment-checkout";
@@ -160,22 +158,6 @@ export function PaymentCheckoutPanel() {
 
   return (
     <div className="min-w-0 space-y-5 overflow-x-hidden">
-      <div className="min-w-0">
-        <Link
-          href={STUDENT_PAY_PATH}
-          className="inline-flex text-sm text-muted-foreground hover:text-foreground hover:underline"
-        >
-          ← К выбору тарифа
-        </Link>
-        <h1 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
-          Оплата обучения
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-foreground/80 sm:text-base">
-          Нажмите кнопку оплаты — заявка создастся автоматически, и вы перейдёте
-          на страницу оплаты школы.
-        </p>
-      </div>
-
       <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(16rem,0.7fr)] xl:items-start">
         <div className="min-w-0 space-y-4">
           {purchaseTariff ? (
