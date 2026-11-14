@@ -2809,6 +2809,8 @@ export const manualTrialLessons = pgTable(
     source: text("source"),
     name: text("name").notNull().default(""),
     contact: text("contact").notNull().default(""),
+    /** Nullable text; empty in UI as "". Not linked to teachers payroll. */
+    teacher: text("teacher"),
     attended: boolean("attended").notNull().default(false),
     purchased: boolean("purchased").notNull().default(false),
     /** Занятий в неделю; null — не указано. */
@@ -2941,7 +2943,8 @@ export const quickAccessLinks = pgTable(
 
 /**
  * Ежедневная статистика «РНП Авито» (Дирекция).
- * API-поля и ручные поля независимы; не связано с base_leads / manual_trial_lessons.
+ * API-поля независимы. Пробные: по умолчанию из manual_trial_lessons;
+ * при *_is_manual = true используется значение trials_* для этой ячейки.
  */
 export const rnpAvitoDailyStats = pgTable(
   "rnp_avito_daily_stats",
@@ -2958,9 +2961,21 @@ export const rnpAvitoDailyStats = pgTable(
     views: integer("views"),
     contacts: integer("contacts"),
     apiSyncedAt: timestamp("api_synced_at", { withTimezone: true }),
-    /** Ручные поля */
+    /**
+     * Значение «назначенных» при trials_scheduled_is_manual = true.
+     * Иначе при чтении берётся overlay из manual_trial_lessons.
+     */
     trialsScheduled: integer("trials_scheduled"),
+    /** Значение «проведённых» при trials_completed_is_manual = true. */
     trialsCompleted: integer("trials_completed"),
+    /** Независимый ручной режим ячейки «назначенные». */
+    trialsScheduledIsManual: boolean("trials_scheduled_is_manual")
+      .notNull()
+      .default(false),
+    /** Независимый ручной режим ячейки «проведённые». */
+    trialsCompletedIsManual: boolean("trials_completed_is_manual")
+      .notNull()
+      .default(false),
     manualUpdatedAt: timestamp("manual_updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

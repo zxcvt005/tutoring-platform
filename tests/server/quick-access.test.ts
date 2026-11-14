@@ -189,7 +189,7 @@ describe("quick access links", () => {
     ).toBe(true);
     await deleteManualTrialLesson(t.db, trialCtx, lesson.id);
 
-    // РНП
+    // РНП: авто + ручное переопределение через quick-access
     const month = await getRnpAvitoMonth(t.db, rnpCtx, {
       year: 2026,
       month: 3,
@@ -202,6 +202,7 @@ describe("quick access links", () => {
       trialsScheduled: 2,
     });
     expect(upserted.trialsScheduled).toBe(2);
+    expect(upserted.trialsScheduledSource).toBe("manual");
 
     // Расходы
     const expense = await createManualExpense(t.db, expCtx, {

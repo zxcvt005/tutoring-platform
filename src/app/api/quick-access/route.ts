@@ -56,6 +56,8 @@ async function dispatchQuickAccessAction(
       return m.getRnpAvitoMonthAction(db, ctx, p);
     case "upsertRnpAvitoManualDay":
       return m.upsertRnpAvitoManualDayAction(db, ctx, p);
+    case "clearRnpAvitoTrialOverride":
+      return m.clearRnpAvitoTrialOverrideAction(db, ctx, p);
     case "syncRnpAvitoMonth":
       return m.syncRnpAvitoMonthAction(db, ctx, p);
     case "listExpenses":

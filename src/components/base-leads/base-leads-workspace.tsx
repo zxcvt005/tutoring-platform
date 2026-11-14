@@ -383,13 +383,13 @@ export function BaseLeadsWorkspace({
                 <TableHead className={cn(headPad, "w-[8rem]")}>
                   Статус
                 </TableHead>
-                <TableHead className={cn(headPad, "w-[14rem] min-w-[12rem]")}>
+                <TableHead className={cn(headPad, "w-[15rem] min-w-[13rem]")}>
                   Ученик
                 </TableHead>
-                <TableHead className={cn(headPad, "w-[14rem] min-w-[12rem]")}>
+                <TableHead className={cn(headPad, "w-[15rem] min-w-[13rem]")}>
                   Родитель
                 </TableHead>
-                <TableHead className={cn(headPad, "w-[9rem]")}>
+                <TableHead className={cn(headPad, "w-[6rem]")}>
                   Преподаватель
                 </TableHead>
                 <TableHead className={cn(headPad, "w-[8rem]")}>
@@ -416,7 +416,7 @@ export function BaseLeadsWorkspace({
                 >
                   П3
                 </TableHead>
-                <TableHead className={cn(headPad, "min-w-[9rem] w-[10rem]")}>
+                <TableHead className={cn(headPad, "min-w-[10rem] w-[11rem]")}>
                   Комментарий
                 </TableHead>
                 <TableHead

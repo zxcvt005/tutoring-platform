@@ -2265,6 +2265,8 @@ export async function updateManualTrialLessonAction(
       name: payload.name === undefined ? undefined : String(payload.name),
       contact:
         payload.contact === undefined ? undefined : String(payload.contact),
+      teacher:
+        payload.teacher === undefined ? undefined : String(payload.teacher),
       attended:
         payload.attended === undefined ? undefined : Boolean(payload.attended),
       purchased:
@@ -2334,6 +2336,27 @@ export async function upsertRnpAvitoManualDayAction(
         payload.trialsCompleted === undefined
           ? undefined
           : (payload.trialsCompleted as never),
+    }),
+  };
+}
+
+export async function clearRnpAvitoTrialOverrideAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { clearRnpAvitoTrialOverride } = await import(
+    "@/server/services/rnp-avito-service"
+  );
+  return {
+    day: await clearRnpAvitoTrialOverride(db, ctx, {
+      date: String(payload.date ?? ""),
+      expectedManualUpdatedAt:
+        payload.expectedManualUpdatedAt == null ||
+        payload.expectedManualUpdatedAt === ""
+          ? null
+          : String(payload.expectedManualUpdatedAt),
+      field: payload.field as "trialsScheduled" | "trialsCompleted",
     }),
   };
 }
@@ -3037,6 +3060,7 @@ export const platformActions = {
   deleteManualTrialLesson: deleteManualTrialLessonAction,
   getRnpAvitoMonth: getRnpAvitoMonthAction,
   upsertRnpAvitoManualDay: upsertRnpAvitoManualDayAction,
+  clearRnpAvitoTrialOverride: clearRnpAvitoTrialOverrideAction,
   syncRnpAvitoMonth: syncRnpAvitoMonthAction,
   listExpenses: listExpensesAction,
   createManualExpense: createManualExpenseAction,

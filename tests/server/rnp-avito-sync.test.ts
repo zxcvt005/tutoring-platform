@@ -1,10 +1,15 @@
 import { and, eq, gte, lte } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { fromAppWall } from "@/lib/app-time";
 import { resetAvitoTokenCache } from "@/server/avito/client";
 import { resolveAuthContext } from "@/server/authz/context";
-import { rnpAvitoDailyStats } from "@/server/db/schema";
+import { manualTrialLessons, rnpAvitoDailyStats } from "@/server/db/schema";
 import { loginWithPassword } from "@/server/services/auth-service";
+import {
+  createManualTrialLesson,
+  updateManualTrialLesson,
+} from "@/server/services/manual-trial-lessons-service";
 import {
   getRnpAvitoMonth,
   resetRnpAvitoSyncLocks,
@@ -130,17 +135,58 @@ describe("rnp avito sync", () => {
     ).rejects.toMatchObject({ code: "validation_error" });
   });
 
-  it("syncs API metrics, keeps manual fields, and upserts without duplicates", async () => {
+  it("syncs API metrics, overlays trials from manual_trial_lessons, no duplicates", async () => {
     const t = await createTestDb();
     close = t.close;
     setEnv();
     const director = await asRole(t.db, "director@demo.local");
 
-    await upsertRnpAvitoManualDay(t.db, director, {
-      date: "2026-11-01",
-      expectedManualUpdatedAt: null,
-      trialsScheduled: 3,
-      trialsCompleted: 2,
+    // Legacy values in rnp table must not affect displayed trial metrics.
+    await t.db.insert(rnpAvitoDailyStats).values({
+      id: "rnp_legacy_sync",
+      organizationId: director.organizationId,
+      dayDate: "2026-11-01",
+      budgetSpentRub: null,
+      impressions: null,
+      views: null,
+      contacts: null,
+      apiSyncedAt: null,
+      trialsScheduled: 99,
+      trialsCompleted: 88,
+      manualUpdatedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const lessonA = await createManualTrialLesson(t.db, director);
+    const lessonB = await createManualTrialLesson(t.db, director);
+    const lessonC = await createManualTrialLesson(t.db, director);
+    const createdAt = fromAppWall(2026, 11, 1, 12, 0, 0);
+    for (const id of [lessonA.id, lessonB.id, lessonC.id]) {
+      await t.db
+        .update(manualTrialLessons)
+        .set({ createdAt, updatedAt: createdAt })
+        .where(eq(manualTrialLessons.id, id));
+    }
+    const [rowB] = await t.db
+      .select()
+      .from(manualTrialLessons)
+      .where(eq(manualTrialLessons.id, lessonB.id))
+      .limit(1);
+    await updateManualTrialLesson(t.db, director, {
+      id: lessonB.id,
+      expectedUpdatedAt: rowB!.updatedAt.toISOString(),
+      attended: true,
+    });
+    const [rowC] = await t.db
+      .select()
+      .from(manualTrialLessons)
+      .where(eq(manualTrialLessons.id, lessonC.id))
+      .limit(1);
+    await updateManualTrialLesson(t.db, director, {
+      id: lessonC.id,
+      expectedUpdatedAt: rowC!.updatedAt.toISOString(),
+      attended: true,
     });
 
     const first = await syncRnpAvitoMonth(
@@ -178,7 +224,54 @@ describe("rnp avito sync", () => {
         )
       );
     expect(rows).toHaveLength(2);
-    expect(second.monthPayload.days.find((d) => d.date === "2026-11-01")!.trialsScheduled).toBe(3);
+    expect(
+      second.monthPayload.days.find((d) => d.date === "2026-11-01")!
+        .trialsScheduled
+    ).toBe(3);
+    expect(
+      second.monthPayload.days.find((d) => d.date === "2026-11-01")!
+        .trialsCompleted
+    ).toBe(2);
+    // API fields untouched by trial overlay; legacy trials_* may remain in DB
+    // when is_manual is false (display still uses auto counts).
+    const dbDay1 = rows.find((r) => r.dayDate === "2026-11-01")!;
+    expect(dbDay1.budgetSpentRub).toBe(2000);
+    expect(dbDay1.trialsScheduled).toBe(99);
+    expect(dbDay1.trialsScheduledIsManual).toBe(false);
+    expect(
+      second.monthPayload.days.find((d) => d.date === "2026-11-01")!
+        .trialsScheduledSource
+    ).toBe("automatic");
+
+    // Manual override must survive Avito sync and stay independent.
+    const beforeOverride = await getRnpAvitoMonth(t.db, director, {
+      year: 2026,
+      month: 11,
+    });
+    const dayBefore = beforeOverride.days.find((d) => d.date === "2026-11-01")!;
+    const manual = await upsertRnpAvitoManualDay(t.db, director, {
+      date: "2026-11-01",
+      expectedManualUpdatedAt: dayBefore.manualUpdatedAt,
+      trialsScheduled: 7,
+    });
+    expect(manual.trialsScheduled).toBe(7);
+    expect(manual.trialsScheduledSource).toBe("manual");
+    expect(manual.trialsCompletedSource).toBe("automatic");
+
+    const afterSync = await syncRnpAvitoMonth(
+      t.db,
+      director,
+      { year: 2026, month: 11 },
+      { fetchFn: mockAvitoOk() }
+    );
+    const dayAfter = afterSync.monthPayload.days.find(
+      (d) => d.date === "2026-11-01"
+    )!;
+    expect(dayAfter.budgetSpentRub).toBe(2000);
+    expect(dayAfter.trialsScheduled).toBe(7);
+    expect(dayAfter.trialsScheduledSource).toBe("manual");
+    expect(dayAfter.trialsCompleted).toBe(2);
+    expect(dayAfter.trialsCompletedSource).toBe("automatic");
   });
 
   it("does not partially update the month when Avito returns an error", async () => {

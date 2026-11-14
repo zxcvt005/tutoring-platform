@@ -16,6 +16,7 @@ import { conflict, notFound, validationError } from "@/server/errors";
 
 const MAX_NAME = 200;
 const MAX_CONTACT = 500;
+const MAX_TEACHER = 200;
 const MAX_COMMENT = 4000;
 const MAX_HOURS = 168;
 const MAX_RATE_RUB = 1_000_000;
@@ -32,6 +33,7 @@ function toRow(row: typeof manualTrialLessons.$inferSelect): ManualTrialLesson {
     source: isManualTrialSource(row.source) ? row.source : null,
     name: row.name,
     contact: row.contact,
+    teacher: row.teacher ?? "",
     attended: row.attended,
     purchased: row.purchased,
     hoursPerWeek: row.hoursPerWeek,
@@ -79,6 +81,12 @@ function sanitizeText(value: unknown, max: number, label: string): string {
     throw validationError(`${label}: слишком длинное значение`);
   }
   return trimmed;
+}
+
+/** Пустая строка → NULL в БД (старые и очищенные записи). */
+function sanitizeOptionalTeacher(value: unknown): string | null {
+  const text = sanitizeText(value, MAX_TEACHER, "Преподаватель");
+  return text === "" ? null : text;
 }
 
 function parseOptionalSource(value: unknown): ManualTrialSource | null {
@@ -148,6 +156,7 @@ export async function createManualTrialLesson(
     source: null,
     name: "",
     contact: "",
+    teacher: null,
     attended: false,
     purchased: false,
     hoursPerWeek: null,
@@ -173,6 +182,7 @@ export type UpdateManualTrialLessonInput = {
   source?: ManualTrialSource | null | "";
   name?: string;
   contact?: string;
+  teacher?: string | null;
   attended?: boolean;
   purchased?: boolean;
   hoursPerWeek?: number | null | "";
@@ -229,6 +239,9 @@ export async function updateManualTrialLesson(
   }
   if (input.contact !== undefined) {
     patch.contact = sanitizeText(input.contact, MAX_CONTACT, "Контакт");
+  }
+  if (input.teacher !== undefined) {
+    patch.teacher = sanitizeOptionalTeacher(input.teacher);
   }
   if (input.comment !== undefined) {
     patch.comment = sanitizeText(input.comment, MAX_COMMENT, "Комментарий");

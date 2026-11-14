@@ -27,6 +27,8 @@ export type ManualTrialLesson = {
   source: ManualTrialSource | null;
   name: string;
   contact: string;
+  /** Пустая строка, если не заполнено (в БД null) */
+  teacher: string;
   attended: boolean;
   purchased: boolean;
   /** null — не заполнено */

@@ -309,6 +309,20 @@
       "when": 1796600000000,
       "tag": "0043_base_leads_people_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1796700000000,
+      "tag": "0044_manual_trial_lessons_teacher",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1796800000000,
+      "tag": "0045_rnp_avito_trial_manual_flags",
+      "breakpoints": true
     }
   ]
 }

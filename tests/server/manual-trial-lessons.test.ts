@@ -38,7 +38,7 @@ describe("manual trial lessons (Дирекция «Пробные уроки»)"
     return resolveAuthContext(db, session.rawToken);
   }
 
-  it("supports CRUD, sources, checkboxes and numeric fields without touching other tables", async () => {
+  it("supports CRUD, sources, teacher, checkboxes and numeric fields without touching other tables", async () => {
     const t = await createTestDb();
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
@@ -52,8 +52,15 @@ describe("manual trial lessons (Дирекция «Пробные уроки»)"
     const created = await createManualTrialLesson(t.db, director);
     expect(created.attended).toBe(false);
     expect(created.purchased).toBe(false);
+    expect(created.teacher).toBe("");
     expect(created.hoursPerWeek).toBeNull();
     expect(created.ratePerHourRub).toBeNull();
+    const [rawCreated] = await t.db
+      .select()
+      .from(manualTrialLessons)
+      .where(eq(manualTrialLessons.id, created.id))
+      .limit(1);
+    expect(rawCreated?.teacher).toBeNull();
 
     for (const source of MANUAL_TRIAL_SOURCES) {
       const listed = await listManualTrialLessons(t.db, director);
@@ -75,6 +82,7 @@ describe("manual trial lessons (Дирекция «Пробные уроки»)"
       lessonTime: "12:00",
       name: "Станислав",
       contact: "+79999999999",
+      teacher: "Анна",
       attended: true,
       purchased: true,
       hoursPerWeek: 2,
@@ -84,10 +92,26 @@ describe("manual trial lessons (Дирекция «Пробные уроки»)"
     expect(filled.lessonDate).toBe("2026-08-22");
     expect(filled.lessonTime).toBe("12:00");
     expect(filled.name).toBe("Станислав");
+    expect(filled.teacher).toBe("Анна");
     expect(filled.attended).toBe(true);
     expect(filled.purchased).toBe(true);
     expect(filled.hoursPerWeek).toBe(2);
     expect(filled.ratePerHourRub).toBe(2000);
+
+    const listedTeacher = await listManualTrialLessons(t.db, director);
+    const curTeacher = listedTeacher.find((r) => r.id === created.id)!;
+    const clearedTeacher = await updateManualTrialLesson(t.db, director, {
+      id: created.id,
+      expectedUpdatedAt: curTeacher.updatedAt,
+      teacher: "  ",
+    });
+    expect(clearedTeacher.teacher).toBe("");
+    const [rawCleared] = await t.db
+      .select()
+      .from(manualTrialLessons)
+      .where(eq(manualTrialLessons.id, created.id))
+      .limit(1);
+    expect(rawCleared?.teacher).toBeNull();
 
     const other = await createManualTrialLesson(t.db, director);
     await deleteManualTrialLesson(t.db, director, created.id);

@@ -66,6 +66,7 @@ type Patch = Partial<
     | "source"
     | "name"
     | "contact"
+    | "teacher"
     | "attended"
     | "purchased"
     | "hoursPerWeek"
@@ -305,7 +306,7 @@ export function ManualTrialLessonsWorkspace({
 
   function onTextChange(
     id: string,
-    field: "name" | "contact" | "comment",
+    field: "name" | "contact" | "teacher" | "comment",
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) {
     const value = e.target.value;
@@ -403,7 +404,7 @@ export function ManualTrialLessonsWorkspace({
         />
       ) : (
         <div className="max-h-[calc(100vh-11rem)] overflow-auto rounded-xl border border-border/80 bg-card">
-          <Table className="min-w-[1080px] text-[0.78rem]">
+          <Table className="min-w-[1160px] text-[0.78rem]">
             <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur-sm">
               <TableRow className="hover:bg-transparent">
                 <GroupHead
@@ -418,7 +419,7 @@ export function ManualTrialLessonsWorkspace({
                 />
                 <GroupHead
                   label="Итог"
-                  colSpan={5}
+                  colSpan={6}
                   className="bg-pastel-mint/80 text-emerald-950 dark:text-emerald-100"
                 />
                 <GroupHead
@@ -434,6 +435,7 @@ export function ManualTrialLessonsWorkspace({
                 <TableHead className="w-[7.5rem]">Источник</TableHead>
                 <TableHead className="w-[7rem]">Имя</TableHead>
                 <TableHead className="w-[8rem]">Контакт</TableHead>
+                <TableHead className="w-[7rem]">Преподаватель</TableHead>
                 <TableHead className="w-12 text-center">Прошёл</TableHead>
                 <TableHead className="w-12 text-center">Купил</TableHead>
                 <TableHead className="w-[5.5rem]">Часов/нед.</TableHead>
@@ -547,6 +549,18 @@ export function ManualTrialLessonsWorkspace({
                         onChange={(e) => onTextChange(row.id, "contact", e)}
                         onBlur={(e) =>
                           queueSave(row.id, { contact: e.target.value }, true)
+                        }
+                      />
+                    </TableCell>
+                    <TableCell className="p-1.5">
+                      <Input
+                        value={row.teacher}
+                        placeholder="Преподаватель"
+                        title={row.teacher || undefined}
+                        className="h-7 border-transparent bg-transparent px-1 shadow-none focus-visible:border-input focus-visible:bg-background"
+                        onChange={(e) => onTextChange(row.id, "teacher", e)}
+                        onBlur={(e) =>
+                          queueSave(row.id, { teacher: e.target.value }, true)
                         }
                       />
                     </TableCell>

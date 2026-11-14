@@ -9,21 +9,27 @@ import {
   useTransition,
   type ChangeEvent,
 } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
   RNP_AVITO_API_METRICS,
   RNP_AVITO_DERIVED_METRICS,
-  RNP_AVITO_MANUAL_METRICS,
+  RNP_AVITO_TRIAL_METRICS,
   type AvitoEnvStatus,
   type RnpAvitoDayStats,
   type RnpAvitoDerivedKey,
-  type RnpAvitoMetricKey,
   type RnpAvitoMonthPayload,
+  type RnpAvitoTrialMetricKey,
   computeRnpAvitoDerived,
   derivedForDay,
   formatDayHeader,
@@ -41,15 +47,18 @@ import { cn } from "@/lib/utils";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-type ManualKey = Extract<
-  RnpAvitoMetricKey,
-  "trialsScheduled" | "trialsCompleted"
->;
-
 const TEXT_DEBOUNCE_MS = 450;
 
 function todayParts(now = new Date()) {
   return { year: now.getFullYear(), month: now.getMonth() + 1 };
+}
+
+function trialSourceKey(
+  field: RnpAvitoTrialMetricKey
+): "trialsScheduledSource" | "trialsCompletedSource" {
+  return field === "trialsScheduled"
+    ? "trialsScheduledSource"
+    : "trialsCompletedSource";
 }
 
 function MetricLabelCell({
@@ -142,7 +151,7 @@ export function RnpAvitoWorkspace({
   const persistManualRef = useRef<
     | ((
         date: string,
-        field: ManualKey,
+        field: RnpAvitoTrialMetricKey,
         value: number | null,
         gen: number,
         retried?: boolean
@@ -166,28 +175,31 @@ export function RnpAvitoWorkspace({
     savedTimerRef.current = setTimeout(() => setSaveState("idle"), 1600);
   }, []);
 
-  const loadMonth = useCallback(async (y: number, m: number) => {
-    setLoadError(null);
-    setReady(false);
-    try {
-      const data = await apiCall<RnpAvitoMonthPayload>("getRnpAvitoMonth", {
-        year: y,
-        month: m,
-      });
-      startTransition(() => {
-        setYear(data.year);
-        setMonth(data.month);
-        setDays(data.days);
-        setApiConnected(data.apiConnected);
-        setAvitoEnv(data.avitoEnv);
-        setLastSyncedAt(data.lastSyncedAt);
+  const loadMonth = useCallback(
+    async (y: number, m: number) => {
+      setLoadError(null);
+      setReady(false);
+      try {
+        const data = await apiCall<RnpAvitoMonthPayload>("getRnpAvitoMonth", {
+          year: y,
+          month: m,
+        });
+        startTransition(() => {
+          setYear(data.year);
+          setMonth(data.month);
+          setDays(data.days);
+          setApiConnected(data.apiConnected);
+          setAvitoEnv(data.avitoEnv);
+          setLastSyncedAt(data.lastSyncedAt);
+          setReady(true);
+        });
+      } catch (err) {
+        setLoadError(err instanceof Error ? err.message : "Ошибка загрузки");
         setReady(true);
-      });
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Ошибка загрузки");
-      setReady(true);
-    }
-  }, [apiCall]);
+      }
+    },
+    [apiCall]
+  );
 
   async function syncAvito() {
     setSyncError(null);
@@ -250,7 +262,7 @@ export function RnpAvitoWorkspace({
   const persistManual = useCallback(
     async (
       date: string,
-      field: ManualKey,
+      field: RnpAvitoTrialMetricKey,
       value: number | null,
       gen: number,
       retried = false
@@ -283,12 +295,8 @@ export function RnpAvitoWorkspace({
             );
             const server = monthData.days.find((d) => d.date === date);
             if (server) {
-              const merged: RnpAvitoDayStats = {
-                ...server,
-                [field]: value,
-              };
               setDays((prev) =>
-                prev.map((d) => (d.date === date ? merged : d))
+                prev.map((d) => (d.date === date ? server : d))
               );
               const retryGen = bumpSaveGen(`${date}:${field}`);
               const retry = persistManualRef.current;
@@ -311,7 +319,7 @@ export function RnpAvitoWorkspace({
   }, [persistManual]);
 
   const queueManual = useCallback(
-    (date: string, field: ManualKey, value: number | null) => {
+    (date: string, field: RnpAvitoTrialMetricKey, value: number | null) => {
       const key = `${date}:${field}`;
       const gen = bumpSaveGen(key);
       const existing = timersRef.current.get(key);
@@ -325,15 +333,24 @@ export function RnpAvitoWorkspace({
     [bumpSaveGen, persistManual]
   );
 
-  function applyLocal(date: string, field: ManualKey, value: number | null) {
+  function applyLocal(
+    date: string,
+    field: RnpAvitoTrialMetricKey,
+    value: number | null
+  ) {
+    const sourceKey = trialSourceKey(field);
     setDays((prev) =>
-      prev.map((d) => (d.date === date ? { ...d, [field]: value } : d))
+      prev.map((d) =>
+        d.date === date
+          ? { ...d, [field]: value, [sourceKey]: "manual" as const }
+          : d
+      )
     );
   }
 
   function onManualChange(
     date: string,
-    field: ManualKey,
+    field: RnpAvitoTrialMetricKey,
     e: ChangeEvent<HTMLInputElement>
   ) {
     const raw = e.target.value;
@@ -349,6 +366,47 @@ export function RnpAvitoWorkspace({
     queueManual(date, field, asInt);
   }
 
+  async function clearOverride(date: string, field: RnpAvitoTrialMetricKey) {
+    const current = daysRef.current.find((d) => d.date === date);
+    if (!current) return;
+    const key = `${date}:${field}`;
+    const existing = timersRef.current.get(key);
+    if (existing) clearTimeout(existing);
+    timersRef.current.delete(key);
+    bumpSaveGen(key);
+    setSaveState("saving");
+    try {
+      const data = await apiCall<{ day: RnpAvitoDayStats }>(
+        "clearRnpAvitoTrialOverride",
+        {
+          date,
+          field,
+          expectedManualUpdatedAt: current.manualUpdatedAt,
+        }
+      );
+      setDays((prev) => prev.map((d) => (d.date === date ? data.day : d)));
+      markSaved();
+    } catch (err) {
+      const status = err instanceof HttpStatusError ? err.status : 0;
+      if (status === 409) {
+        try {
+          const monthData = await apiCall<RnpAvitoMonthPayload>(
+            "getRnpAvitoMonth",
+            { year, month }
+          );
+          setDays(monthData.days);
+          toast.message("Данные обновились, повторите сброс при необходимости");
+          setSaveState("idle");
+          return;
+        } catch {
+          /* fall through */
+        }
+      }
+      setSaveState("error");
+      toast.error(err instanceof Error ? err.message : "Не удалось сбросить");
+    }
+  }
+
   function renderApiValue(value: number | null, money = false) {
     if (value == null) {
       return <span className="text-muted-foreground/50">—</span>;
@@ -356,10 +414,7 @@ export function RnpAvitoWorkspace({
     return formatRnpNumber(value, money ? "money" : "int");
   }
 
-  function renderDerived(
-    key: RnpAvitoDerivedKey,
-    value: number | null
-  ) {
+  function renderDerived(key: RnpAvitoDerivedKey, value: number | null) {
     const meta = RNP_AVITO_DERIVED_METRICS.find((m) => m.key === key)!;
     const text = formatRnpNumber(
       value,
@@ -401,7 +456,7 @@ export function RnpAvitoWorkspace({
     <div>
       <PageHeader
         title="РНП Авито"
-        description="Помесячная рекламная аналитика. Не связана с «Базой» и «Пробными уроками»."
+        description="Помесячная рекламная аналитика. Пробные по умолчанию из «Пробных уроков»; ячейку можно задать вручную."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {saveLabel ? (
@@ -542,18 +597,20 @@ export function RnpAvitoWorkspace({
               </tr>
             ))}
 
-            {RNP_AVITO_MANUAL_METRICS.map((metric) => (
-              <tr key={metric.key} className="bg-pastel-blue/20">
+            {RNP_AVITO_TRIAL_METRICS.map((metric) => (
+              <tr key={metric.key} className="bg-pastel-mint/30">
                 <MetricLabelCell
                   label={metric.label}
-                  className="bg-pastel-blue/40"
+                  hint="Авто из пробных; ячейку можно задать вручную"
+                  className="bg-pastel-mint/50"
                 />
-                <TotalCell className="bg-pastel-blue/40">
+                <TotalCell className="bg-pastel-mint/50">
                   {renderApiValue(totals[metric.key])}
                 </TotalCell>
                 {days.map((d) => {
                   const future = d.date > todayIso;
-                  const value = d[metric.key as ManualKey];
+                  const value = d[metric.key];
+                  const isManual = d[trialSourceKey(metric.key)] === "manual";
                   return (
                     <DayCell
                       key={d.date}
@@ -562,37 +619,35 @@ export function RnpAvitoWorkspace({
                       {future ? (
                         ""
                       ) : (
-                        <Input
-                          type="number"
-                          min={0}
-                          step={1}
-                          value={value ?? ""}
-                          placeholder=""
-                          className="h-6 border-transparent bg-transparent px-0.5 text-center text-[0.7rem] shadow-none focus-visible:border-input focus-visible:bg-background"
+                        <TrialMetricCell
+                          date={d.date}
+                          field={metric.key}
+                          value={value}
+                          isManual={isManual}
                           onChange={(e) =>
-                            onManualChange(d.date, metric.key as ManualKey, e)
+                            onManualChange(d.date, metric.key, e)
                           }
-                          onBlur={(e) => {
-                            const raw = e.target.value.trim();
+                          onBlur={(raw) => {
                             const next =
-                              raw === ""
+                              raw.trim() === ""
                                 ? null
                                 : Number.isFinite(Number(raw))
                                   ? Math.trunc(Number(raw))
                                   : null;
                             if (next != null && next < 0) return;
-                            applyLocal(d.date, metric.key as ManualKey, next);
+                            applyLocal(d.date, metric.key, next);
                             const key = `${d.date}:${metric.key}`;
                             const existing = timersRef.current.get(key);
                             if (existing) clearTimeout(existing);
                             timersRef.current.delete(key);
                             void persistManual(
                               d.date,
-                              metric.key as ManualKey,
+                              metric.key,
                               next,
                               bumpSaveGen(key)
                             );
                           }}
+                          onClear={() => void clearOverride(d.date, metric.key)}
                         />
                       )}
                     </DayCell>
@@ -616,7 +671,8 @@ export function RnpAvitoWorkspace({
                     <DayCell
                       key={d.date}
                       className={cn(
-                        d.date > todayIso && "bg-muted/20 text-muted-foreground/40"
+                        d.date > todayIso &&
+                          "bg-muted/20 text-muted-foreground/40"
                       )}
                     >
                       {d.date > todayIso
@@ -631,5 +687,96 @@ export function RnpAvitoWorkspace({
         </table>
       </div>
     </div>
+  );
+}
+
+function TrialMetricCell({
+  date,
+  field,
+  value,
+  isManual,
+  onChange,
+  onBlur,
+  onClear,
+}: {
+  date: string;
+  field: RnpAvitoTrialMetricKey;
+  value: number | null;
+  isManual: boolean;
+  onChange: (e: ChangeEvent<HTMLInputElement>) => void;
+  onBlur: (raw: string) => void;
+  onClear: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const title = isManual
+    ? "Значение задано вручную"
+    : "Автоматический расчёт из таблицы пробных уроков";
+
+  return (
+    <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <div
+        className={cn(
+          "group relative mx-auto flex max-w-[3.2rem] items-center justify-center",
+          isManual && "rounded-sm bg-foreground/[0.04]"
+        )}
+        title={title}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenuOpen(true);
+        }}
+      >
+        {isManual ? (
+          <span
+            className="pointer-events-none absolute -right-0.5 -top-0.5 size-1 rounded-full bg-foreground/45"
+            aria-hidden
+          />
+        ) : null}
+        <Input
+          type="number"
+          min={0}
+          step={1}
+          value={value ?? ""}
+          placeholder=""
+          aria-label={`${field}-${date}`}
+          className="h-6 border-transparent bg-transparent px-0.5 text-center text-[0.7rem] shadow-none focus-visible:border-input focus-visible:bg-background"
+          onChange={onChange}
+          onBlur={(e) => onBlur(e.target.value)}
+        />
+        <DropdownMenuTrigger
+          render={
+            <button
+              type="button"
+              className={cn(
+                "absolute -bottom-0.5 left-1/2 flex size-3.5 -translate-x-1/2 items-center justify-center rounded-sm text-muted-foreground/70",
+                "opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100",
+                menuOpen && "opacity-100"
+              )}
+              aria-label="Действия с ячейкой"
+            />
+          }
+        >
+          <MoreHorizontal className="size-2.5" />
+        </DropdownMenuTrigger>
+      </div>
+      <DropdownMenuContent align="center" className="min-w-[14rem]">
+        <div className="px-2 py-1.5 text-[0.65rem] text-muted-foreground">
+          {title}
+        </div>
+        {isManual ? (
+          <DropdownMenuItem
+            onClick={() => {
+              setMenuOpen(false);
+              onClear();
+            }}
+          >
+            Вернуть автоматический расчёт
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem disabled>
+            Редактирование переведёт в ручной режим
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

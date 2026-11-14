@@ -27,6 +27,7 @@ export const QUICK_ACCESS_ACTIONS: Record<
   "rnp-avito": [
     "getRnpAvitoMonth",
     "upsertRnpAvitoManualDay",
+    "clearRnpAvitoTrialOverride",
     "syncRnpAvitoMonth",
   ],
   "probnye-uroki": [

@@ -1,13 +1,17 @@
-import { and, asc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, eq, gte, lt, lte } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 
+import { fromAppWall } from "@/lib/app-time";
 import {
+  type ManualTrialCreatedDayCounts,
   type RnpAvitoDayStats,
   type RnpAvitoMonthPayload,
+  type RnpAvitoTrialMetricKey,
+  aggregateManualTrialsByCreatedAppDay,
   buildMonthDayShell,
   daysInMonth,
-  emptyDayStats,
   isoDate,
+  resolveTrialDayFields,
 } from "@/lib/rnp-avito";
 import {
   fetchAvitoItemStatsPage,
@@ -23,11 +27,10 @@ import {
 } from "@/server/avito/parse-stats";
 import type { AuthContext } from "@/server/authz/context";
 import { requireRoles } from "@/server/authz/require";
-import { rnpAvitoDailyStats } from "@/server/db/schema";
+import { manualTrialLessons, rnpAvitoDailyStats } from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
 import { conflict, validationError } from "@/server/errors";
 
-const MAX_COUNT = 1_000_000;
 const ITEM_STATS_PAGE_SIZE = 100;
 const MAX_ITEM_STATS_PAGES = 20;
 
@@ -43,33 +46,58 @@ export function resetRnpAvitoSyncLocks() {
   syncLocks.clear();
 }
 
-function toDay(row: typeof rnpAvitoDailyStats.$inferSelect): RnpAvitoDayStats {
+const MAX_COUNT = 1_000_000;
+
+function toDayBase(
+  row: typeof rnpAvitoDailyStats.$inferSelect
+): Omit<
+  RnpAvitoDayStats,
+  | "trialsScheduled"
+  | "trialsCompleted"
+  | "trialsScheduledSource"
+  | "trialsCompletedSource"
+> {
   return {
     date: row.dayDate,
     budgetSpentRub: row.budgetSpentRub,
     impressions: row.impressions,
     views: row.views,
     contacts: row.contacts,
-    trialsScheduled: row.trialsScheduled,
-    trialsCompleted: row.trialsCompleted,
     manualUpdatedAt: row.manualUpdatedAt.toISOString(),
     apiSyncedAt: row.apiSyncedAt ? row.apiSyncedAt.toISOString() : null,
   };
 }
 
-function parseYearMonth(year: unknown, month: unknown): {
-  year: number;
-  month: number;
-} {
-  const y = Number(year);
-  const m = Number(month);
-  if (!Number.isInteger(y) || y < 2000 || y > 2100) {
-    throw validationError("Некорректный год");
-  }
-  if (!Number.isInteger(m) || m < 1 || m > 12) {
-    throw validationError("Некорректный месяц");
-  }
-  return { year: y, month: m };
+function resolveDay(
+  row: typeof rnpAvitoDailyStats.$inferSelect | null,
+  date: string,
+  counts: ManualTrialCreatedDayCounts | undefined
+): RnpAvitoDayStats {
+  const base = row
+    ? toDayBase(row)
+    : {
+        date,
+        budgetSpentRub: null,
+        impressions: null,
+        views: null,
+        contacts: null,
+        manualUpdatedAt: null,
+        apiSyncedAt: null,
+      };
+  return {
+    ...base,
+    ...resolveTrialDayFields(
+      row
+        ? {
+            trialsScheduled: row.trialsScheduled,
+            trialsCompleted: row.trialsCompleted,
+            trialsScheduledIsManual: row.trialsScheduledIsManual,
+            trialsCompletedIsManual: row.trialsCompletedIsManual,
+          }
+        : null,
+      counts
+    ),
+  };
 }
 
 function parseDayDate(value: unknown): string {
@@ -119,6 +147,63 @@ function sameInstant(a: Date, iso: string): boolean {
   return a.getTime() === t;
 }
 
+async function countsForDayDate(
+  db: AppDb,
+  organizationId: string,
+  dayDate: string
+): Promise<ManualTrialCreatedDayCounts | undefined> {
+  const [y, m] = dayDate.split("-").map(Number);
+  const map = await loadManualTrialCountsByCreatedDay(
+    db,
+    organizationId,
+    y!,
+    m!
+  );
+  return map.get(dayDate);
+}
+
+/**
+ * Единый источник пробных для РНП: manual_trial_lessons по createdAt (Europe/Moscow).
+ */
+export async function loadManualTrialCountsByCreatedDay(
+  db: AppDb,
+  organizationId: string,
+  year: number,
+  month: number
+): Promise<Map<string, ManualTrialCreatedDayCounts>> {
+  const monthStart = fromAppWall(year, month, 1, 0, 0, 0);
+  const nextMonthStart = fromAppWall(year, month + 1, 1, 0, 0, 0);
+  const rows = await db
+    .select({
+      createdAt: manualTrialLessons.createdAt,
+      attended: manualTrialLessons.attended,
+    })
+    .from(manualTrialLessons)
+    .where(
+      and(
+        eq(manualTrialLessons.organizationId, organizationId),
+        gte(manualTrialLessons.createdAt, monthStart),
+        lt(manualTrialLessons.createdAt, nextMonthStart)
+      )
+    );
+  return aggregateManualTrialsByCreatedAppDay(rows, year, month);
+}
+
+function parseYearMonth(year: unknown, month: unknown): {
+  year: number;
+  month: number;
+} {
+  const y = Number(year);
+  const m = Number(month);
+  if (!Number.isInteger(y) || y < 2000 || y > 2100) {
+    throw validationError("Некорректный год");
+  }
+  if (!Number.isInteger(m) || m < 1 || m > 12) {
+    throw validationError("Некорректный месяц");
+  }
+  return { year: y, month: m };
+}
+
 export async function getRnpAvitoMonth(
   db: AppDb,
   ctx: AuthContext,
@@ -142,8 +227,16 @@ export async function getRnpAvitoMonth(
     )
     .orderBy(asc(rnpAvitoDailyStats.dayDate));
 
-  const byDate = new Map(rows.map((r) => [r.dayDate, toDay(r)]));
-  const days = shell.map((d) => byDate.get(d.date) ?? emptyDayStats(d.date));
+  const byDate = new Map(rows.map((r) => [r.dayDate, r]));
+  const trialCounts = await loadManualTrialCountsByCreatedDay(
+    db,
+    ctx.organizationId,
+    year,
+    month
+  );
+  const days = shell.map((d) =>
+    resolveDay(byDate.get(d.date) ?? null, d.date, trialCounts.get(d.date))
+  );
 
   let lastSyncedAt: string | null = null;
   for (const d of days) {
@@ -179,6 +272,10 @@ export type UpsertRnpAvitoManualInput = {
   trialsCompleted?: number | null | "";
 };
 
+/**
+ * Сохраняет ручное переопределение одной или обеих ячеек пробных.
+ * Каждое переданное поле переводится в режим manual независимо от другого.
+ */
 export async function upsertRnpAvitoManualDay(
   db: AppDb,
   ctx: AuthContext,
@@ -187,6 +284,37 @@ export async function upsertRnpAvitoManualDay(
   requireRoles(ctx, ["director"]);
   const dayDate = parseDayDate(input.date);
   const now = new Date();
+
+  const patch: {
+    trialsScheduled?: number | null;
+    trialsCompleted?: number | null;
+    trialsScheduledIsManual?: boolean;
+    trialsCompletedIsManual?: boolean;
+  } = {};
+
+  if (input.trialsScheduled !== undefined) {
+    patch.trialsScheduled = parseOptionalNonNegInt(
+      input.trialsScheduled,
+      "Назначенные пробные",
+      MAX_COUNT
+    );
+    patch.trialsScheduledIsManual = true;
+  }
+  if (input.trialsCompleted !== undefined) {
+    patch.trialsCompleted = parseOptionalNonNegInt(
+      input.trialsCompleted,
+      "Проведённые пробные",
+      MAX_COUNT
+    );
+    patch.trialsCompletedIsManual = true;
+  }
+
+  if (
+    patch.trialsScheduledIsManual === undefined &&
+    patch.trialsCompletedIsManual === undefined
+  ) {
+    throw validationError("Нет полей для сохранения");
+  }
 
   const [existing] = await db
     .select()
@@ -199,39 +327,16 @@ export async function upsertRnpAvitoManualDay(
     )
     .limit(1);
 
-  const patchManual: {
-    trialsScheduled?: number | null;
-    trialsCompleted?: number | null;
-  } = {};
-
-  if (input.trialsScheduled !== undefined) {
-    patchManual.trialsScheduled = parseOptionalNonNegInt(
-      input.trialsScheduled,
-      "Назначенные пробные",
-      MAX_COUNT
-    );
-  }
-  if (input.trialsCompleted !== undefined) {
-    patchManual.trialsCompleted = parseOptionalNonNegInt(
-      input.trialsCompleted,
-      "Проведённые пробные",
-      MAX_COUNT
-    );
-  }
-
-  if (Object.keys(patchManual).length === 0) {
-    throw validationError("Нет полей для сохранения");
-  }
-
+  let rowId: string;
   if (!existing) {
     if (input.expectedManualUpdatedAt) {
       throw conflict(
         "Запись уже изменена. Обновите данные и повторите сохранение."
       );
     }
-    const id = newId();
+    rowId = newId();
     await db.insert(rnpAvitoDailyStats).values({
-      id,
+      id: rowId,
       organizationId: ctx.organizationId,
       dayDate,
       budgetSpentRub: null,
@@ -239,19 +344,79 @@ export async function upsertRnpAvitoManualDay(
       views: null,
       contacts: null,
       apiSyncedAt: null,
-      trialsScheduled: patchManual.trialsScheduled ?? null,
-      trialsCompleted: patchManual.trialsCompleted ?? null,
+      trialsScheduled: patch.trialsScheduled ?? null,
+      trialsCompleted: patch.trialsCompleted ?? null,
+      trialsScheduledIsManual: patch.trialsScheduledIsManual ?? false,
+      trialsCompletedIsManual: patch.trialsCompletedIsManual ?? false,
       manualUpdatedAt: now,
       createdAt: now,
       updatedAt: now,
     });
-    const [row] = await db
-      .select()
-      .from(rnpAvitoDailyStats)
-      .where(eq(rnpAvitoDailyStats.id, id))
-      .limit(1);
-    if (!row) throw new Error("Не удалось сохранить день РНП");
-    return toDay(row);
+  } else {
+    const expected = input.expectedManualUpdatedAt;
+    if (!expected || !sameInstant(existing.manualUpdatedAt, expected)) {
+      throw conflict(
+        "Запись уже изменена. Обновите данные и повторите сохранение."
+      );
+    }
+    rowId = existing.id;
+    await db
+      .update(rnpAvitoDailyStats)
+      .set({
+        ...patch,
+        manualUpdatedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(rnpAvitoDailyStats.id, existing.id));
+  }
+
+  const [row] = await db
+    .select()
+    .from(rnpAvitoDailyStats)
+    .where(eq(rnpAvitoDailyStats.id, rowId))
+    .limit(1);
+  if (!row) throw new Error("Не удалось сохранить день РНП");
+  const counts = await countsForDayDate(db, ctx.organizationId, dayDate);
+  return resolveDay(row, dayDate, counts);
+}
+
+export type ClearRnpAvitoTrialOverrideInput = {
+  date: string;
+  expectedManualUpdatedAt: string | null;
+  field: RnpAvitoTrialMetricKey;
+};
+
+/**
+ * Снимает ручной режим с одной ячейки; значение снова из manual_trial_lessons.
+ */
+export async function clearRnpAvitoTrialOverride(
+  db: AppDb,
+  ctx: AuthContext,
+  input: ClearRnpAvitoTrialOverrideInput
+): Promise<RnpAvitoDayStats> {
+  requireRoles(ctx, ["director"]);
+  const dayDate = parseDayDate(input.date);
+  if (
+    input.field !== "trialsScheduled" &&
+    input.field !== "trialsCompleted"
+  ) {
+    throw validationError("Некорректное поле для сброса");
+  }
+
+  const [existing] = await db
+    .select()
+    .from(rnpAvitoDailyStats)
+    .where(
+      and(
+        eq(rnpAvitoDailyStats.organizationId, ctx.organizationId),
+        eq(rnpAvitoDailyStats.dayDate, dayDate)
+      )
+    )
+    .limit(1);
+
+  if (!existing) {
+    const counts = await countsForDayDate(db, ctx.organizationId, dayDate);
+    return resolveDay(null, dayDate, counts);
   }
 
   const expected = input.expectedManualUpdatedAt;
@@ -261,13 +426,28 @@ export async function upsertRnpAvitoManualDay(
     );
   }
 
+  const isManual =
+    input.field === "trialsScheduled"
+      ? existing.trialsScheduledIsManual
+      : existing.trialsCompletedIsManual;
+  if (!isManual) {
+    const counts = await countsForDayDate(db, ctx.organizationId, dayDate);
+    return resolveDay(existing, dayDate, counts);
+  }
+
+  const now = new Date();
+  const patch =
+    input.field === "trialsScheduled"
+      ? { trialsScheduledIsManual: false, manualUpdatedAt: now, updatedAt: now }
+      : {
+          trialsCompletedIsManual: false,
+          manualUpdatedAt: now,
+          updatedAt: now,
+        };
+
   await db
     .update(rnpAvitoDailyStats)
-    .set({
-      ...patchManual,
-      manualUpdatedAt: now,
-      updatedAt: now,
-    })
+    .set(patch)
     .where(eq(rnpAvitoDailyStats.id, existing.id));
 
   const [row] = await db
@@ -275,8 +455,9 @@ export async function upsertRnpAvitoManualDay(
     .from(rnpAvitoDailyStats)
     .where(eq(rnpAvitoDailyStats.id, existing.id))
     .limit(1);
-  if (!row) throw new Error("Не удалось сохранить день РНП");
-  return toDay(row);
+  if (!row) throw new Error("Не удалось сбросить переопределение РНП");
+  const counts = await countsForDayDate(db, ctx.organizationId, dayDate);
+  return resolveDay(row, dayDate, counts);
 }
 
 async function fetchAllItemStatsByDay(
@@ -416,6 +597,8 @@ export async function syncRnpAvitoMonth(
             apiSyncedAt: row.apiSyncedAt,
             trialsScheduled: null,
             trialsCompleted: null,
+            trialsScheduledIsManual: false,
+            trialsCompletedIsManual: false,
             manualUpdatedAt: syncedAt,
             createdAt: syncedAt,
             updatedAt: row.updatedAt,
@@ -432,6 +615,7 @@ export async function syncRnpAvitoMonth(
               contacts: row.contacts,
               apiSyncedAt: row.apiSyncedAt,
               updatedAt: row.updatedAt,
+              // trials_* и *_is_manual не трогаем — ручные переопределения сохраняются.
             },
           });
       }

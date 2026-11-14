@@ -1,5 +1,10 @@
 /** РНП Авито — помесячная рекламная аналитика (Дирекция). Изолированный модуль. */
 
+import { appDateKey } from "@/lib/app-time";
+
+/** Источник значения пробного показателя в ячейке дня. */
+export type RnpAvitoTrialSource = "automatic" | "manual";
+
 export type RnpAvitoDayStats = {
   /** YYYY-MM-DD */
   date: string;
@@ -11,9 +16,13 @@ export type RnpAvitoDayStats = {
   views: number | null;
   /** API: контакты */
   contacts: number | null;
-  /** Ручные */
+  /**
+   * Назначенные: auto из manual_trial_lessons или ручное переопределение.
+   */
   trialsScheduled: number | null;
   trialsCompleted: number | null;
+  trialsScheduledSource: RnpAvitoTrialSource;
+  trialsCompletedSource: RnpAvitoTrialSource;
   /** ISO; null если строки ещё нет в БД */
   manualUpdatedAt: string | null;
   apiSyncedAt: string | null;
@@ -66,13 +75,20 @@ export const RNP_AVITO_API_METRICS: {
   { key: "contacts", label: "Количество контактов" },
 ];
 
-export const RNP_AVITO_MANUAL_METRICS: {
-  key: RnpAvitoMetricKey;
+/** Пробные: по умолчанию из «Пробных уроков»; ячейку можно переопределить вручную. */
+export const RNP_AVITO_TRIAL_METRICS: {
+  key: Extract<RnpAvitoMetricKey, "trialsScheduled" | "trialsCompleted">;
   label: string;
 }[] = [
   { key: "trialsScheduled", label: "Количество назначенных пробных" },
   { key: "trialsCompleted", label: "Количество проведённых пробных" },
 ];
+
+export type RnpAvitoTrialMetricKey =
+  (typeof RNP_AVITO_TRIAL_METRICS)[number]["key"];
+
+/** @deprecated Используйте RNP_AVITO_TRIAL_METRICS */
+export const RNP_AVITO_MANUAL_METRICS = RNP_AVITO_TRIAL_METRICS;
 
 export const RNP_AVITO_DERIVED_METRICS: {
   key: RnpAvitoDerivedKey;
@@ -122,6 +138,11 @@ export function formatMonthTitle(year: number, month: number): string {
   return `${MONTH_NAMES_RU[month - 1]} ${year}`;
 }
 
+export type ManualTrialCreatedDayCounts = {
+  scheduled: number;
+  completed: number;
+};
+
 export function emptyDayStats(date: string): RnpAvitoDayStats {
   return {
     date,
@@ -131,8 +152,44 @@ export function emptyDayStats(date: string): RnpAvitoDayStats {
     contacts: null,
     trialsScheduled: null,
     trialsCompleted: null,
+    trialsScheduledSource: "automatic",
+    trialsCompletedSource: "automatic",
     manualUpdatedAt: null,
     apiSyncedAt: null,
+  };
+}
+
+/** Слияние auto-счётчиков с независимыми ручными флагами строки БД. */
+export function resolveTrialDayFields(
+  stored: {
+    trialsScheduled: number | null;
+    trialsCompleted: number | null;
+    trialsScheduledIsManual: boolean;
+    trialsCompletedIsManual: boolean;
+  } | null,
+  counts: ManualTrialCreatedDayCounts | undefined
+): Pick<
+  RnpAvitoDayStats,
+  | "trialsScheduled"
+  | "trialsCompleted"
+  | "trialsScheduledSource"
+  | "trialsCompletedSource"
+> {
+  const scheduledManual = stored?.trialsScheduledIsManual === true;
+  const completedManual = stored?.trialsCompletedIsManual === true;
+  return {
+    trialsScheduled: scheduledManual
+      ? (stored?.trialsScheduled ?? null)
+      : counts
+        ? counts.scheduled
+        : null,
+    trialsCompleted: completedManual
+      ? (stored?.trialsCompleted ?? null)
+      : counts
+        ? counts.completed
+        : null,
+    trialsScheduledSource: scheduledManual ? "manual" : "automatic",
+    trialsCompletedSource: completedManual ? "manual" : "automatic",
   };
 }
 
@@ -235,4 +292,27 @@ export function shiftMonth(
 ): { year: number; month: number } {
   const d = new Date(year, month - 1 + delta, 1);
   return { year: d.getFullYear(), month: d.getMonth() + 1 };
+}
+
+/**
+ * Группирует записи «Пробных уроков» по календарному дню создания (Europe/Moscow).
+ * Одна запись = один назначенный; completed — только при attended === true.
+ * Месяц фильтрации — по appDateKey(createdAt), не по дате урока.
+ */
+export function aggregateManualTrialsByCreatedAppDay(
+  rows: ReadonlyArray<{ createdAt: Date | string; attended: boolean }>,
+  year: number,
+  month: number
+): Map<string, ManualTrialCreatedDayCounts> {
+  const prefix = `${year}-${String(month).padStart(2, "0")}-`;
+  const map = new Map<string, ManualTrialCreatedDayCounts>();
+  for (const row of rows) {
+    const key = appDateKey(row.createdAt);
+    if (!key.startsWith(prefix)) continue;
+    const cur = map.get(key) ?? { scheduled: 0, completed: 0 };
+    cur.scheduled += 1;
+    if (row.attended) cur.completed += 1;
+    map.set(key, cur);
+  }
+  return map;
 }
