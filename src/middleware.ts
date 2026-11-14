@@ -7,6 +7,9 @@ import { SESSION_COOKIE } from "@/server/auth/constants";
 /**
  * Кабинеты требуют cookie сессии.
  * Роль проверяет серверный layout: чужой кабинет туда не пускает.
+ *
+ * `/quick-access/*` намеренно вне matcher и CABINET_PREFIXES:
+ * доступ только по секретному токену (см. /api/quick-access).
  */
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

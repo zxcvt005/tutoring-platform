@@ -144,6 +144,18 @@ describe("demo session stability", () => {
     // Похожие имена не считаются public
     expect(isDemoPublicPath("/joining")).toBe(false);
     expect(isDemoPublicPath("/private-calls-admin")).toBe(false);
+
+    expect(isDemoPublicPath("/quick-access")).toBe(true);
+    expect(isDemoPublicPath("/quick-access/baza/tok")).toBe(true);
+    expect(isDemoPublicPath("/quick-access/rnp-avito/tok")).toBe(true);
+    expect(isDemoPublicPath("/quick-access/probnye-uroki/tok")).toBe(true);
+    expect(isDemoPublicPath("/quick-access/rashody/tok")).toBe(true);
+    expect(demoSessionBootKey("/quick-access/baza/secret-token")).toBe(
+      "public"
+    );
+    expect(isDemoPublicPath("/direkciya/quick-access")).toBe(false);
+    expect(demoSessionBootKey("/direkciya/quick-access")).toBe("director");
+    expect(isDemoPublicPath("/quick-accessories")).toBe(false);
   });
 
   it("does not switch cabinets from filters when demo login is off", () => {

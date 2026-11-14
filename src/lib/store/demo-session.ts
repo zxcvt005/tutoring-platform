@@ -52,8 +52,10 @@ export function hasDemoSkipAutoLogin(
 }
 
 /**
- * Страницы без platform-сессии: login/register, инвайты орг, личные звонки.
+ * Страницы без platform-сессии: login/register, инвайты орг, личные звонки,
+ * секретные ссылки быстрого доступа к таблицам Дирекции.
  * `/join/*` и `/private-calls` используют свои cookie (гость/хост), не кабинетный login.
+ * `/quick-access/*` авторизуется только токеном в URL + POST /api/quick-access.
  */
 export function isDemoPublicPath(pathname: string | null): boolean {
   if (!pathname) return false;
@@ -69,7 +71,9 @@ export function isDemoPublicPath(pathname: string | null): boolean {
     pathname.startsWith("/demo") ||
     pathname === "/join" ||
     pathname.startsWith("/join/") ||
-    pathname.startsWith("/private-calls/")
+    pathname.startsWith("/private-calls/") ||
+    pathname === "/quick-access" ||
+    pathname.startsWith("/quick-access/")
   );
 }
 
