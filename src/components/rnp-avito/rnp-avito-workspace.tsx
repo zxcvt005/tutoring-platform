@@ -32,7 +32,11 @@ import {
   shiftMonth,
   totalsFromDays,
 } from "@/lib/rnp-avito";
-import { apiPlatform, HttpStatusError } from "@/lib/store/api-client";
+import {
+  apiPlatform,
+  HttpStatusError,
+  type PlatformApiCall,
+} from "@/lib/store/api-client";
 import { cn } from "@/lib/utils";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -112,7 +116,11 @@ function DayCell({
   );
 }
 
-export function RnpAvitoWorkspace() {
+export function RnpAvitoWorkspace({
+  apiCall = apiPlatform,
+}: {
+  apiCall?: PlatformApiCall;
+} = {}) {
   const initial = todayParts();
   const [year, setYear] = useState(initial.year);
   const [month, setMonth] = useState(initial.month);
@@ -162,7 +170,7 @@ export function RnpAvitoWorkspace() {
     setLoadError(null);
     setReady(false);
     try {
-      const data = await apiPlatform<RnpAvitoMonthPayload>("getRnpAvitoMonth", {
+      const data = await apiCall<RnpAvitoMonthPayload>("getRnpAvitoMonth", {
         year: y,
         month: m,
       });
@@ -179,13 +187,13 @@ export function RnpAvitoWorkspace() {
       setLoadError(err instanceof Error ? err.message : "Ошибка загрузки");
       setReady(true);
     }
-  }, []);
+  }, [apiCall]);
 
   async function syncAvito() {
     setSyncError(null);
     setSyncing(true);
     try {
-      const data = await apiPlatform<{
+      const data = await apiCall<{
         year: number;
         month: number;
         syncedDays: number;
@@ -251,7 +259,7 @@ export function RnpAvitoWorkspace() {
       if (!current) return;
       setSaveState("saving");
       try {
-        const data = await apiPlatform<{ day: RnpAvitoDayStats }>(
+        const data = await apiCall<{ day: RnpAvitoDayStats }>(
           "upsertRnpAvitoManualDay",
           {
             date,
@@ -269,7 +277,7 @@ export function RnpAvitoWorkspace() {
         const status = err instanceof HttpStatusError ? err.status : 0;
         if (status === 409 && !retried) {
           try {
-            const monthData = await apiPlatform<RnpAvitoMonthPayload>(
+            const monthData = await apiCall<RnpAvitoMonthPayload>(
               "getRnpAvitoMonth",
               { year, month }
             );
@@ -295,7 +303,7 @@ export function RnpAvitoWorkspace() {
         toast.error(err instanceof Error ? err.message : "Ошибка сохранения");
       }
     },
-    [bumpSaveGen, markSaved, month, year]
+    [apiCall, bumpSaveGen, markSaved, month, year]
   );
 
   useEffect(() => {

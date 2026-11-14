@@ -51,7 +51,11 @@ import {
   todayIsoDate,
 } from "@/lib/expenses";
 import { useExpandedTableRow } from "@/lib/hooks/use-expanded-table-row";
-import { apiPlatform, HttpStatusError } from "@/lib/store/api-client";
+import {
+  apiPlatform,
+  HttpStatusError,
+  type PlatformApiCall,
+} from "@/lib/store/api-client";
 import { cn } from "@/lib/utils";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -83,7 +87,11 @@ function monthOptions(now = new Date()) {
   return items;
 }
 
-export function ExpensesWorkspace() {
+export function ExpensesWorkspace({
+  apiCall = apiPlatform,
+}: {
+  apiCall?: PlatformApiCall;
+} = {}) {
   const now = todayIsoDate();
   const [year, setYear] = useState<number | null>(() =>
     Number(now.slice(0, 4))
@@ -140,7 +148,7 @@ export function ExpensesWorkspace() {
     async (y: number | null, m: number | null, cat: ExpenseCategory | null) => {
       setLoadError(null);
       try {
-        const data = await apiPlatform<ExpensesListPayload>("listExpenses", {
+        const data = await apiCall<ExpensesListPayload>("listExpenses", {
           year: y,
           month: m,
           category: cat,
@@ -159,7 +167,7 @@ export function ExpensesWorkspace() {
         setReady(true);
       }
     },
-    []
+    [apiCall]
   );
 
   useEffect(() => {
@@ -180,7 +188,7 @@ export function ExpensesWorkspace() {
       if (!current || isAutoExpenseSource(current.source)) return;
       setSaveState("saving");
       try {
-        const data = await apiPlatform<{ expense: Expense }>(
+        const data = await apiCall<{ expense: Expense }>(
           "updateManualExpense",
           {
             id,
@@ -210,7 +218,7 @@ export function ExpensesWorkspace() {
         toast.error(err instanceof Error ? err.message : "Ошибка сохранения");
       }
     },
-    [bumpSaveGen, markSaved, load, year, month, category]
+    [apiCall, bumpSaveGen, markSaved, load, year, month, category]
   );
 
   useEffect(() => {
@@ -245,7 +253,7 @@ export function ExpensesWorkspace() {
   async function addRow() {
     setCreating(true);
     try {
-      const data = await apiPlatform<{ expense: Expense }>(
+      const data = await apiCall<{ expense: Expense }>(
         "createManualExpense",
         {
           category: "Сервисы",
@@ -269,7 +277,7 @@ export function ExpensesWorkspace() {
     setDeleting(true);
     const id = deleteTarget.id;
     try {
-      await apiPlatform("deleteManualExpense", { id });
+      await apiCall("deleteManualExpense", { id });
       setRows((prev) => prev.filter((r) => r.id !== id));
       setDeleteTarget(null);
       toast.success("Расход удалён");

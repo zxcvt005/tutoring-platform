@@ -73,10 +73,17 @@ describe("base leads (Дирекция «База»)", () => {
 
     const afterStatuses = await listBaseLeads(t.db, director);
     const cur = afterStatuses.find((r) => r.id === created.id)!;
+    expect(created.student).toBe("");
+    expect(created.parent).toBe("");
+    expect(created.teacher).toBe("");
+
     const filled = await updateBaseLead(t.db, director, {
       id: created.id,
       expectedUpdatedAt: cur.updatedAt,
       name: "Даниил",
+      student: "Иван",
+      parent: "Мария",
+      teacher: "Анна",
       contact: "+79999999999",
       comment: "Очень хороший лид",
       avitoUrl: "https://www.avito.ru/item/1",
@@ -87,6 +94,9 @@ describe("base leads (Дирекция «База»)", () => {
       entryDate: "2026-02-01",
     });
     expect(filled.name).toBe("Даниил");
+    expect(filled.student).toBe("Иван");
+    expect(filled.parent).toBe("Мария");
+    expect(filled.teacher).toBe("Анна");
     expect(filled.contact).toBe("+79999999999");
     expect(filled.comment).toBe("Очень хороший лид");
     expect(filled.avitoUrl).toBe("https://www.avito.ru/item/1");
@@ -190,5 +200,85 @@ describe("base leads (Дирекция «База»)", () => {
     await expect(listBaseLeads(t.db, press)).rejects.toMatchObject({
       code: "forbidden",
     });
+  });
+
+  it("edits student/parent/teacher and keeps avitoUrl after label rename", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await asRole(t.db, "director@demo.local");
+
+    const created = await createBaseLead(t.db, director);
+    expect(created.student).toBe("");
+    expect(created.parent).toBe("");
+    expect(created.teacher).toBe("");
+
+    const withUrl = await updateBaseLead(t.db, director, {
+      id: created.id,
+      expectedUpdatedAt: created.updatedAt,
+      avitoUrl: "https://www.avito.ru/item/legacy",
+    });
+    expect(withUrl.avitoUrl).toBe("https://www.avito.ru/item/legacy");
+
+    let cur = withUrl;
+    for (const [field, value] of [
+      ["student", "Пётр"],
+      ["parent", "Ольга"],
+      ["teacher", "Сергей"],
+    ] as const) {
+      cur = await updateBaseLead(t.db, director, {
+        id: created.id,
+        expectedUpdatedAt: cur.updatedAt,
+        [field]: value,
+      });
+      expect(cur[field]).toBe(value);
+      expect(cur.avitoUrl).toBe("https://www.avito.ru/item/legacy");
+    }
+
+    const raw = await t.db
+      .select()
+      .from(baseLeads)
+      .where(eq(baseLeads.id, created.id));
+    expect(raw[0]?.student).toBe("Пётр");
+    expect(raw[0]?.parent).toBe("Ольга");
+    expect(raw[0]?.teacher).toBe("Сергей");
+    expect(raw[0]?.avitoUrl).toBe("https://www.avito.ru/item/legacy");
+
+    const cleared = await updateBaseLead(t.db, director, {
+      id: created.id,
+      expectedUpdatedAt: cur.updatedAt,
+      student: "",
+      parent: "  ",
+      teacher: null,
+    });
+    expect(cleared.student).toBe("");
+    expect(cleared.parent).toBe("");
+    expect(cleared.teacher).toBe("");
+    expect(cleared.avitoUrl).toBe("https://www.avito.ru/item/legacy");
+  });
+
+  it("keeps legacy rows with null people fields readable as empty strings", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await asRole(t.db, "director@demo.local");
+    const created = await createBaseLead(t.db, director);
+
+    await t.db
+      .update(baseLeads)
+      .set({
+        student: null,
+        parent: null,
+        teacher: null,
+        avitoUrl: "https://example.com/keep",
+        name: "Старая",
+      })
+      .where(eq(baseLeads.id, created.id));
+
+    const listed = await listBaseLeads(t.db, director);
+    const row = listed.find((r) => r.id === created.id)!;
+    expect(row.name).toBe("Старая");
+    expect(row.student).toBe("");
+    expect(row.parent).toBe("");
+    expect(row.teacher).toBe("");
+    expect(row.avitoUrl).toBe("https://example.com/keep");
   });
 });

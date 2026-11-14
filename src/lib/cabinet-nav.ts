@@ -14,6 +14,7 @@ export const direkciyaNavItems: CabinetNavItem[] = [
   { href: "/direkciya/probnye-uroki", label: "Пробные уроки" },
   { href: "/direkciya/rnp-avito", label: "РНП Авито" },
   { href: "/direkciya/rashody", label: "Расходы" },
+  { href: "/direkciya/quick-access", label: "Быстрый доступ" },
   { href: "/direkciya/tariffs", label: "Тарифы" },
   { href: "/direkciya/products", label: "Продукты" },
   { href: "/direkciya/payments", label: "Доходы" },

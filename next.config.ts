@@ -17,6 +17,30 @@ const nextConfig: NextConfig = {
       },
     },
   },
+  async headers() {
+    return [
+      {
+        source: "/quick-access/:path*",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          {
+            key: "X-Robots-Tag",
+            value: "noindex, nofollow, noarchive",
+          },
+        ],
+      },
+      {
+        source: "/api/quick-access",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          {
+            key: "X-Robots-Tag",
+            value: "noindex, nofollow, noarchive",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

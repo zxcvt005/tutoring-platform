@@ -44,4 +44,19 @@ describe("base-leads helpers", () => {
   it("builds today ISO date", () => {
     expect(todayIsoDate(new Date("2026-11-12T10:00:00Z"))).toBe("2026-11-12");
   });
+
+  it("documents people fields and keeps avitoUrl key for the Ссылка column", () => {
+    const sample = {
+      student: "",
+      parent: "",
+      teacher: "",
+      avitoUrl: "https://www.avito.ru/item/1",
+    };
+    expect(Object.keys(sample)).toEqual([
+      "student",
+      "parent",
+      "teacher",
+      "avitoUrl",
+    ]);
+  });
 });

@@ -51,7 +51,11 @@ import {
   formatBaseLeadDateDisplay,
 } from "@/lib/base-leads";
 import { useExpandedTableRow } from "@/lib/hooks/use-expanded-table-row";
-import { apiPlatform, HttpStatusError } from "@/lib/store/api-client";
+import {
+  apiPlatform,
+  HttpStatusError,
+  type PlatformApiCall,
+} from "@/lib/store/api-client";
 import { cn } from "@/lib/utils";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -63,6 +67,9 @@ type Patch = Partial<
     | "source"
     | "status"
     | "name"
+    | "student"
+    | "parent"
+    | "teacher"
     | "avitoUrl"
     | "contact"
     | "path1"
@@ -72,6 +79,8 @@ type Patch = Partial<
     | "reconciliation"
   >
 >;
+
+type TextField = "name" | "student" | "parent" | "teacher" | "contact" | "comment" | "avitoUrl";
 
 const TEXT_DEBOUNCE_MS = 450;
 
@@ -94,7 +103,11 @@ function Pill({
   );
 }
 
-export function BaseLeadsWorkspace() {
+export function BaseLeadsWorkspace({
+  apiCall = apiPlatform,
+}: {
+  apiCall?: PlatformApiCall;
+} = {}) {
   const [rows, setRows] = useState<BaseLead[]>([]);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -138,7 +151,7 @@ export function BaseLeadsWorkspace() {
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      const data = await apiPlatform<{ leads: BaseLead[] }>("listBaseLeads");
+      const data = await apiCall<{ leads: BaseLead[] }>("listBaseLeads");
       startTransition(() => {
         setRows(data.leads);
         setReady(true);
@@ -147,7 +160,7 @@ export function BaseLeadsWorkspace() {
       setLoadError(err instanceof Error ? err.message : "Ошибка загрузки");
       setReady(true);
     }
-  }, []);
+  }, [apiCall]);
 
   useEffect(() => {
     const timers = timersRef.current;
@@ -166,7 +179,7 @@ export function BaseLeadsWorkspace() {
       if (!current) return;
       setSaveState("saving");
       try {
-        const data = await apiPlatform<{ lead: BaseLead }>("updateBaseLead", {
+        const data = await apiCall<{ lead: BaseLead }>("updateBaseLead", {
           id,
           expectedUpdatedAt: current.updatedAt,
           ...patch,
@@ -179,7 +192,7 @@ export function BaseLeadsWorkspace() {
         const status = err instanceof HttpStatusError ? err.status : 0;
         if (status === 409 && !retried) {
           try {
-            const data = await apiPlatform<{ leads: BaseLead[] }>(
+            const data = await apiCall<{ leads: BaseLead[] }>(
               "listBaseLeads"
             );
             const server = data.leads.find((r) => r.id === id);
@@ -205,7 +218,7 @@ export function BaseLeadsWorkspace() {
         toast.error(err instanceof Error ? err.message : "Ошибка сохранения");
       }
     },
-    [bumpSaveGen, markSaved]
+    [apiCall, bumpSaveGen, markSaved]
   );
 
   useEffect(() => {
@@ -240,7 +253,7 @@ export function BaseLeadsWorkspace() {
   async function addRow() {
     setCreating(true);
     try {
-      const data = await apiPlatform<{ lead: BaseLead }>("createBaseLead");
+      const data = await apiCall<{ lead: BaseLead }>("createBaseLead");
       setRows((prev) => [...prev, data.lead]);
       markSaved();
     } catch (err) {
@@ -255,7 +268,7 @@ export function BaseLeadsWorkspace() {
     setDeleting(true);
     const id = deleteTarget.id;
     try {
-      await apiPlatform("deleteBaseLead", { id });
+      await apiCall("deleteBaseLead", { id });
       setRows((prev) => prev.filter((r) => r.id !== id));
       setDeleteTarget(null);
       toast.success("Запись удалена");
@@ -267,17 +280,13 @@ export function BaseLeadsWorkspace() {
     }
   }
 
-  function onTextBlur(
-    id: string,
-    field: "name" | "contact" | "comment" | "avitoUrl",
-    value: string
-  ) {
+  function onTextBlur(id: string, field: TextField, value: string) {
     queueSave(id, { [field]: value }, true);
   }
 
   function onTextChange(
     id: string,
-    field: "name" | "contact" | "comment" | "avitoUrl",
+    field: TextField,
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) {
     const value = e.target.value;
@@ -351,14 +360,17 @@ export function BaseLeadsWorkspace() {
         />
       ) : (
         <div className="max-h-[calc(100vh-11rem)] overflow-auto rounded-xl border border-border/80 bg-card">
-          <Table className="min-w-[1100px] text-[0.78rem]">
+          <Table className="min-w-[1480px] text-[0.78rem]">
             <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur-sm">
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-[4.5rem]">Дата</TableHead>
                 <TableHead className="w-[7.5rem]">Источник</TableHead>
                 <TableHead className="w-[9.5rem]">Статус</TableHead>
                 <TableHead className="w-[7rem]">Имя</TableHead>
-                <TableHead className="w-[10rem]">Авито</TableHead>
+                <TableHead className="w-[7rem]">Ученик</TableHead>
+                <TableHead className="w-[7rem]">Родитель</TableHead>
+                <TableHead className="w-[8rem]">Преподаватель</TableHead>
+                <TableHead className="w-[10rem]">Ссылка</TableHead>
                 <TableHead className="w-[8rem]">Контакт</TableHead>
                 <TableHead className="w-10 text-center">Путь 1</TableHead>
                 <TableHead className="w-10 text-center">Путь 2</TableHead>
@@ -483,6 +495,39 @@ export function BaseLeadsWorkspace() {
                       onChange={(e) => onTextChange(row.id, "name", e)}
                       onBlur={(e) =>
                         onTextBlur(row.id, "name", e.target.value)
+                      }
+                    />
+                  </TableCell>
+                  <TableCell className="p-1.5">
+                    <Input
+                      value={row.student}
+                      placeholder="Ученик"
+                      className="h-7 border-transparent bg-transparent px-1 shadow-none focus-visible:border-input focus-visible:bg-background"
+                      onChange={(e) => onTextChange(row.id, "student", e)}
+                      onBlur={(e) =>
+                        onTextBlur(row.id, "student", e.target.value)
+                      }
+                    />
+                  </TableCell>
+                  <TableCell className="p-1.5">
+                    <Input
+                      value={row.parent}
+                      placeholder="Родитель"
+                      className="h-7 border-transparent bg-transparent px-1 shadow-none focus-visible:border-input focus-visible:bg-background"
+                      onChange={(e) => onTextChange(row.id, "parent", e)}
+                      onBlur={(e) =>
+                        onTextBlur(row.id, "parent", e.target.value)
+                      }
+                    />
+                  </TableCell>
+                  <TableCell className="p-1.5">
+                    <Input
+                      value={row.teacher}
+                      placeholder="Преподаватель"
+                      className="h-7 border-transparent bg-transparent px-1 shadow-none focus-visible:border-input focus-visible:bg-background"
+                      onChange={(e) => onTextChange(row.id, "teacher", e)}
+                      onBlur={(e) =>
+                        onTextBlur(row.id, "teacher", e.target.value)
                       }
                     />
                   </TableCell>

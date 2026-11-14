@@ -49,7 +49,11 @@ import {
   formatManualTrialSumRub,
 } from "@/lib/manual-trial-lessons";
 import { useExpandedTableRow } from "@/lib/hooks/use-expanded-table-row";
-import { apiPlatform, HttpStatusError } from "@/lib/store/api-client";
+import {
+  apiPlatform,
+  HttpStatusError,
+  type PlatformApiCall,
+} from "@/lib/store/api-client";
 import { cn } from "@/lib/utils";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -113,7 +117,11 @@ function GroupHead({
   );
 }
 
-export function ManualTrialLessonsWorkspace() {
+export function ManualTrialLessonsWorkspace({
+  apiCall = apiPlatform,
+}: {
+  apiCall?: PlatformApiCall;
+} = {}) {
   const [rows, setRows] = useState<ManualTrialLesson[]>([]);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -159,7 +167,7 @@ export function ManualTrialLessonsWorkspace() {
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      const data = await apiPlatform<{ lessons: ManualTrialLesson[] }>(
+      const data = await apiCall<{ lessons: ManualTrialLesson[] }>(
         "listManualTrialLessons"
       );
       startTransition(() => {
@@ -170,7 +178,7 @@ export function ManualTrialLessonsWorkspace() {
       setLoadError(err instanceof Error ? err.message : "Ошибка загрузки");
       setReady(true);
     }
-  }, []);
+  }, [apiCall]);
 
   useEffect(() => {
     const timers = timersRef.current;
@@ -189,7 +197,7 @@ export function ManualTrialLessonsWorkspace() {
       if (!current) return;
       setSaveState("saving");
       try {
-        const data = await apiPlatform<{ lesson: ManualTrialLesson }>(
+        const data = await apiCall<{ lesson: ManualTrialLesson }>(
           "updateManualTrialLesson",
           {
             id,
@@ -205,7 +213,7 @@ export function ManualTrialLessonsWorkspace() {
         const status = err instanceof HttpStatusError ? err.status : 0;
         if (status === 409 && !retried) {
           try {
-            const data = await apiPlatform<{ lessons: ManualTrialLesson[] }>(
+            const data = await apiCall<{ lessons: ManualTrialLesson[] }>(
               "listManualTrialLessons"
             );
             const server = data.lessons.find((r) => r.id === id);
@@ -231,7 +239,7 @@ export function ManualTrialLessonsWorkspace() {
         toast.error(err instanceof Error ? err.message : "Ошибка сохранения");
       }
     },
-    [bumpSaveGen, markSaved]
+    [apiCall, bumpSaveGen, markSaved]
   );
 
   useEffect(() => {
@@ -266,7 +274,7 @@ export function ManualTrialLessonsWorkspace() {
   async function addRow() {
     setCreating(true);
     try {
-      const data = await apiPlatform<{ lesson: ManualTrialLesson }>(
+      const data = await apiCall<{ lesson: ManualTrialLesson }>(
         "createManualTrialLesson"
       );
       setRows((prev) => [...prev, data.lesson]);
@@ -283,7 +291,7 @@ export function ManualTrialLessonsWorkspace() {
     setDeleting(true);
     const id = deleteTarget.id;
     try {
-      await apiPlatform("deleteManualTrialLesson", { id });
+      await apiCall("deleteManualTrialLesson", { id });
       setRows((prev) => prev.filter((r) => r.id !== id));
       setDeleteTarget(null);
       toast.success("Запись удалена");

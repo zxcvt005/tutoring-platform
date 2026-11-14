@@ -2724,6 +2724,12 @@ export const baseLeads = pgTable(
     source: text("source"),
     status: text("status"),
     name: text("name").notNull().default(""),
+    /** Ученик (текст; nullable для старых записей). */
+    student: text("student"),
+    /** Родитель (текст; nullable для старых записей). */
+    parent: text("parent"),
+    /** Преподаватель (текст; nullable для старых записей). */
+    teacher: text("teacher"),
     avitoUrl: text("avito_url").notNull().default(""),
     contact: text("contact").notNull().default(""),
     path1: boolean("path_1").notNull().default(false),
@@ -2898,6 +2904,42 @@ export const directorExpenses = pgTable(
 );
 
 /**
+ * Секретные ссылки быстрого доступа к таблицам Дирекции (без логина).
+ * В URL — сырой токен; в БД — sha256(token). Одна запись на (org, access_type).
+ */
+export const quickAccessLinks = pgTable(
+  "quick_access_links",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** baza | rnp-avito | probnye-uroki | rashody */
+    accessType: text("access_type").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("quick_access_links_token_hash_uidx").on(t.tokenHash),
+    uniqueIndex("quick_access_links_org_type_uidx").on(
+      t.organizationId,
+      t.accessType
+    ),
+    index("quick_access_links_org_idx").on(t.organizationId),
+    check(
+      "quick_access_links_type_check",
+      sql`${t.accessType} in ('baza', 'rnp-avito', 'probnye-uroki', 'rashody')`
+    ),
+  ]
+);
+
+/**
  * Ежедневная статистика «РНП Авито» (Дирекция).
  * API-поля и ручные поля независимы; не связано с base_leads / manual_trial_lessons.
  */
@@ -3031,5 +3073,6 @@ export const schema = {
   siteLeads,
   manualTrialLessons,
   directorExpenses,
+  quickAccessLinks,
   rnpAvitoDailyStats,
 };

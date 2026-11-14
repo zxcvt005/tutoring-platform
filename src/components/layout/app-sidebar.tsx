@@ -27,6 +27,7 @@ import {
   UserRound,
   Users,
   BookMarked,
+  Link2,
   Video,
   Wallet,
 } from "lucide-react";
@@ -65,6 +66,7 @@ const iconsByHref: Record<string, NavItem["icon"]> = {
   "/direkciya/probnye-uroki": CalendarClock,
   "/direkciya/rnp-avito": BarChart3,
   "/direkciya/rashody": Receipt,
+  "/direkciya/quick-access": Link2,
   "/direkciya/tariffs": Package,
   "/direkciya/products": Boxes,
   "/direkciya/payments": CreditCard,

@@ -16,6 +16,7 @@ import type { AppDb } from "@/server/db/types";
 import { conflict, notFound, validationError } from "@/server/errors";
 
 const MAX_NAME = 200;
+const MAX_PEOPLE = 200;
 const MAX_CONTACT = 500;
 const MAX_COMMENT = 4000;
 const MAX_URL = 2000;
@@ -31,6 +32,9 @@ function toLead(row: typeof baseLeads.$inferSelect): BaseLead {
     source: isBaseLeadSource(row.source) ? row.source : null,
     status: isBaseLeadStatus(row.status) ? row.status : null,
     name: row.name,
+    student: row.student ?? "",
+    parent: row.parent ?? "",
+    teacher: row.teacher ?? "",
     avitoUrl: row.avitoUrl,
     contact: row.contact,
     path1: row.path1,
@@ -72,17 +76,26 @@ function sanitizeText(value: unknown, max: number, label: string): string {
   return trimmed;
 }
 
+/** Пустая строка → NULL в БД (старые и очищенные записи). */
+function sanitizeOptionalPeopleField(
+  value: unknown,
+  label: string
+): string | null {
+  const text = sanitizeText(value, MAX_PEOPLE, label);
+  return text === "" ? null : text;
+}
+
 function sanitizeOptionalUrl(value: unknown): string {
-  const raw = sanitizeText(value, MAX_URL, "Ссылка Авито");
+  const raw = sanitizeText(value, MAX_URL, "Ссылка");
   if (!raw) return "";
   let parsed: URL;
   try {
     parsed = new URL(raw);
   } catch {
-    throw validationError("Ссылка Авито должна быть корректным URL");
+    throw validationError("Ссылка должна быть корректным URL");
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw validationError("Ссылка Авито допускает только http(s)");
+    throw validationError("Ссылка допускает только http(s)");
   }
   return parsed.toString();
 }
@@ -136,6 +149,9 @@ export async function createBaseLead(
     source: null,
     status: null,
     name: "",
+    student: null,
+    parent: null,
+    teacher: null,
     avitoUrl: "",
     contact: "",
     path1: false,
@@ -163,6 +179,9 @@ export type UpdateBaseLeadInput = {
   source?: BaseLeadSource | null | "";
   status?: BaseLeadStatus | null | "";
   name?: string;
+  student?: string | null;
+  parent?: string | null;
+  teacher?: string | null;
   avitoUrl?: string;
   contact?: string;
   path1?: boolean;
@@ -218,6 +237,15 @@ export async function updateBaseLead(
   }
   if (input.name !== undefined) {
     patch.name = sanitizeText(input.name, MAX_NAME, "Имя");
+  }
+  if (input.student !== undefined) {
+    patch.student = sanitizeOptionalPeopleField(input.student, "Ученик");
+  }
+  if (input.parent !== undefined) {
+    patch.parent = sanitizeOptionalPeopleField(input.parent, "Родитель");
+  }
+  if (input.teacher !== undefined) {
+    patch.teacher = sanitizeOptionalPeopleField(input.teacher, "Преподаватель");
   }
   if (input.avitoUrl !== undefined) {
     patch.avitoUrl = sanitizeOptionalUrl(input.avitoUrl);

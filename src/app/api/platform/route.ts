@@ -269,6 +269,14 @@ export async function POST(request: Request) {
           return m.updateManualExpenseAction(db, ctx, p);
         case "deleteManualExpense":
           return m.deleteManualExpenseAction(db, ctx, p);
+        case "listQuickAccessLinks":
+          return m.listQuickAccessLinksAction(db, ctx);
+        case "createQuickAccessLink":
+          return m.createQuickAccessLinkAction(db, ctx, p);
+        case "reissueQuickAccessLink":
+          return m.reissueQuickAccessLinkAction(db, ctx, p);
+        case "disableQuickAccessLink":
+          return m.disableQuickAccessLinkAction(db, ctx, p);
         case "archiveTariff":
           return m.archiveTariffAction(db, ctx, String(p.id));
         case "assignTariff":

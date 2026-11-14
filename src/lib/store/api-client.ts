@@ -272,6 +272,38 @@ export async function apiPlatform<T = unknown>(
   return parseJson(res);
 }
 
+export type PlatformApiCall = typeof apiPlatform;
+
+/** Вызовы таблиц Дирекции через секретную ссылку (токен в теле, не в URL API). */
+export function createQuickAccessApi(
+  token: string,
+  accessType: string
+): PlatformApiCall {
+  return async function apiQuickAccess<T = unknown>(
+    action: string,
+    payload?: unknown,
+    idempotencyKey?: string
+  ): Promise<T> {
+    const headers = await mutatingHeaders(
+      idempotencyKey ? { "idempotency-key": idempotencyKey } : undefined
+    );
+    const res = await fetch("/api/quick-access", {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: JSON.stringify({
+        token,
+        accessType,
+        action,
+        payload,
+      }),
+      // Не передаём Referer с токеном в URL страницы.
+      referrerPolicy: "no-referrer",
+    });
+    return parseJson(res);
+  };
+}
+
 export async function apiMe() {
   const res = await fetch("/api/auth/me", { credentials: "include" });
   if (res.status === 401) return null;

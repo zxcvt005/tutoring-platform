@@ -287,3 +287,50 @@ body:has([data-call-overlay]) [data-cabinet-header],
 body:has([data-call-overlay]) [data-cabinet-float] {
   display: none !important;
 }
+
+/* Быстрый доступ с телефона: крупные зоны нажатия, горизонтальный скролл таблиц */
+.quick-access-shell {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+.quick-access-table [data-slot="page-header"] {
+  position: sticky;
+  top: 3.25rem;
+  z-index: 20;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  background: color-mix(in oklab, var(--background) 88%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.quick-access-table [data-slot="button"],
+.quick-access-shell button {
+  min-height: 2.75rem;
+}
+
+.quick-access-table [data-slot="input"],
+.quick-access-table [data-slot="textarea"],
+.quick-access-table select {
+  min-height: 2.75rem;
+  font-size: 16px; /* без авто-зума iOS */
+}
+
+.quick-access-table [data-slot="table-container"],
+.quick-access-table .overflow-x-auto,
+.quick-access-table [class*="overflow-x"] {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+@media (max-width: 640px) {
+  .quick-access-table table {
+    font-size: 0.8125rem;
+  }
+
+  .quick-access-table th,
+  .quick-access-table td {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+}

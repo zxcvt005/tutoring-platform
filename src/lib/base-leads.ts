@@ -29,6 +29,13 @@ export type BaseLead = {
   source: BaseLeadSource | null;
   status: BaseLeadStatus | null;
   name: string;
+  /** Ученик (пусто для старых записей) */
+  student: string;
+  /** Родитель (пусто для старых записей) */
+  parent: string;
+  /** Преподаватель (пусто для старых записей) */
+  teacher: string;
+  /** URL-ссылка; колонка в UI — «Ссылка», в БД — avito_url */
   avitoUrl: string;
   contact: string;
   path1: boolean;

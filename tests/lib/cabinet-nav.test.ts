@@ -110,6 +110,20 @@ describe("cabinet navigation", () => {
     expect(expensesIdx).toBe(rnpIdx + 1);
   });
 
+  it("adds Quick Access after Expenses in Direkciya", () => {
+    expect(direkciyaNavItems).toContainEqual({
+      href: "/direkciya/quick-access",
+      label: "Быстрый доступ",
+    });
+    const expensesIdx = direkciyaNavItems.findIndex(
+      (i) => i.href === "/direkciya/rashody"
+    );
+    const quickIdx = direkciyaNavItems.findIndex(
+      (i) => i.href === "/direkciya/quick-access"
+    );
+    expect(quickIdx).toBe(expensesIdx + 1);
+  });
+
   it("adds monthly feedback to teacher and press cabinets", () => {
     expect(kafedraNavItems).toContainEqual({
       href: "/kafedra/feedback",

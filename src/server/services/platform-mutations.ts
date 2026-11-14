@@ -2149,6 +2149,12 @@ export async function updateBaseLeadAction(
           ? undefined
           : (payload.status as never),
       name: payload.name === undefined ? undefined : String(payload.name),
+      student:
+        payload.student === undefined ? undefined : String(payload.student),
+      parent:
+        payload.parent === undefined ? undefined : String(payload.parent),
+      teacher:
+        payload.teacher === undefined ? undefined : String(payload.teacher),
       avitoUrl:
         payload.avitoUrl === undefined ? undefined : String(payload.avitoUrl),
       contact:
@@ -2410,6 +2416,63 @@ export async function deleteManualExpenseAction(
   );
   await deleteManualExpense(db, ctx, { id: String(payload.id ?? "") });
   return { ok: true as const };
+}
+
+export async function listQuickAccessLinksAction(
+  db: AppDb,
+  ctx: AuthContext
+) {
+  const { listQuickAccessLinks } = await import(
+    "@/server/services/quick-access-service"
+  );
+  return { links: await listQuickAccessLinks(db, ctx) };
+}
+
+export async function createQuickAccessLinkAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { createQuickAccessLink } = await import(
+    "@/server/services/quick-access-service"
+  );
+  return {
+    link: await createQuickAccessLink(db, ctx, String(payload.accessType ?? "")),
+  };
+}
+
+export async function reissueQuickAccessLinkAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { reissueQuickAccessLink } = await import(
+    "@/server/services/quick-access-service"
+  );
+  return {
+    link: await reissueQuickAccessLink(
+      db,
+      ctx,
+      String(payload.accessType ?? "")
+    ),
+  };
+}
+
+export async function disableQuickAccessLinkAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { disableQuickAccessLink } = await import(
+    "@/server/services/quick-access-service"
+  );
+  return {
+    link: await disableQuickAccessLink(
+      db,
+      ctx,
+      String(payload.accessType ?? "")
+    ),
+  };
 }
 
 export async function upsertProductAction(
@@ -2979,6 +3042,10 @@ export const platformActions = {
   createManualExpense: createManualExpenseAction,
   updateManualExpense: updateManualExpenseAction,
   deleteManualExpense: deleteManualExpenseAction,
+  listQuickAccessLinks: listQuickAccessLinksAction,
+  createQuickAccessLink: createQuickAccessLinkAction,
+  reissueQuickAccessLink: reissueQuickAccessLinkAction,
+  disableQuickAccessLink: disableQuickAccessLinkAction,
   archiveTariff: archiveTariffAction,
   assignTariff: assignTariffAction,
   setStudentPurchaseTariff: setStudentPurchaseTariffAction,
