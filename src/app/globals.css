@@ -288,6 +288,22 @@ body:has([data-call-overlay]) [data-cabinet-float] {
   display: none !important;
 }
 
+/* База: фиксированные узкие колонки путей, плотные ячейки */
+.base-leads-table [data-slot="table"] {
+  border-collapse: collapse;
+}
+
+.base-leads-table [data-slot="table-head"],
+.base-leads-table [data-slot="table-cell"] {
+  vertical-align: middle;
+}
+
+.base-leads-table [data-slot="table-head"].w-9,
+.base-leads-table [data-slot="table-cell"].w-9 {
+  width: 2.25rem;
+  max-width: 2.25rem;
+}
+
 /* Быстрый доступ с телефона: крупные зоны нажатия, горизонтальный скролл таблиц */
 .quick-access-shell {
   -webkit-text-size-adjust: 100%;

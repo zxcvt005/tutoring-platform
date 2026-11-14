@@ -66,7 +66,6 @@ type Patch = Partial<
     | "entryDate"
     | "source"
     | "status"
-    | "name"
     | "student"
     | "parent"
     | "teacher"
@@ -80,7 +79,19 @@ type Patch = Partial<
   >
 >;
 
-type TextField = "name" | "student" | "parent" | "teacher" | "contact" | "comment" | "avitoUrl";
+type TextField =
+  | "student"
+  | "parent"
+  | "teacher"
+  | "contact"
+  | "comment"
+  | "avitoUrl";
+
+/** Компактные ячейки: меньше горизонтальных отступов, чем у общего Table. */
+const cellPad = "px-1 py-1";
+const headPad = "h-8 px-1";
+/** Путь 1–3: ширина ≈ чекбокс + небольшой запас под палец. */
+const pathCol = "w-9 max-w-9 px-0.5 text-center";
 
 const TEXT_DEBOUNCE_MS = 450;
 
@@ -359,25 +370,62 @@ export function BaseLeadsWorkspace({
           description="Добавьте первую запись кнопкой «Добавить запись»."
         />
       ) : (
-        <div className="max-h-[calc(100vh-11rem)] overflow-auto rounded-xl border border-border/80 bg-card">
-          <Table className="min-w-[1480px] text-[0.78rem]">
+        <div className="base-leads-table max-h-[calc(100vh-11rem)] overflow-auto rounded-xl border border-border/80 bg-card">
+          <Table className="w-full min-w-[1180px] table-fixed text-[0.78rem]">
             <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur-sm">
               <TableRow className="hover:bg-transparent">
-                <TableHead className="w-[4.5rem]">Дата</TableHead>
-                <TableHead className="w-[7.5rem]">Источник</TableHead>
-                <TableHead className="w-[9.5rem]">Статус</TableHead>
-                <TableHead className="w-[7rem]">Имя</TableHead>
-                <TableHead className="w-[7rem]">Ученик</TableHead>
-                <TableHead className="w-[7rem]">Родитель</TableHead>
-                <TableHead className="w-[8rem]">Преподаватель</TableHead>
-                <TableHead className="w-[10rem]">Ссылка</TableHead>
-                <TableHead className="w-[8rem]">Контакт</TableHead>
-                <TableHead className="w-10 text-center">Путь 1</TableHead>
-                <TableHead className="w-10 text-center">Путь 2</TableHead>
-                <TableHead className="w-10 text-center">Путь 3</TableHead>
-                <TableHead className="min-w-[12rem]">Комментарий</TableHead>
-                <TableHead className="w-12 text-center">Сверка</TableHead>
-                <TableHead className="w-10" />
+                <TableHead className={cn(headPad, "w-[4.25rem]")}>
+                  Дата
+                </TableHead>
+                <TableHead className={cn(headPad, "w-[6.25rem]")}>
+                  Источник
+                </TableHead>
+                <TableHead className={cn(headPad, "w-[8rem]")}>
+                  Статус
+                </TableHead>
+                <TableHead className={cn(headPad, "w-[14rem] min-w-[12rem]")}>
+                  Ученик
+                </TableHead>
+                <TableHead className={cn(headPad, "w-[14rem] min-w-[12rem]")}>
+                  Родитель
+                </TableHead>
+                <TableHead className={cn(headPad, "w-[9rem]")}>
+                  Преподаватель
+                </TableHead>
+                <TableHead className={cn(headPad, "w-[8rem]")}>
+                  Ссылка
+                </TableHead>
+                <TableHead className={cn(headPad, "w-[7rem]")}>
+                  Контакт
+                </TableHead>
+                <TableHead
+                  className={cn(headPad, pathCol)}
+                  title="Путь 1"
+                >
+                  П1
+                </TableHead>
+                <TableHead
+                  className={cn(headPad, pathCol)}
+                  title="Путь 2"
+                >
+                  П2
+                </TableHead>
+                <TableHead
+                  className={cn(headPad, pathCol)}
+                  title="Путь 3"
+                >
+                  П3
+                </TableHead>
+                <TableHead className={cn(headPad, "min-w-[9rem] w-[10rem]")}>
+                  Комментарий
+                </TableHead>
+                <TableHead
+                  className={cn(headPad, "w-9 max-w-9 px-0.5 text-center")}
+                  title="Сверка"
+                >
+                  Св.
+                </TableHead>
+                <TableHead className={cn(headPad, "w-8")} />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -387,12 +435,12 @@ export function BaseLeadsWorkspace({
                   expanded={isExpanded(row.id)}
                   onToggle={() => toggleExpanded(row.id)}
                 >
-                  <TableCell className="p-1.5">
+                  <TableCell className={cellPad}>
                     <Input
                       type="date"
                       value={row.entryDate}
                       title={formatBaseLeadDateDisplay(row.entryDate)}
-                      className="h-7 border-transparent bg-transparent px-1 text-[0.78rem] shadow-none focus-visible:border-input focus-visible:bg-background"
+                      className="h-7 w-full min-w-0 border-transparent bg-transparent px-0.5 text-[0.78rem] shadow-none focus-visible:border-input focus-visible:bg-background"
                       onChange={(e) => {
                         const entryDate = e.target.value;
                         if (!entryDate) return;
@@ -401,7 +449,7 @@ export function BaseLeadsWorkspace({
                       }}
                     />
                   </TableCell>
-                  <TableCell className="p-1.5">
+                  <TableCell className={cellPad}>
                     <Select
                       value={row.source ?? "__empty__"}
                       onValueChange={(v) => {
@@ -414,7 +462,7 @@ export function BaseLeadsWorkspace({
                     >
                       <SelectTrigger
                         size="sm"
-                        className="h-7 min-w-[6.5rem] border-transparent bg-transparent px-1 shadow-none"
+                        className="h-7 w-full min-w-0 border-transparent bg-transparent px-0.5 shadow-none"
                       >
                         <SelectValue>
                           {(v) =>
@@ -444,7 +492,7 @@ export function BaseLeadsWorkspace({
                       </SelectContent>
                     </Select>
                   </TableCell>
-                  <TableCell className="p-1.5">
+                  <TableCell className={cellPad}>
                     <Select
                       value={row.status ?? "__empty__"}
                       onValueChange={(v) => {
@@ -457,7 +505,7 @@ export function BaseLeadsWorkspace({
                     >
                       <SelectTrigger
                         size="sm"
-                        className="h-7 min-w-[8.5rem] border-transparent bg-transparent px-1 shadow-none"
+                        className="h-7 w-full min-w-0 border-transparent bg-transparent px-0.5 shadow-none"
                       >
                         <SelectValue>
                           {(v) =>
@@ -487,66 +535,70 @@ export function BaseLeadsWorkspace({
                       </SelectContent>
                     </Select>
                   </TableCell>
-                  <TableCell className="p-1.5">
-                    <Input
-                      value={row.name}
-                      placeholder="Имя"
-                      className="h-7 border-transparent bg-transparent px-1 shadow-none focus-visible:border-input focus-visible:bg-background"
-                      onChange={(e) => onTextChange(row.id, "name", e)}
-                      onBlur={(e) =>
-                        onTextBlur(row.id, "name", e.target.value)
-                      }
-                    />
-                  </TableCell>
-                  <TableCell className="p-1.5">
-                    <Input
+                  <TableCell
+                    className={cn(cellPad, "align-top whitespace-normal")}
+                  >
+                    <InlineMultilineCell
                       value={row.student}
                       placeholder="Ученик"
-                      className="h-7 border-transparent bg-transparent px-1 shadow-none focus-visible:border-input focus-visible:bg-background"
-                      onChange={(e) => onTextChange(row.id, "student", e)}
-                      onBlur={(e) =>
-                        onTextBlur(row.id, "student", e.target.value)
+                      expanded={isExpanded(row.id)}
+                      onFocusRow={() => expand(row.id)}
+                      onChange={(value) => {
+                        applyLocal(row.id, { student: value });
+                        queueSave(row.id, { student: value });
+                      }}
+                      onBlur={(value) =>
+                        onTextBlur(row.id, "student", value)
                       }
                     />
                   </TableCell>
-                  <TableCell className="p-1.5">
-                    <Input
+                  <TableCell
+                    className={cn(cellPad, "align-top whitespace-normal")}
+                  >
+                    <InlineMultilineCell
                       value={row.parent}
                       placeholder="Родитель"
-                      className="h-7 border-transparent bg-transparent px-1 shadow-none focus-visible:border-input focus-visible:bg-background"
-                      onChange={(e) => onTextChange(row.id, "parent", e)}
-                      onBlur={(e) =>
-                        onTextBlur(row.id, "parent", e.target.value)
+                      expanded={isExpanded(row.id)}
+                      onFocusRow={() => expand(row.id)}
+                      onChange={(value) => {
+                        applyLocal(row.id, { parent: value });
+                        queueSave(row.id, { parent: value });
+                      }}
+                      onBlur={(value) =>
+                        onTextBlur(row.id, "parent", value)
                       }
                     />
                   </TableCell>
-                  <TableCell className="p-1.5">
+                  <TableCell className={cellPad}>
                     <Input
                       value={row.teacher}
                       placeholder="Преподаватель"
-                      className="h-7 border-transparent bg-transparent px-1 shadow-none focus-visible:border-input focus-visible:bg-background"
+                      title={row.teacher || undefined}
+                      className="h-7 w-full min-w-0 border-transparent bg-transparent px-0.5 shadow-none focus-visible:border-input focus-visible:bg-background"
                       onChange={(e) => onTextChange(row.id, "teacher", e)}
                       onBlur={(e) =>
                         onTextBlur(row.id, "teacher", e.target.value)
                       }
                     />
                   </TableCell>
-                  <TableCell className="p-1.5">
+                  <TableCell className={cellPad}>
                     <Input
                       value={row.avitoUrl}
                       placeholder="https://…"
-                      className="h-7 border-transparent bg-transparent px-1 font-mono text-[0.72rem] text-sky-700 underline-offset-2 shadow-none focus-visible:border-input focus-visible:bg-background dark:text-sky-300"
+                      title={row.avitoUrl || undefined}
+                      className="h-7 w-full min-w-0 border-transparent bg-transparent px-0.5 font-mono text-[0.72rem] text-sky-700 underline-offset-2 shadow-none focus-visible:border-input focus-visible:bg-background dark:text-sky-300"
                       onChange={(e) => onTextChange(row.id, "avitoUrl", e)}
                       onBlur={(e) =>
                         onTextBlur(row.id, "avitoUrl", e.target.value)
                       }
                     />
                   </TableCell>
-                  <TableCell className="p-1.5">
+                  <TableCell className={cellPad}>
                     <Input
                       value={row.contact}
-                      placeholder="Телефон / Telegram"
-                      className="h-7 border-transparent bg-transparent px-1 shadow-none focus-visible:border-input focus-visible:bg-background"
+                      placeholder="Телефон"
+                      title={row.contact || undefined}
+                      className="h-7 w-full min-w-0 border-transparent bg-transparent px-0.5 shadow-none focus-visible:border-input focus-visible:bg-background"
                       onChange={(e) => onTextChange(row.id, "contact", e)}
                       onBlur={(e) =>
                         onTextBlur(row.id, "contact", e.target.value)
@@ -560,10 +612,17 @@ export function BaseLeadsWorkspace({
                       ["path3", row.path3],
                     ] as const
                   ).map(([key, checked]) => (
-                    <TableCell key={key} className="p-1.5 text-center">
+                    <TableCell key={key} className={cn(cellPad, pathCol)}>
                       <Checkbox
                         checked={checked}
-                        className="mx-auto"
+                        className="mx-auto size-5 touch-manipulation"
+                        aria-label={
+                          key === "path1"
+                            ? "Путь 1"
+                            : key === "path2"
+                              ? "Путь 2"
+                              : "Путь 3"
+                        }
                         onCheckedChange={(v) => {
                           const next = v === true;
                           applyLocal(row.id, { [key]: next });
@@ -572,7 +631,12 @@ export function BaseLeadsWorkspace({
                       />
                     </TableCell>
                   ))}
-                  <TableCell className="max-w-[16rem] align-top p-1.5 whitespace-normal">
+                  <TableCell
+                    className={cn(
+                      cellPad,
+                      "max-w-[10rem] align-top whitespace-normal"
+                    )}
+                  >
                     <InlineMultilineCell
                       value={row.comment}
                       placeholder="Комментарий"
@@ -587,10 +651,16 @@ export function BaseLeadsWorkspace({
                       }
                     />
                   </TableCell>
-                  <TableCell className="p-1.5 text-center">
+                  <TableCell
+                    className={cn(
+                      cellPad,
+                      "w-9 max-w-9 px-0.5 text-center"
+                    )}
+                  >
                     <Checkbox
                       checked={row.reconciliation}
-                      className="mx-auto"
+                      className="mx-auto size-5 touch-manipulation"
+                      aria-label="Сверка"
                       onCheckedChange={(v) => {
                         const reconciliation = v === true;
                         applyLocal(row.id, { reconciliation });
@@ -598,7 +668,7 @@ export function BaseLeadsWorkspace({
                       }}
                     />
                   </TableCell>
-                  <TableCell className="p-1">
+                  <TableCell className={cn(cellPad, "w-8 px-0.5")}>
                     <Button
                       type="button"
                       size="icon-sm"
@@ -629,10 +699,18 @@ export function BaseLeadsWorkspace({
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             Запись
-            {deleteTarget?.name ? (
+            {deleteTarget?.student ||
+            deleteTarget?.parent ||
+            deleteTarget?.contact ? (
               <>
                 {" "}
-                «<span className="text-foreground">{deleteTarget.name}</span>»
+                «
+                <span className="text-foreground">
+                  {deleteTarget.student ||
+                    deleteTarget.parent ||
+                    deleteTarget.contact}
+                </span>
+                »
               </>
             ) : null}{" "}
             будет удалена из базы. Это действие нельзя отменить.
