@@ -86,7 +86,7 @@ describe("avito parse-stats", () => {
     });
   });
 
-  it("merges spendings and item counters by calendar day", () => {
+  it("merges spendings and item counters without inventing zeros for missing sources", () => {
     const spendings = new Map([
       ["2026-11-01", 2000],
       ["2026-11-03", 500],
@@ -105,18 +105,25 @@ describe("avito parse-stats", () => {
       impressions: 10,
       views: 4,
       contacts: 1,
+      hasBudget: true,
+      hasItems: true,
     });
+    // Items without spendings → budget null (not 0) — regress first-day budget bug
     expect(merged.get("2026-11-02")).toEqual({
-      budgetSpentRub: 0,
+      budgetSpentRub: null,
       impressions: 5,
       views: 2,
       contacts: 0,
+      hasBudget: false,
+      hasItems: true,
     });
     expect(merged.get("2026-11-03")).toEqual({
       budgetSpentRub: 500,
-      impressions: 0,
-      views: 0,
-      contacts: 0,
+      impressions: null,
+      views: null,
+      contacts: null,
+      hasBudget: true,
+      hasItems: false,
     });
     expect(merged.has("2026-11-04")).toBe(false);
   });

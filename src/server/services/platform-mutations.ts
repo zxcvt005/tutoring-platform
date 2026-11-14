@@ -2369,9 +2369,14 @@ export async function syncRnpAvitoMonthAction(
   const { syncRnpAvitoMonth } = await import(
     "@/server/services/rnp-avito-service"
   );
+  const mode =
+    payload.mode === "auto" || payload.mode === "force"
+      ? payload.mode
+      : "force";
   return syncRnpAvitoMonth(db, ctx, {
     year: Number(payload.year),
     month: Number(payload.month),
+    mode,
   });
 }
 

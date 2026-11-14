@@ -1,10 +1,16 @@
 import { validationError } from "@/server/errors";
 
 export type AvitoDayApiMetrics = {
-  budgetSpentRub: number;
-  impressions: number;
-  views: number;
-  contacts: number;
+  /** null — в ответе spendings дня не было (не подменять нулём). */
+  budgetSpentRub: number | null;
+  /** null — в ответе items дня не было. */
+  impressions: number | null;
+  views: number | null;
+  contacts: number | null;
+  /** День присутствовал в spendings (в т.ч. с явным 0). */
+  hasBudget: boolean;
+  /** День присутствовал в items stats. */
+  hasItems: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -169,6 +175,11 @@ export function parseItemStatsByDay(payload: unknown): Map<string, DayCounters> 
   return byDay;
 }
 
+/**
+ * Сливает spendings и items по календарному дню.
+ * Отсутствие дня в одном источнике ≠ 0: оставляем null и флаги hasBudget/hasItems,
+ * чтобы sync не затирал ранее сохранённые корректные значения.
+ */
 export function mergeAvitoDayMetrics(
   dates: string[],
   spendings: Map<string, number>,
@@ -176,19 +187,17 @@ export function mergeAvitoDayMetrics(
 ): Map<string, AvitoDayApiMetrics> {
   const out = new Map<string, AvitoDayApiMetrics>();
   for (const date of dates) {
+    const hasBudget = spendings.has(date);
+    const hasItems = items.has(date);
+    if (!hasBudget && !hasItems) continue;
     const counters = items.get(date);
-    const budget = spendings.get(date);
-    const hasAny =
-      budget != null ||
-      counters != null ||
-      spendings.has(date) ||
-      items.has(date);
-    if (!hasAny) continue;
     out.set(date, {
-      budgetSpentRub: budget ?? 0,
-      impressions: counters?.impressions ?? 0,
-      views: counters?.views ?? 0,
-      contacts: counters?.contacts ?? 0,
+      budgetSpentRub: hasBudget ? (spendings.get(date) ?? 0) : null,
+      impressions: hasItems ? (counters?.impressions ?? 0) : null,
+      views: hasItems ? (counters?.views ?? 0) : null,
+      contacts: hasItems ? (counters?.contacts ?? 0) : null,
+      hasBudget,
+      hasItems,
     });
   }
   return out;

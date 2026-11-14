@@ -14,13 +14,18 @@ import {
   resolveTrialDayFields,
 } from "@/lib/rnp-avito";
 import {
+  type RnpAvitoSyncMode,
+  isRnpAvitoMetricStale,
+  minMaxIsoDates,
+  monthDatesThroughToday,
+} from "@/lib/rnp-avito-sync-policy";
+import {
   fetchAvitoItemStatsPage,
   fetchAvitoSpendings,
   type AvitoClientDeps,
 } from "@/server/avito/client";
 import { diagnoseAvitoEnv, requireAvitoEnv } from "@/server/avito/env";
 import {
-  mergeAvitoDayMetrics,
   parseItemStatsByDay,
   parseSpendingsByDay,
   readDataTotalCount,
@@ -48,6 +53,17 @@ export function resetRnpAvitoSyncLocks() {
 
 const MAX_COUNT = 1_000_000;
 
+function maxIsoTimestamp(
+  ...values: Array<string | null | undefined>
+): string | null {
+  let best: string | null = null;
+  for (const v of values) {
+    if (!v) continue;
+    if (!best || v > best) best = v;
+  }
+  return best;
+}
+
 function toDayBase(
   row: typeof rnpAvitoDailyStats.$inferSelect
 ): Omit<
@@ -57,6 +73,13 @@ function toDayBase(
   | "trialsScheduledSource"
   | "trialsCompletedSource"
 > {
+  const budgetAt = row.budgetApiSyncedAt
+    ? row.budgetApiSyncedAt.toISOString()
+    : null;
+  const itemsAt = row.itemsApiSyncedAt
+    ? row.itemsApiSyncedAt.toISOString()
+    : null;
+  const legacy = row.apiSyncedAt ? row.apiSyncedAt.toISOString() : null;
   return {
     date: row.dayDate,
     budgetSpentRub: row.budgetSpentRub,
@@ -64,7 +87,7 @@ function toDayBase(
     views: row.views,
     contacts: row.contacts,
     manualUpdatedAt: row.manualUpdatedAt.toISOString(),
-    apiSyncedAt: row.apiSyncedAt ? row.apiSyncedAt.toISOString() : null,
+    apiSyncedAt: maxIsoTimestamp(budgetAt, itemsAt, legacy),
   };
 }
 
@@ -465,12 +488,16 @@ async function fetchAllItemStatsByDay(
   dateFrom: string,
   dateTo: string,
   deps: AvitoClientDeps
-) {
+): Promise<{
+  byDay: Map<string, { impressions: number; views: number; contacts: number }>;
+  pages: number;
+}> {
   const merged = new Map<
     string,
     { impressions: number; views: number; contacts: number }
   >();
   let offset = 0;
+  let pages = 0;
   for (let page = 0; page < MAX_ITEM_STATS_PAGES; page++) {
     const payload = await fetchAvitoItemStatsPage(
       cfg,
@@ -482,6 +509,7 @@ async function fetchAllItemStatsByDay(
       },
       deps
     );
+    pages += 1;
     const pageMap = parseItemStatsByDay(payload);
     for (const [date, counters] of pageMap) {
       const prev = merged.get(date) ?? {
@@ -503,29 +531,52 @@ async function fetchAllItemStatsByDay(
       break;
     }
   }
-  return merged;
+  return { byDay: merged, pages };
 }
 
 export type SyncRnpAvitoMonthResult = {
   year: number;
   month: number;
+  /** Дней, по которым записали/отметили sync хотя бы одной метрики */
   syncedDays: number;
-  lastSyncedAt: string;
+  /** Сколько HTTP-вызовов к Avito stats API (без token) */
+  apiCalls: number;
+  /** true если запросов к Avito не было (данные свежие) */
+  skipped: boolean;
+  mode: RnpAvitoSyncMode;
+  lastSyncedAt: string | null;
   monthPayload: RnpAvitoMonthPayload;
 };
 
+type DayApiPatch = {
+  dayDate: string;
+  budgetSpentRub?: number;
+  writeBudgetValue: boolean;
+  markBudgetSynced: boolean;
+  impressions?: number;
+  views?: number;
+  contacts?: number;
+  writeItemsValue: boolean;
+  markItemsSynced: boolean;
+};
+
 /**
- * Pull Avito API metrics for a month and upsert only API columns.
- * Manual fields are never modified. On fetch/parse failure nothing is written.
+ * Выборочная синхронизация API-метрик месяца.
+ * - auto: только устаревшие дни по TTL; повторное открытие без API при свежих данных.
+ * - force: обновляет окно последних 7 дней (+ никогда не синхронизированные дни).
+ * Не затирает историю нулями при отсутствии дня в ответе.
+ * Ручные пробные (trials_* / *_is_manual) не трогает.
+ * При ошибке fetch/parse до записи — без изменений в БД.
  */
 export async function syncRnpAvitoMonth(
   db: AppDb,
   ctx: AuthContext,
-  input: { year: number; month: number },
+  input: { year: number; month: number; mode?: RnpAvitoSyncMode },
   deps: AvitoClientDeps = {}
 ): Promise<SyncRnpAvitoMonthResult> {
   requireRoles(ctx, ["director"]);
   const { year, month } = parseYearMonth(input.year, input.month);
+  const mode: RnpAvitoSyncMode = input.mode === "auto" ? "auto" : "force";
   const lockKey = `${ctx.organizationId}:${year}-${month}`;
   if (syncLocks.has(lockKey)) {
     throw conflict("Синхронизация этого месяца уже выполняется");
@@ -533,95 +584,179 @@ export async function syncRnpAvitoMonth(
   syncLocks.add(lockKey);
 
   try {
-    const cfg = requireAvitoEnv();
+    const now = new Date();
     const from = isoDate(year, month, 1);
-    const lastDay = daysInMonth(year, month);
-    const to = isoDate(year, month, lastDay);
-    const monthDates = buildMonthDayShell(year, month).map((d) => d.date);
+    const to = isoDate(year, month, daysInMonth(year, month));
+    const eligibleDates = monthDatesThroughToday(year, month, now);
 
-    // Fetch both endpoints BEFORE any DB writes (atomicity of month update).
-    const spendingsPayload = await fetchAvitoSpendings(
-      cfg,
-      { dateFrom: from, dateTo: to },
-      deps
-    );
-    const spendingsByDay = parseSpendingsByDay(spendingsPayload);
-    const itemsByDay = await fetchAllItemStatsByDay(cfg, from, to, deps);
-    const merged = mergeAvitoDayMetrics(monthDates, spendingsByDay, itemsByDay);
+    const existingRows = await db
+      .select()
+      .from(rnpAvitoDailyStats)
+      .where(
+        and(
+          eq(rnpAvitoDailyStats.organizationId, ctx.organizationId),
+          gte(rnpAvitoDailyStats.dayDate, from),
+          lte(rnpAvitoDailyStats.dayDate, to)
+        )
+      );
+    const byDate = new Map(existingRows.map((r) => [r.dayDate, r]));
+
+    const budgetStale: string[] = [];
+    const itemsStale: string[] = [];
+    for (const dayDate of eligibleDates) {
+      const row = byDate.get(dayDate);
+      const budgetAt = row?.budgetApiSyncedAt ?? row?.apiSyncedAt ?? null;
+      const itemsAt = row?.itemsApiSyncedAt ?? row?.apiSyncedAt ?? null;
+      if (isRnpAvitoMetricStale(budgetAt, dayDate, now, mode)) {
+        budgetStale.push(dayDate);
+      }
+      if (isRnpAvitoMetricStale(itemsAt, dayDate, now, mode)) {
+        itemsStale.push(dayDate);
+      }
+    }
+
+    if (budgetStale.length === 0 && itemsStale.length === 0) {
+      const monthPayload = await getRnpAvitoMonth(db, ctx, { year, month });
+      return {
+        year,
+        month,
+        syncedDays: 0,
+        apiCalls: 0,
+        skipped: true,
+        mode,
+        lastSyncedAt: monthPayload.lastSyncedAt,
+        monthPayload,
+      };
+    }
+
+    const cfg = requireAvitoEnv();
+    let apiCalls = 0;
+    let spendingsByDay = new Map<string, number>();
+    let itemsByDay = new Map<
+      string,
+      { impressions: number; views: number; contacts: number }
+    >();
+
+    // Fetch BEFORE writes. Partial failure → no DB changes.
+    const budgetRange = minMaxIsoDates(budgetStale);
+    if (budgetRange) {
+      const spendingsPayload = await fetchAvitoSpendings(
+        cfg,
+        { dateFrom: budgetRange.from, dateTo: budgetRange.to },
+        deps
+      );
+      apiCalls += 1;
+      spendingsByDay = parseSpendingsByDay(spendingsPayload);
+    }
+
+    const itemsRange = minMaxIsoDates(itemsStale);
+    if (itemsRange) {
+      const fetched = await fetchAllItemStatsByDay(
+        cfg,
+        itemsRange.from,
+        itemsRange.to,
+        deps
+      );
+      itemsByDay = fetched.byDay;
+      apiCalls += fetched.pages;
+    }
+
+    const patchDates = new Set([...budgetStale, ...itemsStale]);
+    const patches: DayApiPatch[] = [];
+    for (const dayDate of patchDates) {
+      const patch: DayApiPatch = {
+        dayDate,
+        writeBudgetValue: false,
+        markBudgetSynced: false,
+        writeItemsValue: false,
+        markItemsSynced: false,
+      };
+      if (budgetStale.includes(dayDate)) {
+        patch.markBudgetSynced = true;
+        if (spendingsByDay.has(dayDate)) {
+          patch.writeBudgetValue = true;
+          patch.budgetSpentRub = spendingsByDay.get(dayDate)!;
+        }
+      }
+      if (itemsStale.includes(dayDate)) {
+        patch.markItemsSynced = true;
+        if (itemsByDay.has(dayDate)) {
+          const c = itemsByDay.get(dayDate)!;
+          patch.writeItemsValue = true;
+          patch.impressions = c.impressions;
+          patch.views = c.views;
+          patch.contacts = c.contacts;
+        }
+      }
+      patches.push(patch);
+    }
 
     const syncedAt = new Date();
-    const rows = [...merged.entries()].map(([dayDate, metrics]) => ({
-      id: newId(),
-      organizationId: ctx.organizationId,
-      dayDate,
-      budgetSpentRub: metrics.budgetSpentRub,
-      impressions: metrics.impressions,
-      views: metrics.views,
-      contacts: metrics.contacts,
-      apiSyncedAt: syncedAt,
-      updatedAt: syncedAt,
-    }));
-
     await db.transaction(async (tx) => {
-      // Clear previous API values for the month so removed days don't keep stale API data.
-      // Manual columns are preserved.
-      await tx
-        .update(rnpAvitoDailyStats)
-        .set({
-          budgetSpentRub: null,
-          impressions: null,
-          views: null,
-          contacts: null,
-          apiSyncedAt: null,
-          updatedAt: syncedAt,
-        })
-        .where(
-          and(
-            eq(rnpAvitoDailyStats.organizationId, ctx.organizationId),
-            gte(rnpAvitoDailyStats.dayDate, from),
-            lte(rnpAvitoDailyStats.dayDate, to)
+      for (const patch of patches) {
+        const [existing] = await tx
+          .select()
+          .from(rnpAvitoDailyStats)
+          .where(
+            and(
+              eq(rnpAvitoDailyStats.organizationId, ctx.organizationId),
+              eq(rnpAvitoDailyStats.dayDate, patch.dayDate)
+            )
           )
-        );
+          .limit(1);
 
-      for (const row of rows) {
-        await tx
-          .insert(rnpAvitoDailyStats)
-          .values({
-            id: row.id,
-            organizationId: row.organizationId,
-            dayDate: row.dayDate,
-            budgetSpentRub: row.budgetSpentRub,
-            impressions: row.impressions,
-            views: row.views,
-            contacts: row.contacts,
-            apiSyncedAt: row.apiSyncedAt,
+        const setValues: Partial<typeof rnpAvitoDailyStats.$inferInsert> = {
+          updatedAt: syncedAt,
+          apiSyncedAt: syncedAt,
+        };
+        if (patch.markBudgetSynced) {
+          setValues.budgetApiSyncedAt = syncedAt;
+        }
+        if (patch.writeBudgetValue) {
+          setValues.budgetSpentRub = patch.budgetSpentRub ?? null;
+        }
+        if (patch.markItemsSynced) {
+          setValues.itemsApiSyncedAt = syncedAt;
+        }
+        if (patch.writeItemsValue) {
+          setValues.impressions = patch.impressions ?? null;
+          setValues.views = patch.views ?? null;
+          setValues.contacts = patch.contacts ?? null;
+        }
+
+        if (!existing) {
+          await tx.insert(rnpAvitoDailyStats).values({
+            id: newId(),
+            organizationId: ctx.organizationId,
+            dayDate: patch.dayDate,
+            budgetSpentRub: patch.writeBudgetValue
+              ? (patch.budgetSpentRub ?? null)
+              : null,
+            impressions: patch.writeItemsValue
+              ? (patch.impressions ?? null)
+              : null,
+            views: patch.writeItemsValue ? (patch.views ?? null) : null,
+            contacts: patch.writeItemsValue ? (patch.contacts ?? null) : null,
+            apiSyncedAt: syncedAt,
+            budgetApiSyncedAt: patch.markBudgetSynced ? syncedAt : null,
+            itemsApiSyncedAt: patch.markItemsSynced ? syncedAt : null,
             trialsScheduled: null,
             trialsCompleted: null,
             trialsScheduledIsManual: false,
             trialsCompletedIsManual: false,
             manualUpdatedAt: syncedAt,
             createdAt: syncedAt,
-            updatedAt: row.updatedAt,
-          })
-          .onConflictDoUpdate({
-            target: [
-              rnpAvitoDailyStats.organizationId,
-              rnpAvitoDailyStats.dayDate,
-            ],
-            set: {
-              budgetSpentRub: row.budgetSpentRub,
-              impressions: row.impressions,
-              views: row.views,
-              contacts: row.contacts,
-              apiSyncedAt: row.apiSyncedAt,
-              updatedAt: row.updatedAt,
-              // trials_* и *_is_manual не трогаем — ручные переопределения сохраняются.
-            },
+            updatedAt: syncedAt,
           });
+        } else {
+          await tx
+            .update(rnpAvitoDailyStats)
+            .set(setValues)
+            .where(eq(rnpAvitoDailyStats.id, existing.id));
+        }
       }
     });
 
-    // Обновить автозаписи «Расходы» из актуальных дневных сумм (без повторного вызова Avito API).
     try {
       const { refreshAvitoExpensesFromRnp } = await import(
         "@/server/services/expenses-service"
@@ -638,7 +773,10 @@ export async function syncRnpAvitoMonth(
     return {
       year,
       month,
-      syncedDays: rows.length,
+      syncedDays: patches.length,
+      apiCalls,
+      skipped: false,
+      mode,
       lastSyncedAt: syncedAt.toISOString(),
       monthPayload,
     };

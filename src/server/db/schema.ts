@@ -2960,7 +2960,15 @@ export const rnpAvitoDailyStats = pgTable(
     impressions: integer("impressions"),
     views: integer("views"),
     contacts: integer("contacts"),
+    /**
+     * Legacy: max(budget/items) sync time; сохраняем для совместимости чтения.
+     * Источник истины для TTL — budgetApiSyncedAt / itemsApiSyncedAt.
+     */
     apiSyncedAt: timestamp("api_synced_at", { withTimezone: true }),
+    /** Успешная синхронизация расходов (spendings) за этот день. */
+    budgetApiSyncedAt: timestamp("budget_api_synced_at", { withTimezone: true }),
+    /** Успешная синхронизация показов/просмотров/контактов (items) за день. */
+    itemsApiSyncedAt: timestamp("items_api_synced_at", { withTimezone: true }),
     /**
      * Значение «назначенных» при trials_scheduled_is_manual = true.
      * Иначе при чтении берётся overlay из manual_trial_lessons.

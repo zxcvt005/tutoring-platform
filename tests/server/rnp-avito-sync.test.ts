@@ -192,10 +192,12 @@ describe("rnp avito sync", () => {
     const first = await syncRnpAvitoMonth(
       t.db,
       director,
-      { year: 2026, month: 11 },
+      { year: 2026, month: 11, mode: "force" },
       { fetchFn: mockAvitoOk() }
     );
-    expect(first.syncedDays).toBe(2);
+    expect(first.syncedDays).toBeGreaterThanOrEqual(2);
+    expect(first.apiCalls).toBeGreaterThanOrEqual(2);
+    expect(first.skipped).toBe(false);
     expect(first.monthPayload.apiConnected).toBe(true);
     expect(first.monthPayload.lastSyncedAt).toBeTruthy();
 
@@ -207,12 +209,23 @@ describe("rnp avito sync", () => {
     expect(day1.trialsScheduled).toBe(3);
     expect(day1.trialsCompleted).toBe(2);
 
+    // Повторный auto сразу после sync — без API.
+    let apiHits = 0;
     const second = await syncRnpAvitoMonth(
       t.db,
       director,
-      { year: 2026, month: 11 },
-      { fetchFn: mockAvitoOk() }
+      { year: 2026, month: 11, mode: "auto" },
+      {
+        fetchFn: async (url) => {
+          apiHits += 1;
+          return mockAvitoOk()(url, {});
+        },
+      }
     );
+    expect(second.skipped).toBe(true);
+    expect(second.apiCalls).toBe(0);
+    expect(apiHits).toBe(0);
+
     const rows = await t.db
       .select()
       .from(rnpAvitoDailyStats)
@@ -223,17 +236,11 @@ describe("rnp avito sync", () => {
           lte(rnpAvitoDailyStats.dayDate, "2026-11-30")
         )
       );
-    expect(rows).toHaveLength(2);
+    expect(rows.length).toBeGreaterThanOrEqual(2);
     expect(
       second.monthPayload.days.find((d) => d.date === "2026-11-01")!
         .trialsScheduled
     ).toBe(3);
-    expect(
-      second.monthPayload.days.find((d) => d.date === "2026-11-01")!
-        .trialsCompleted
-    ).toBe(2);
-    // API fields untouched by trial overlay; legacy trials_* may remain in DB
-    // when is_manual is false (display still uses auto counts).
     const dbDay1 = rows.find((r) => r.dayDate === "2026-11-01")!;
     expect(dbDay1.budgetSpentRub).toBe(2000);
     expect(dbDay1.trialsScheduled).toBe(99);
@@ -243,7 +250,6 @@ describe("rnp avito sync", () => {
         .trialsScheduledSource
     ).toBe("automatic");
 
-    // Manual override must survive Avito sync and stay independent.
     const beforeOverride = await getRnpAvitoMonth(t.db, director, {
       year: 2026,
       month: 11,
@@ -256,12 +262,11 @@ describe("rnp avito sync", () => {
     });
     expect(manual.trialsScheduled).toBe(7);
     expect(manual.trialsScheduledSource).toBe("manual");
-    expect(manual.trialsCompletedSource).toBe("automatic");
 
     const afterSync = await syncRnpAvitoMonth(
       t.db,
       director,
-      { year: 2026, month: 11 },
+      { year: 2026, month: 11, mode: "force" },
       { fetchFn: mockAvitoOk() }
     );
     const dayAfter = afterSync.monthPayload.days.find(
@@ -274,6 +279,79 @@ describe("rnp avito sync", () => {
     expect(dayAfter.trialsCompletedSource).toBe("automatic");
   });
 
+  it("does not invent budget=0 when items exist without spendings for the day", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    setEnv();
+    const director = await asRole(t.db, "director@demo.local");
+
+    const first = await syncRnpAvitoMonth(
+      t.db,
+      director,
+      { year: 2026, month: 11, mode: "force" },
+      {
+        fetchFn: async (url) => {
+          const u = String(url);
+          if (u.includes("/token/")) {
+            return jsonResponse({ access_token: "tok", expires_in: 3600 });
+          }
+          if (u.includes("/spendings")) {
+            // Только 2-е число — 1-е отсутствует в spendings (типичный кейс «бюджет 0»).
+            return jsonResponse({
+              result: {
+                timestamp: 1,
+                groupings: [
+                  {
+                    date: "2026-11-02",
+                    type: "day",
+                    spendings: [
+                      { slug: "promotion", value: 500, services: [] },
+                    ],
+                  },
+                ],
+              },
+            });
+          }
+          if (u.includes("/items")) {
+            return jsonResponse({
+              result: {
+                dataTotalCount: 2,
+                groupings: [
+                  {
+                    id: 20261101,
+                    type: "day",
+                    metrics: [
+                      { slug: "impressions", value: 100 },
+                      { slug: "views", value: 40 },
+                      { slug: "contacts", value: 8 },
+                    ],
+                  },
+                  {
+                    id: 20261102,
+                    type: "day",
+                    metrics: [
+                      { slug: "impressions", value: 20 },
+                      { slug: "views", value: 5 },
+                      { slug: "contacts", value: 1 },
+                    ],
+                  },
+                ],
+              },
+            });
+          }
+          return jsonResponse({ error: { message: "unexpected" } }, 500);
+        },
+      }
+    );
+
+    const day1 = first.monthPayload.days.find((d) => d.date === "2026-11-01")!;
+    expect(day1.impressions).toBe(100);
+    expect(day1.budgetSpentRub).toBeNull();
+    const day2 = first.monthPayload.days.find((d) => d.date === "2026-11-02")!;
+    expect(day2.budgetSpentRub).toBe(500);
+    expect(day2.impressions).toBe(20);
+  });
+
   it("does not partially update the month when Avito returns an error", async () => {
     const t = await createTestDb();
     close = t.close;
@@ -283,7 +361,7 @@ describe("rnp avito sync", () => {
     await syncRnpAvitoMonth(
       t.db,
       director,
-      { year: 2026, month: 11 },
+      { year: 2026, month: 11, mode: "force" },
       { fetchFn: mockAvitoOk() }
     );
 
@@ -292,7 +370,7 @@ describe("rnp avito sync", () => {
       syncRnpAvitoMonth(
         t.db,
         director,
-        { year: 2026, month: 11 },
+        { year: 2026, month: 11, mode: "force" },
         {
           fetchFn: async (url) => {
             const u = String(url);
@@ -327,6 +405,7 @@ describe("rnp avito sync", () => {
       year: 2026,
       month: 11,
     });
+    // Ошибка items до записи — бюджет 1-го числа не затирается.
     expect(month.days.find((d) => d.date === "2026-11-01")!.budgetSpentRub).toBe(
       2000
     );

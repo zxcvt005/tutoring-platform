@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { appDateKey, appZonedParts } from "@/lib/app-time";
 import {
   RNP_AVITO_API_METRICS,
   RNP_AVITO_DERIVED_METRICS,
@@ -50,8 +51,20 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 const TEXT_DEBOUNCE_MS = 450;
 
 function todayParts(now = new Date()) {
-  return { year: now.getFullYear(), month: now.getMonth() + 1 };
+  const p = appZonedParts(now);
+  return { year: p.year, month: p.month };
 }
+
+type SyncMonthResult = {
+  year: number;
+  month: number;
+  syncedDays: number;
+  apiCalls: number;
+  skipped: boolean;
+  mode: "auto" | "force";
+  lastSyncedAt: string | null;
+  monthPayload: RnpAvitoMonthPayload;
+};
 
 function trialSourceKey(
   field: RnpAvitoTrialMetricKey
@@ -175,10 +188,52 @@ export function RnpAvitoWorkspace({
     savedTimerRef.current = setTimeout(() => setSaveState("idle"), 1600);
   }, []);
 
+  const runSync = useCallback(
+    async (y: number, m: number, mode: "auto" | "force") => {
+      setSyncError(null);
+      if (mode === "force") setSyncing(true);
+      try {
+        const data = await apiCall<SyncMonthResult>("syncRnpAvitoMonth", {
+          year: y,
+          month: m,
+          mode,
+        });
+        // Не сбрасываем таблицу: подменяем дни только после ответа.
+        if (data.year === y && data.month === m) {
+          setDays(data.monthPayload.days);
+          setApiConnected(data.monthPayload.apiConnected);
+          setAvitoEnv(data.monthPayload.avitoEnv);
+          setLastSyncedAt(data.lastSyncedAt);
+        }
+        if (mode === "force") {
+          if (data.skipped) {
+            toast.message("Данные уже актуальны, запросы к Avito не нужны");
+          } else {
+            toast.success(
+              `Синхронизировано · ${data.syncedDays} дн. · API ${data.apiCalls}`
+            );
+          }
+        }
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Не удалось синхронизировать";
+        if (mode === "force") {
+          setSyncError(message);
+          toast.error(message);
+        }
+        // auto: тихий провал, таблица из БД остаётся
+      } finally {
+        if (mode === "force") setSyncing(false);
+      }
+    },
+    [apiCall]
+  );
+
   const loadMonth = useCallback(
-    async (y: number, m: number) => {
+    async (y: number, m: number, opts?: { soft?: boolean }) => {
+      const soft = opts?.soft === true;
       setLoadError(null);
-      setReady(false);
+      if (!soft) setReady(false);
       try {
         const data = await apiCall<RnpAvitoMonthPayload>("getRnpAvitoMonth", {
           year: y,
@@ -193,40 +248,18 @@ export function RnpAvitoWorkspace({
           setLastSyncedAt(data.lastSyncedAt);
           setReady(true);
         });
+        // Фоновая выборочная синхронизация устаревших дней (0 API, если всё свежо).
+        void runSync(data.year, data.month, "auto");
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : "Ошибка загрузки");
         setReady(true);
       }
     },
-    [apiCall]
+    [apiCall, runSync]
   );
 
   async function syncAvito() {
-    setSyncError(null);
-    setSyncing(true);
-    try {
-      const data = await apiCall<{
-        year: number;
-        month: number;
-        syncedDays: number;
-        lastSyncedAt: string;
-        monthPayload: RnpAvitoMonthPayload;
-      }>("syncRnpAvitoMonth", { year, month });
-      setDays(data.monthPayload.days);
-      setApiConnected(data.monthPayload.apiConnected);
-      setAvitoEnv(data.monthPayload.avitoEnv);
-      setLastSyncedAt(data.lastSyncedAt);
-      toast.success(
-        `Синхронизировано с Avito · ${data.syncedDays} дн. с данными`
-      );
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Не удалось синхронизировать";
-      setSyncError(message);
-      toast.error(message);
-    } finally {
-      setSyncing(false);
-    }
+    await runSync(year, month, "force");
   }
 
   useEffect(() => {
@@ -247,16 +280,13 @@ export function RnpAvitoWorkspace({
     [totals]
   );
 
-  const todayIso = useMemo(() => {
-    const n = new Date();
-    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
-  }, []);
+  const todayIso = useMemo(() => appDateKey(new Date()), []);
 
   function goMonth(delta: number) {
     const next = shiftMonth(year, month, delta);
     setYear(next.year);
     setMonth(next.month);
-    void loadMonth(next.year, next.month);
+    void loadMonth(next.year, next.month, { soft: days.length > 0 });
   }
 
   const persistManual = useCallback(
