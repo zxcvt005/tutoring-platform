@@ -55,7 +55,7 @@ export function HomeworkWorkspace() {
   const studentId = data.currentStudentId;
   const all = assignmentsForStudent(studentId);
   const lessons = lessonsForStudent(studentId);
-  const learning = studentLearningLock(data.tariffAssignments, studentId);
+  const learning = studentLearningLock(data, studentId);
   const [filter, setFilter] = useState<HomeworkBoardFilter>("all");
 
   const stats = useMemo(() => studentHomeworkRingStats(all), [all]);

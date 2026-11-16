@@ -590,6 +590,7 @@ export async function upsertLesson(
     teacherId: string;
     topicId: string | null;
     subject: string | null;
+    directionId: string | null;
     startsAt: Date;
     endsAt: Date;
     status: Lesson["status"];
@@ -601,6 +602,7 @@ export async function upsertLesson(
     teacherId: lesson.teacherId,
     topicId: lesson.topicId ?? null,
     subject: lesson.subject ?? null,
+    directionId: lesson.directionId?.trim() || null,
     startsAt: new Date(lesson.startsAt),
     endsAt: new Date(lesson.endsAt),
     status: lesson.status,
@@ -658,6 +660,11 @@ export async function createRecurringScheduleAction(
   const { createLessonSchedule } = await import(
     "@/server/services/schedule-service"
   );
+  const directionRaw = payload.directionId;
+  const directionId =
+    typeof directionRaw === "string" && directionRaw.trim()
+      ? directionRaw.trim()
+      : undefined;
   return createLessonSchedule(db, ctx, {
     teacherId: String(payload.teacherId),
     studentIds: (payload.studentIds as string[]) ?? [],
@@ -665,6 +672,7 @@ export async function createRecurringScheduleAction(
     startTime: String(payload.startTime ?? ""),
     durationMin: Number(payload.durationMin ?? 60),
     subject: payload.subject as string | undefined,
+    directionId,
     activeFrom: payload.activeFrom as string | undefined,
     activeUntil: payload.activeUntil as string | undefined,
   });
@@ -1167,7 +1175,7 @@ export async function setAttendance(
   return {
     ok: true,
     remaining: balance?.remaining ?? null,
-    used: balance?.used ?? null,
+    used: null,
   };
 }
 
@@ -2090,17 +2098,22 @@ export async function upsertTariffAction(
   payload: Record<string, unknown>
 ) {
   const { upsertTariff } = await import("@/server/services/tariffs-service");
+  const purchaseOptions = Array.isArray(payload.purchaseOptions)
+    ? payload.purchaseOptions.map((raw) => {
+        const item = raw as Record<string, unknown>;
+        return {
+          id: item.id as string | undefined,
+          lessonsCount: Number(item.lessonsCount),
+          totalPrice: Number(item.totalPrice),
+          sortOrder: Number(item.sortOrder ?? 0),
+          isActive: item.isActive == null ? true : Boolean(item.isActive),
+        };
+      })
+    : undefined;
   return upsertTariff(db, ctx, {
     id: payload.id as string | undefined,
+    directionId: String(payload.directionId ?? ""),
     name: String(payload.name ?? ""),
-    price: Number(payload.price),
-    durationDays: Number(payload.durationDays),
-    lessonsLimit:
-      payload.lessonsLimit == null ? null : Number(payload.lessonsLimit),
-    weeklyFrequency:
-      payload.weeklyFrequency == null
-        ? undefined
-        : Number(payload.weeklyFrequency),
     includesText: (payload.includesText as string) ?? null,
     features: payload.features as string[] | undefined,
     status: payload.status as "active" | "archived" | undefined,
@@ -2108,7 +2121,42 @@ export async function upsertTariffAction(
     productIds: Array.isArray(payload.productIds)
       ? payload.productIds.map((id) => String(id))
       : undefined,
+    purchaseOptions,
   });
+}
+
+export async function listLearningDirectionsAction(db: AppDb, ctx: AuthContext) {
+  const { listDirections } = await import(
+    "@/server/services/directions-service"
+  );
+  return { directions: await listDirections(db, ctx) };
+}
+
+export async function upsertLearningDirectionAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { upsertDirection } = await import(
+    "@/server/services/directions-service"
+  );
+  return upsertDirection(db, ctx, {
+    id: payload.id as string | undefined,
+    name: String(payload.name ?? ""),
+    slug: payload.slug as string | undefined,
+    status: payload.status as "active" | "archived" | undefined,
+  });
+}
+
+export async function archiveLearningDirectionAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { archiveDirection } = await import(
+    "@/server/services/directions-service"
+  );
+  return archiveDirection(db, ctx, String(payload.id ?? ""));
 }
 
 export async function listProductsAction(db: AppDb, ctx: AuthContext) {
@@ -2528,71 +2576,109 @@ export async function archiveTariffAction(
 }
 
 export async function assignTariffAction(
-  db: AppDb,
-  ctx: AuthContext,
-  payload: Record<string, unknown>
+  _db: AppDb,
+  _ctx: AuthContext,
+  _payload: Record<string, unknown>
 ) {
-  const { assignTariffToStudent } = await import(
-    "@/server/services/tariffs-service"
+  const { badRequest } = await import("@/server/errors");
+  throw badRequest(
+    "Назначение тарифа устарело. Ученик оформляет покупку через createLessonCheckout."
   );
-  return assignTariffToStudent(db, ctx, {
-    studentId: String(payload.studentId),
-    tariffId: String(payload.tariffId),
-    startsAt: payload.startsAt as string | undefined,
-    endsAt: payload.endsAt as string | undefined,
-    mode: payload.mode === "enqueue" ? "enqueue" : "purchase",
-    reason: payload.reason as string | undefined,
-  });
 }
 
 export async function setStudentPurchaseTariffAction(
-  db: AppDb,
-  ctx: AuthContext,
-  payload: Record<string, unknown>
+  _db: AppDb,
+  _ctx: AuthContext,
+  _payload: Record<string, unknown>
 ) {
-  const { setStudentPurchaseTariff } = await import(
-    "@/server/services/tariffs-service"
+  const { badRequest } = await import("@/server/errors");
+  throw badRequest(
+    "purchaseTariffId устарел. Выберите тариф и вариант покупки на стороне ученика."
   );
-  return setStudentPurchaseTariff(db, ctx, {
-    studentId: String(payload.studentId),
-    tariffId: String(payload.tariffId),
-    reason: payload.reason as string | undefined,
-  });
 }
 
 export async function adminMarkPaidAction(
+  _db: AppDb,
+  _ctx: AuthContext,
+  _payload: Record<string, unknown>
+) {
+  const { badRequest } = await import("@/server/errors");
+  throw badRequest(
+    "Ручное подтверждение отключено: оплата фиксируется webhook/статусом Точка Банк."
+  );
+}
+
+export async function createLessonCheckoutAction(
   db: AppDb,
   ctx: AuthContext,
   payload: Record<string, unknown>
 ) {
-  const { adminMarkPaymentPaid } = await import(
-    "@/server/services/tariffs-service"
+  const { createCheckout } = await import(
+    "@/server/services/lesson-orders-service"
   );
-  return adminMarkPaymentPaid(db, ctx, {
-    paymentId: String(payload.paymentId),
-    reason: String(payload.reason ?? ""),
+  return createCheckout(db, ctx, {
+    tariffId: String(payload.tariffId ?? ""),
+    optionId: String(payload.optionId ?? ""),
   });
 }
 
 export async function studentPayAction(
   db: AppDb,
   ctx: AuthContext,
-  assignmentId?: string
+  payload: Record<string, unknown>
 ) {
-  const { studentRequestPayment } = await import(
-    "@/server/services/tariffs-service"
-  );
-  return studentRequestPayment(db, ctx, assignmentId);
+  return createLessonCheckoutAction(db, ctx, payload);
 }
 
 export async function studentStartCheckoutAction(
   db: AppDb,
-  ctx: AuthContext
+  ctx: AuthContext,
+  payload: Record<string, unknown>
 ) {
-  const { studentStartCheckout } = await import(
-    "@/server/services/tariffs-service"
+  return createLessonCheckoutAction(db, ctx, payload);
+}
+
+export async function refreshLessonOrderPaymentAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { refreshPaymentStatus } = await import(
+    "@/server/services/lesson-orders-service"
   );
-  return studentStartCheckout(db, ctx);
+  return refreshPaymentStatus(db, ctx, {
+    paymentId: String(payload.paymentId ?? ""),
+  });
+}
+
+export async function adminRefundLessonPaymentAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { adminRefundPayment } = await import(
+    "@/server/services/lesson-orders-service"
+  );
+  return adminRefundPayment(db, ctx, {
+    paymentId: String(payload.paymentId ?? ""),
+    reason: payload.reason as string | undefined,
+  });
+}
+
+export async function adminAdjustLessonBalanceAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { adminAdjustBalance } = await import(
+    "@/server/services/lesson-orders-service"
+  );
+  return adminAdjustBalance(db, ctx, {
+    studentId: String(payload.studentId ?? ""),
+    directionId: String(payload.directionId ?? ""),
+    delta: Number(payload.delta),
+    note: String(payload.note ?? ""),
+  });
 }
 
 export async function adminRejectPaymentAction(
@@ -2601,12 +2687,22 @@ export async function adminRejectPaymentAction(
   payload: Record<string, unknown>
 ) {
   const { adminRejectPayment } = await import(
-    "@/server/services/tariffs-service"
+    "@/server/services/lesson-orders-service"
   );
   return adminRejectPayment(db, ctx, {
     paymentId: String(payload.paymentId),
     reason: payload.reason as string | undefined,
   });
+}
+
+export async function getCommerceIncomeOverviewAction(
+  db: AppDb,
+  ctx: AuthContext
+) {
+  const { getCommerceIncomeOverview } = await import(
+    "@/server/services/income-service"
+  );
+  return getCommerceIncomeOverview(db, ctx);
 }
 
 export async function getIncomeOverviewAction(db: AppDb, ctx: AuthContext) {
@@ -3076,12 +3172,20 @@ export const platformActions = {
   reissueQuickAccessLink: reissueQuickAccessLinkAction,
   disableQuickAccessLink: disableQuickAccessLinkAction,
   archiveTariff: archiveTariffAction,
+  upsertLearningDirection: upsertLearningDirectionAction,
+  archiveLearningDirection: archiveLearningDirectionAction,
+  listLearningDirections: listLearningDirectionsAction,
   assignTariff: assignTariffAction,
   setStudentPurchaseTariff: setStudentPurchaseTariffAction,
   adminMarkPaymentPaid: adminMarkPaidAction,
   adminRejectPayment: adminRejectPaymentAction,
   studentRequestPayment: studentPayAction,
   studentStartCheckout: studentStartCheckoutAction,
+  createLessonCheckout: createLessonCheckoutAction,
+  refreshLessonOrderPayment: refreshLessonOrderPaymentAction,
+  adminRefundLessonPayment: adminRefundLessonPaymentAction,
+  adminAdjustLessonBalance: adminAdjustLessonBalanceAction,
+  getCommerceIncomeOverview: getCommerceIncomeOverviewAction,
   getIncomeOverview: getIncomeOverviewAction,
   getTeacherPayRates: getTeacherPayRatesAction,
   setTeacherPayRates: setTeacherPayRatesAction,

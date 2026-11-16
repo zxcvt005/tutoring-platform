@@ -8,6 +8,7 @@ import { addAppDateKey, appDateKey, fromAppDateTime } from "@/lib/app-time";
 import { hashPassword } from "@/server/auth/password";
 import type { AuthContext } from "@/server/authz/context";
 import {
+  learningDirections,
   memberships,
   organizations,
   students,
@@ -20,20 +21,15 @@ import {
   SCHOOL_TARIFF_QA_STUDENT_IDS,
 } from "@/server/db/seed-school";
 import type { AppDb } from "@/server/db/types";
-import {
-  findDebitAssignment,
-  getAssignmentBalance,
-} from "@/server/services/lesson-balance";
+import { getDirectionBalance } from "@/server/services/lesson-balance";
+import { ensureDefaultDirections } from "@/server/services/directions-service";
+import { adminAdjustBalance } from "@/server/services/lesson-orders-service";
 import {
   completeLesson,
   upsertLesson,
   upsertStudent,
 } from "@/server/services/platform-mutations";
-import {
-  adminMarkPaymentPaid,
-  assignTariffToStudent,
-  upsertTariff,
-} from "@/server/services/tariffs-service";
+import { upsertTariff } from "@/server/services/tariffs-service";
 
 export const SCHOOL_TARIFF_QA_TARIFF_ID = "sch_tariff_qa_balance_2";
 const TEACHER_ID = "sch_t1";
@@ -153,28 +149,48 @@ export async function ensureSchoolTariffQaFixtures(
   const ctx = directorCtx(directorUser);
   const passwordHash = await hashPassword(SCHOOL_PASSWORD);
 
-  const tariff = await upsertTariff(db, ctx, {
+  await ensureDefaultDirections(db, SCHOOL_ORG_ID);
+  const [physicsDirection] = await db
+    .select()
+    .from(learningDirections)
+    .where(
+      and(
+        eq(learningDirections.organizationId, SCHOOL_ORG_ID),
+        eq(learningDirections.slug, "physics")
+      )
+    )
+    .limit(1);
+  if (!physicsDirection) {
+    throw new Error("Направление physics не найдено после ensureDefaultDirections");
+  }
+
+  await upsertTariff(db, ctx, {
     id: SCHOOL_TARIFF_QA_TARIFF_ID,
+    directionId: physicsDirection.id,
     name: "ТЕСТ пакет 2 занятия",
-    price: 1000,
-    durationDays: 14,
-    lessonsLimit: 2,
-    weeklyFrequency: 2,
     features: ["individual_lessons", "homework"],
     includesText: "QA-пакет для проверки остатка 2 / 1 / 0 / -1",
     adminNotes: "Тестовый тариф. Не использовать для реальных учеников.",
+    purchaseOptions: [
+      {
+        lessonsCount: 2,
+        totalPrice: 1000,
+        sortOrder: 0,
+        isActive: true,
+      },
+    ],
   });
 
   const results: TariffQaEnsureResult[] = [];
   for (const spec of SCHOOL_TARIFF_QA_SPECS) {
     await ensureStudent(db, ctx, spec, passwordHash);
-    const current = await findDebitAssignment(db, SCHOOL_ORG_ID, spec.id);
-    if (current) {
-      const balance = await getAssignmentBalance(
-        db,
-        current.id,
-        current.lessonsLimitSnapshot
-      );
+    const balance = await getDirectionBalance(
+      db,
+      SCHOOL_ORG_ID,
+      spec.id,
+      physicsDirection.id
+    );
+    if (balance.remaining != null) {
       if (balance.remaining === spec.targetRemaining) {
         results.push({
           studentId: spec.id,
@@ -186,20 +202,18 @@ export async function ensureSchoolTariffQaFixtures(
       }
     }
 
-    await ensurePaidTwoLessonPackage(db, ctx, spec.id, tariff.id);
-    await syncDebits(db, ctx, spec.id, spec);
-    const restored = await findDebitAssignment(db, SCHOOL_ORG_ID, spec.id);
-    const balance = restored
-      ? await getAssignmentBalance(
-          db,
-          restored.id,
-          restored.lessonsLimitSnapshot
-        )
-      : null;
+    await ensureTwoLessonBalance(db, ctx, spec.id, physicsDirection.id);
+    await syncDebits(db, ctx, spec.id, spec, physicsDirection.id);
+    const after = await getDirectionBalance(
+      db,
+      SCHOOL_ORG_ID,
+      spec.id,
+      physicsDirection.id
+    );
     results.push({
       studentId: spec.id,
       fullName: spec.fullName,
-      remaining: balance?.remaining ?? null,
+      remaining: after.remaining,
       restored: true,
     });
   }
@@ -271,43 +285,34 @@ async function ensureStudent(
   return id;
 }
 
-async function ensurePaidTwoLessonPackage(
+async function ensureTwoLessonBalance(
   db: AppDb,
   ctx: AuthContext,
   studentId: string,
-  tariffId: string
+  directionId: string
 ) {
-  const current = await findDebitAssignment(db, SCHOOL_ORG_ID, studentId);
-  if (
-    current &&
-    current.tariffId === tariffId &&
-    Number(current.lessonsLimitSnapshot) === 2 &&
-    current.paymentStatus === "paid"
-  ) {
-    return current;
-  }
-
-  const assigned = await assignTariffToStudent(db, ctx, {
+  const current = await getDirectionBalance(
+    db,
+    SCHOOL_ORG_ID,
     studentId,
-    tariffId,
+    directionId
+  );
+  if (current.remaining >= 2) return;
+  const delta = 2 - current.remaining;
+  await adminAdjustBalance(db, ctx, {
+    studentId,
+    directionId,
+    delta,
+    note: "QA seed: пакет 2 занятия",
   });
-  if (!assigned.paymentId) {
-    throw new Error(`Не удалось создать платёж для ${studentId}`);
-  }
-  await adminMarkPaymentPaid(db, ctx, {
-    paymentId: assigned.paymentId,
-    reason: "Тестовая фиксация оплаты (QA остатка занятий)",
-  });
-  const paid = await findDebitAssignment(db, SCHOOL_ORG_ID, studentId);
-  if (!paid) throw new Error(`Не удалось активировать тариф для ${studentId}`);
-  return paid;
 }
 
 async function syncDebits(
   db: AppDb,
   ctx: AuthContext,
   studentId: string,
-  spec: TariffQaSpec
+  spec: TariffQaSpec,
+  directionId: string
 ) {
   const needed = 2 - spec.targetRemaining;
   for (let i = 0; i < spec.lessonIds.length; i++) {
@@ -317,6 +322,7 @@ async function syncDebits(
       id: lessonId,
       teacherId: TEACHER_ID,
       studentIds: [studentId],
+      directionId,
       startsAt: slot.startsAt.toISOString(),
       endsAt: slot.endsAt.toISOString(),
       status: "planned",

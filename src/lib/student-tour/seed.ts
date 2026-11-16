@@ -580,7 +580,10 @@ export function createStudentTourSeed(): DemoData {
   ];
 
   const tariffId = "tour_tariff_16";
-  const assignmentId = "tour_ta_active";
+  const directionId = "tour_dir_physics";
+  const optionId = "tour_tpo_16";
+  const orderPrevId = "tour_order_old";
+  const orderActiveId = "tour_ta_active";
 
   return {
     version: 6,
@@ -608,7 +611,6 @@ export function createStudentTourSeed(): DemoData {
         phone: "+7 900 000-00-00",
         status: "active",
         teacherId: T,
-        purchaseTariffId: tariffId,
         createdAt: atDay(-120, 10),
       },
     ],
@@ -626,9 +628,20 @@ export function createStudentTourSeed(): DemoData {
     intensiveAssignments,
     mockExams,
     mockExamResults,
+    learningDirections: [
+      {
+        id: directionId,
+        name: "Физика",
+        slug: "physics",
+        status: "active" as const,
+        createdAt: atDay(-120, 10),
+        updatedAt: atDay(-4, 12),
+      },
+    ],
     tariffs: [
       {
         id: tariffId,
+        directionId,
         name: "16 занятий · физика",
         price: 28800,
         currency: "RUB",
@@ -645,6 +658,80 @@ export function createStudentTourSeed(): DemoData {
         ],
         status: "active",
         productIds: ["tour_prd_trainer"],
+        purchaseOptions: [
+          {
+            id: optionId,
+            tariffId,
+            lessonsCount: 16,
+            totalPrice: 28800,
+            sortOrder: 0,
+            isActive: true,
+          },
+        ],
+      },
+    ],
+    lessonOrders: [
+      {
+        id: orderPrevId,
+        studentId: S,
+        payerUserId: "user_tour",
+        tariffId,
+        optionId,
+        directionId,
+        tariffNameSnapshot: "16 занятий · физика",
+        lessonsCount: 16,
+        totalAmount: 28800,
+        unitPrice: 1800,
+        currency: "RUB",
+        featuresSnapshot: [
+          "individual_lessons",
+          "homework",
+          "extra_materials",
+          "intensives",
+        ],
+        productIdsSnapshot: ["tour_prd_trainer"],
+        status: "paid",
+        paidAt: atDay(-121, 14),
+        creditedAt: atDay(-121, 14),
+        creditLedgerEntryId: "tour_sll_old",
+        accessRevoked: true,
+        createdAt: atDay(-121, 11),
+        updatedAt: atDay(-50, 14),
+      },
+      {
+        id: orderActiveId,
+        studentId: S,
+        payerUserId: "user_tour",
+        tariffId,
+        optionId,
+        directionId,
+        tariffNameSnapshot: "16 занятий · физика",
+        lessonsCount: 16,
+        totalAmount: 28800,
+        unitPrice: 1800,
+        currency: "RUB",
+        featuresSnapshot: [
+          "individual_lessons",
+          "homework",
+          "extra_materials",
+          "intensives",
+        ],
+        productIdsSnapshot: ["tour_prd_trainer"],
+        status: "paid",
+        paidAt: atDay(-50, 14),
+        creditedAt: atDay(-50, 14),
+        creditLedgerEntryId: "tour_sll_active",
+        accessRevoked: false,
+        createdAt: atDay(-50, 11),
+        updatedAt: atDay(-4, 12),
+      },
+    ],
+    studentDirectionBalances: [
+      {
+        studentId: S,
+        directionId,
+        remaining: 7,
+        used: 9,
       },
     ],
     tariffAssignments: [
@@ -667,7 +754,7 @@ export function createStudentTourSeed(): DemoData {
         tariffName: "16 занятий · физика",
       },
       {
-        id: assignmentId,
+        id: orderActiveId,
         studentId: S,
         tariffId,
         startsAt: fromAppDateOnly(dayKey(-49)).toISOString(),
@@ -691,7 +778,7 @@ export function createStudentTourSeed(): DemoData {
       {
         id: "tour_pay_old",
         studentId: S,
-        assignmentId: "tour_ta_old",
+        orderId: orderPrevId,
         amount: 28800,
         currency: "RUB",
         status: "paid",
@@ -702,7 +789,7 @@ export function createStudentTourSeed(): DemoData {
       {
         id: "tour_pay_cur",
         studentId: S,
-        assignmentId,
+        orderId: orderActiveId,
         amount: 28800,
         currency: "RUB",
         status: "paid",

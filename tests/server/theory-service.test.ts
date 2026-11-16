@@ -21,7 +21,7 @@ import {
   submitHomeworkAction,
   upsertHomework,
 } from "@/server/services/platform-mutations";
-import { adminMarkPaymentPaid } from "@/server/services/tariffs-service";
+import { confirmPaidFromBank } from "@/server/services/lesson-orders-service";
 import {
   assignTheory,
   getTheoryFileForViewer,
@@ -624,9 +624,10 @@ describe("theory materials", () => {
     expect(s1AfterAdd.testAssignmentId).toBeNull();
 
     const director = await login(t.db, "director@demo.local");
-    await adminMarkPaymentPaid(t.db, director, {
+    await confirmPaidFromBank(t.db, director, {
       paymentId: "pay_s2",
-      reason: "оплата тарифа для проверки теории",
+      amount: 12000,
+      raw: { test: "theory" },
     });
     const s2 = await login(t.db, "s2@demo.local");
     const s2Boot = await buildBootstrap(t.db, s2);

@@ -235,6 +235,10 @@ async function migrateAndMaybeSeed(connectionString: string) {
         qa.map((r) => `${r.studentId}=${r.remaining}`).join(", ")
     );
 
+    const { ensureDefaultDirections } = await import(
+      "../src/server/services/directions-service"
+    );
+    await ensureDefaultDirections(db, SCHOOL_ORG_ID);
     const { ensureDefaultProducts } = await import(
       "../src/server/services/products-service"
     );

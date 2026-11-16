@@ -5,24 +5,23 @@ import { resolveAuthContext } from "@/server/authz/context";
 import {
   attendances,
   lessons,
-  tariffLessonLedger,
+  studentLessonLedger,
   teacherPayrollEntries,
 } from "@/server/db/schema";
 import { loginWithPassword } from "@/server/services/auth-service";
 import { resolveLearningAccess } from "@/server/services/learning-access";
 import {
   setAttendance,
-  upsertLesson,
 } from "@/server/services/platform-mutations";
 import {
   settleLessonPayroll,
   setTeacherPayRates,
 } from "@/server/services/teacher-payroll-service";
 import {
-  adminMarkPaymentPaid,
-  assignTariffToStudent,
-  upsertTariff,
-} from "@/server/services/tariffs-service";
+  makePlannedLesson,
+  physicsDirectionId,
+  seedPaidLessons,
+} from "../helpers/commerce";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
 
 describe("attendance save does not duplicate finance", () => {
@@ -48,41 +47,12 @@ describe("attendance save does not duplicate finance", () => {
     db: Awaited<ReturnType<typeof createTestDb>>["db"],
     director: Awaited<ReturnType<typeof asRole>>
   ) {
-    const tariff = await upsertTariff(db, director, {
-      name: "Пакет посещаемости",
-      price: 1000,
-      durationDays: 28,
-      lessonsLimit: 8,
-      weeklyFrequency: 2,
-      features: ["individual_lessons"],
+    const directionId = await physicsDirectionId(db, director.organizationId);
+    await seedPaidLessons(db, director, "s11", {
+      directionId,
+      lessons: 8,
     });
-    const assigned = await assignTariffToStudent(db, director, {
-      studentId: "s11",
-      tariffId: tariff.id,
-    });
-    await adminMarkPaymentPaid(db, director, {
-      paymentId: assigned.paymentId,
-      reason: "Тестовая оплата",
-    });
-  }
-
-  async function makeLesson(
-    db: Awaited<ReturnType<typeof createTestDb>>["db"],
-    teacher: Awaited<ReturnType<typeof asRole>>,
-    hour = 16
-  ) {
-    const startsAt = new Date(Date.now() + 2 * 86_400_000);
-    startsAt.setHours(hour, 0, 0, 0);
-    const endsAt = new Date(startsAt.getTime() + 60 * 60_000);
-    const created = await upsertLesson(db, teacher, {
-      teacherId: "t1",
-      studentIds: ["s11"],
-      startsAt: startsAt.toISOString(),
-      endsAt: endsAt.toISOString(),
-      status: "planned",
-      subject: "Посещаемость",
-    });
-    return created.id;
+    return directionId;
   }
 
   async function debits(
@@ -91,8 +61,8 @@ describe("attendance save does not duplicate finance", () => {
   ) {
     return db
       .select()
-      .from(tariffLessonLedger)
-      .where(eq(tariffLessonLedger.lessonId, lessonId));
+      .from(studentLessonLedger)
+      .where(eq(studentLessonLedger.lessonId, lessonId));
   }
 
   it("starts unmarked and does not debit a forgotten lesson", async () => {
@@ -100,8 +70,12 @@ describe("attendance save does not duplicate finance", () => {
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
     const anna = await asRole(t.db, "anna@example.com");
-    await paidPackage(t.db, director);
-    const lessonId = await makeLesson(t.db, anna, 11);
+    const directionId = await paidPackage(t.db, director);
+    const lessonId = await makePlannedLesson(t.db, anna, {
+      studentIds: ["s11"],
+      directionId,
+      slotHour: 11,
+    });
 
     const marks = await t.db
       .select()
@@ -130,7 +104,8 @@ describe("attendance save does not duplicate finance", () => {
       t.db,
       director.organizationId,
       "s11",
-      "homework"
+      "homework",
+      directionId
     );
     expect(access.remaining).toBe(8);
   });
@@ -144,9 +119,13 @@ describe("attendance save does not duplicate finance", () => {
       teacherId: "t1",
       rates: { 1: 100_000, 2: 150_000, 3: 180_000, 4: 200_000, 5: 220_000 },
     });
-    await paidPackage(t.db, director);
+    const directionId = await paidPackage(t.db, director);
     const before = await t.db.select({ id: lessons.id }).from(lessons);
-    const lessonId = await makeLesson(t.db, anna, 12);
+    const lessonId = await makePlannedLesson(t.db, anna, {
+      studentIds: ["s11"],
+      directionId,
+      slotHour: 12,
+    });
 
     await setAttendance(t.db, anna, lessonId, "s11", "present");
     await setAttendance(t.db, anna, lessonId, "s11", "present");
@@ -162,7 +141,8 @@ describe("attendance save does not duplicate finance", () => {
       t.db,
       director.organizationId,
       "s11",
-      "homework"
+      "homework",
+      directionId
     );
     expect(access.remaining).toBe(7);
 
@@ -194,7 +174,8 @@ describe("attendance save does not duplicate finance", () => {
       t.db,
       director.organizationId,
       "s11",
-      "homework"
+      "homework",
+      directionId
     );
     expect(restored.remaining).toBe(8);
     const [mark] = await t.db
@@ -215,7 +196,12 @@ describe("attendance save does not duplicate finance", () => {
     const anna = await asRole(t.db, "anna@example.com");
     const igor = await asRole(t.db, "igor@example.com");
     const student = await asRole(t.db, "s1@demo.local");
-    const lessonId = await makeLesson(t.db, anna, 13);
+    const directionId = await physicsDirectionId(t.db, anna.organizationId);
+    const lessonId = await makePlannedLesson(t.db, anna, {
+      studentIds: ["s11"],
+      directionId,
+      slotHour: 13,
+    });
 
     await expect(
       setAttendance(t.db, igor, lessonId, "s11", "present")

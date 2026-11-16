@@ -165,8 +165,6 @@ export const students = pgTable("students", {
   previousTeacherId: text("previous_teacher_id").references(() => teachers.id, {
     onDelete: "set null",
   }),
-  /** Каталожный тариф, который ученик может оплачивать сам. Не списывающий пакет. */
-  purchaseTariffId: text("purchase_tariff_id"),
   ...timestamps,
 }, (t) => [
   index("students_org_idx").on(t.organizationId),
@@ -424,6 +422,32 @@ export const testAnswerKeys = pgTable("test_answer_keys", {
   ),
 ]);
 
+/** Направление обучения (предмет / продуктовая линия) в рамках школы. */
+export const learningDirections = pgTable(
+  "learning_directions",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    status: text("status").notNull().default("active"),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("learning_directions_org_slug_uidx").on(
+      t.organizationId,
+      t.slug
+    ),
+    index("learning_directions_org_idx").on(t.organizationId),
+    check(
+      "learning_directions_status_check",
+      sql`${t.status} in ('active', 'archived')`
+    ),
+  ]
+);
+
 /** Шаблон регулярного расписания (вторник/четверг 17:00 и т.п.). */
 export const lessonSchedules = pgTable(
   "lesson_schedules",
@@ -435,6 +459,9 @@ export const lessonSchedules = pgTable(
     teacherId: text("teacher_id")
       .notNull()
       .references(() => teachers.id, { onDelete: "cascade" }),
+    directionId: text("direction_id").references(() => learningDirections.id, {
+      onDelete: "set null",
+    }),
     subject: text("subject"),
     /** Дни недели: 1=пн … 7=вс */
     weekdays: jsonb("weekdays").$type<number[]>().notNull(),
@@ -481,6 +508,9 @@ export const lessons = pgTable("lessons", {
   teacherId: text("teacher_id")
     .notNull()
     .references(() => teachers.id, { onDelete: "cascade" }),
+  directionId: text("direction_id").references(() => learningDirections.id, {
+    onDelete: "set null",
+  }),
   topicId: text("topic_id").references(() => topics.id, {
     onDelete: "set null",
   }),
@@ -789,7 +819,7 @@ export const loginAttempts = pgTable(
   ]
 );
 
-/** Продукт обучения (каталог). Не путать с назначением ученику. */
+/** Каталожный тариф в рамках направления обучения. */
 export const tariffs = pgTable(
   "tariffs",
   {
@@ -797,12 +827,16 @@ export const tariffs = pgTable(
     organizationId: text("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    directionId: text("direction_id")
+      .notNull()
+      .references(() => learningDirections.id, { onDelete: "restrict" }),
     name: text("name").notNull(),
-    price: numeric("price", { precision: 12, scale: 2 }).notNull(),
+    /** Устаревшее одиночное поле цены; для новых тарифов — варианты покупки. */
+    price: numeric("price", { precision: 12, scale: 2 }),
     currency: text("currency").notNull().default("RUB"),
     /** Прогнозируемая длительность пакета в днях (не дата сгорания). */
-    durationDays: integer("duration_days").notNull(),
-    /** Количество занятий в пакете */
+    durationDays: integer("duration_days"),
+    /** Количество занятий в пакете (legacy; предпочтительны purchase options) */
     lessonsLimit: integer("lessons_limit"),
     /** Частота занятий в неделю (независимо от duration_days) */
     weeklyFrequency: integer("weekly_frequency").notNull().default(1),
@@ -815,6 +849,7 @@ export const tariffs = pgTable(
   },
   (t) => [
     index("tariffs_org_idx").on(t.organizationId),
+    index("tariffs_direction_idx").on(t.directionId),
     check(
       "tariffs_status_check",
       sql`${t.status} in ('active', 'archived')`
@@ -873,54 +908,94 @@ export const tariffProducts = pgTable(
   ]
 );
 
-/**
- * Назначение тарифа ученику (подписка / период).
- * priceSnapshot фиксирует цену на момент оформления.
- */
-export const studentTariffAssignments = pgTable(
-  "student_tariff_assignments",
+/** Вариант покупки тарифа (N занятий за фиксированную сумму). */
+export const tariffPurchaseOptions = pgTable(
+  "tariff_purchase_options",
   {
     id: text("id").primaryKey(),
     organizationId: text("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    tariffId: text("tariff_id")
+      .notNull()
+      .references(() => tariffs.id, { onDelete: "cascade" }),
+    lessonsCount: integer("lessons_count").notNull(),
+    totalPrice: numeric("total_price", { precision: 12, scale: 2 }).notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    isActive: boolean("is_active").notNull().default(true),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("tariff_purchase_options_tariff_lessons_uidx").on(
+      t.tariffId,
+      t.lessonsCount
+    ),
+    index("tariff_purchase_options_tariff_idx").on(t.tariffId),
+    index("tariff_purchase_options_org_idx").on(t.organizationId),
+    check("tariff_purchase_options_lessons_check", sql`${t.lessonsCount} > 0`),
+  ]
+);
+
+/** Заказ пакета занятий (коммерческая единица вместо назначения тарифа). */
+export const lessonOrders = pgTable(
+  "lesson_orders",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    payerUserId: text("payer_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
     studentId: text("student_id")
       .notNull()
       .references(() => students.id, { onDelete: "cascade" }),
     tariffId: text("tariff_id")
       .notNull()
       .references(() => tariffs.id, { onDelete: "restrict" }),
-    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
-    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
-    priceSnapshot: numeric("price_snapshot", {
+    optionId: text("option_id").references(() => tariffPurchaseOptions.id, {
+      onDelete: "set null",
+    }),
+    directionId: text("direction_id")
+      .notNull()
+      .references(() => learningDirections.id, { onDelete: "restrict" }),
+    tariffNameSnapshot: text("tariff_name_snapshot").notNull(),
+    lessonsCount: integer("lessons_count").notNull(),
+    totalAmount: numeric("total_amount", {
       precision: 12,
       scale: 2,
     }).notNull(),
+    unitPrice: numeric("unit_price", { precision: 12, scale: 2 }).notNull(),
     currency: text("currency").notNull().default("RUB"),
-    status: text("status").notNull().default("pending_payment"),
-    paymentStatus: text("payment_status").notNull().default("unpaid"),
-    /** Снимок каталога на момент назначения */
-    lessonsLimitSnapshot: integer("lessons_limit_snapshot"),
-    weeklyFrequencySnapshot: integer("weekly_frequency_snapshot"),
-    durationDaysSnapshot: integer("duration_days_snapshot"),
-    tariffNameSnapshot: text("tariff_name_snapshot"),
+    featuresSnapshot: jsonb("features_snapshot")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    productIdsSnapshot: jsonb("product_ids_snapshot")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    status: text("status").notNull().default("awaiting_payment"),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    creditedAt: timestamp("credited_at", { withTimezone: true }),
+    creditLedgerEntryId: text("credit_ledger_entry_id").references(
+      (): AnyPgColumn => studentLessonLedger.id,
+      { onDelete: "set null" }
+    ),
+    accessRevoked: boolean("access_revoked").notNull().default(false),
     ...timestamps,
   },
   (t) => [
-    index("sta_org_student_idx").on(t.organizationId, t.studentId),
-    index("sta_tariff_idx").on(t.tariffId),
-    uniqueIndex("sta_one_active_paid_uidx")
-      .on(t.organizationId, t.studentId)
-      .where(sql`${t.status} = 'active' and ${t.paymentStatus} = 'paid'`),
+    index("lesson_orders_org_student_idx").on(t.organizationId, t.studentId),
+    index("lesson_orders_org_status_idx").on(t.organizationId, t.status),
+    index("lesson_orders_direction_idx").on(t.directionId),
+    index("lesson_orders_tariff_idx").on(t.tariffId),
     check(
-      "sta_status_check",
-      sql`${t.status} in ('pending_payment', 'active', 'queued', 'expired', 'cancelled', 'paused')`
+      "lesson_orders_status_check",
+      sql`${t.status} in ('awaiting_payment', 'paid', 'cancelled', 'expired', 'refunded', 'disputed')`
     ),
-    check(
-      "sta_payment_status_check",
-      sql`${t.paymentStatus} in ('unpaid', 'paid', 'refunded')`
-    ),
-    check("sta_time_check", sql`${t.endsAt} > ${t.startsAt}`),
+    check("lesson_orders_currency_check", sql`${t.currency} in ('RUB')`),
+    check("lesson_orders_lessons_check", sql`${t.lessonsCount} > 0`),
   ]
 );
 
@@ -934,14 +1009,15 @@ export const payments = pgTable(
     studentId: text("student_id")
       .notNull()
       .references(() => students.id, { onDelete: "cascade" }),
-    assignmentId: text("assignment_id")
+    orderId: text("order_id")
       .notNull()
-      .references(() => studentTariffAssignments.id, { onDelete: "restrict" }),
+      .references(() => lessonOrders.id, { onDelete: "restrict" }),
     amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
     currency: text("currency").notNull().default("RUB"),
     status: text("status").notNull().default("pending"),
     provider: text("provider").notNull().default("stub"),
     externalId: text("external_id"),
+    paymentLinkId: text("payment_link_id"),
     /** Защита от дублей при повторных запросах создания платежа */
     idempotencyKey: text("idempotency_key").notNull(),
     paidAt: timestamp("paid_at", { withTimezone: true }),
@@ -951,63 +1027,79 @@ export const payments = pgTable(
   },
   (t) => [
     index("payments_org_student_idx").on(t.organizationId, t.studentId),
-    index("payments_assignment_idx").on(t.assignmentId),
+    index("payments_order_idx").on(t.orderId),
     index("payments_org_paid_at_idx").on(t.organizationId, t.paidAt),
     uniqueIndex("payments_idempotency_uidx").on(
       t.organizationId,
       t.idempotencyKey
     ),
-    uniqueIndex("payments_one_pending_student_uidx")
-      .on(t.organizationId, t.studentId)
+    uniqueIndex("payments_external_id_uidx")
+      .on(t.externalId)
+      .where(sql`${t.externalId} is not null`),
+    uniqueIndex("payments_payment_link_id_uidx")
+      .on(t.paymentLinkId)
+      .where(sql`${t.paymentLinkId} is not null`),
+    uniqueIndex("payments_one_pending_order_uidx")
+      .on(t.orderId)
       .where(sql`${t.status} = 'pending'`),
     check(
       "payments_status_check",
-      sql`${t.status} in ('pending', 'paid', 'cancelled', 'failed', 'rejected')`
+      sql`${t.status} in ('pending', 'paid', 'failed', 'cancelled', 'expired', 'refunded')`
     ),
   ]
 );
 
 /**
- * Журнал списаний пакета. Append-only: сторно — новая строка с delta > 0.
+ * Журнал баланса занятий по направлению. Append-only.
  */
-export const tariffLessonLedger = pgTable(
-  "tariff_lesson_ledger",
+export const studentLessonLedger = pgTable(
+  "student_lesson_ledger",
   {
     id: text("id").primaryKey(),
     organizationId: text("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    assignmentId: text("assignment_id")
-      .notNull()
-      .references(() => studentTariffAssignments.id, { onDelete: "cascade" }),
-    lessonId: text("lesson_id").references(() => lessons.id, {
-      onDelete: "set null",
-    }),
     studentId: text("student_id")
       .notNull()
       .references(() => students.id, { onDelete: "cascade" }),
-    /** -1 списание, +1 сторно */
+    directionId: text("direction_id")
+      .notNull()
+      .references(() => learningDirections.id, { onDelete: "restrict" }),
     delta: integer("delta").notNull(),
     reason: text("reason").notNull(),
-    attendanceStatus: text("attendance_status"),
+    lessonId: text("lesson_id").references(() => lessons.id, {
+      onDelete: "set null",
+    }),
+    orderId: text("order_id").references(() => lessonOrders.id, {
+      onDelete: "set null",
+    }),
     supersedesId: text("supersedes_id"),
     actorUserId: text("actor_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
+    note: text("note"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
   (t) => [
-    index("tll_assignment_idx").on(t.assignmentId),
-    index("tll_lesson_student_idx").on(t.lessonId, t.studentId),
-    uniqueIndex("tll_debt_settlement_uidx")
-      .on(t.assignmentId)
-      .where(sql`${t.reason} = 'debt_settlement'`),
-    check("tll_delta_check", sql`${t.delta} in (-1, 1)`),
+    index("sll_org_student_direction_idx").on(
+      t.organizationId,
+      t.studentId,
+      t.directionId
+    ),
+    index("sll_lesson_student_idx").on(t.lessonId, t.studentId),
+    index("sll_order_idx").on(t.orderId),
+    uniqueIndex("sll_purchase_per_order_uidx")
+      .on(t.orderId)
+      .where(sql`${t.reason} = 'purchase'`),
+    uniqueIndex("sll_refund_clawback_per_order_uidx")
+      .on(t.orderId)
+      .where(sql`${t.reason} = 'refund_clawback'`),
+    check("sll_delta_check", sql`${t.delta} <> 0`),
     check(
-      "tll_reason_check",
-      sql`${t.reason} in ('present', 'absent_unexcused', 'reversal', 'debt_settlement')`
+      "sll_reason_check",
+      sql`${t.reason} in ('purchase', 'present', 'absent_unexcused', 'reversal', 'manual_adjustment', 'refund_clawback')`
     ),
   ]
 );
@@ -1015,8 +1107,8 @@ export const tariffLessonLedger = pgTable(
 /**
  * Текущее открытое списание по (занятие, ученик) — защита от двойного debit.
  */
-export const tariffLessonDebitState = pgTable(
-  "tariff_lesson_debit_state",
+export const lessonDebitState = pgTable(
+  "lesson_debit_state",
   {
     lessonId: text("lesson_id")
       .notNull()
@@ -1024,19 +1116,20 @@ export const tariffLessonDebitState = pgTable(
     studentId: text("student_id")
       .notNull()
       .references(() => students.id, { onDelete: "cascade" }),
-    assignmentId: text("assignment_id")
+    directionId: text("direction_id")
       .notNull()
-      .references(() => studentTariffAssignments.id, { onDelete: "cascade" }),
+      .references(() => learningDirections.id, { onDelete: "restrict" }),
     ledgerEntryId: text("ledger_entry_id")
       .notNull()
-      .references(() => tariffLessonLedger.id, { onDelete: "cascade" }),
+      .references(() => studentLessonLedger.id, { onDelete: "cascade" }),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
   (t) => [
     primaryKey({ columns: [t.lessonId, t.studentId] }),
-    uniqueIndex("tlds_ledger_uidx").on(t.ledgerEntryId),
+    uniqueIndex("lds_ledger_uidx").on(t.ledgerEntryId),
+    index("lds_direction_idx").on(t.directionId),
   ]
 );
 
@@ -3038,13 +3131,15 @@ export const schema = {
   auditLog,
   idempotencyKeys,
   loginAttempts,
+  learningDirections,
   tariffs,
+  tariffPurchaseOptions,
+  lessonOrders,
   products,
   tariffProducts,
-  studentTariffAssignments,
   payments,
-  tariffLessonLedger,
-  tariffLessonDebitState,
+  studentLessonLedger,
+  lessonDebitState,
   lessonScheduleExceptions,
   chats,
   chatMessages,

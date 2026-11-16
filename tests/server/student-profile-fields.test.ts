@@ -6,11 +6,7 @@ import { students } from "@/server/db/schema";
 import { loginWithPassword } from "@/server/services/auth-service";
 import { buildBootstrap } from "@/server/services/bootstrap-service";
 import { upsertStudent } from "@/server/services/platform-mutations";
-import {
-  adminMarkPaymentPaid,
-  assignTariffToStudent,
-  upsertTariff,
-} from "@/server/services/tariffs-service";
+import { physicsDirectionId, seedPaidLessons } from "../helpers/commerce";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
 
 describe("student profile fields", () => {
@@ -159,30 +155,20 @@ describe("student profile fields", () => {
     expect(row.status).toBe("active");
   });
 
-  it("editing student without tariff change does not create duplicate assignment", async () => {
+  it("editing student does not create duplicate paid lesson orders", async () => {
     const t = await createTestDb();
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
-
-    const tariff = await upsertTariff(t.db, director, {
-      name: "Тест",
-      price: 5000,
-      durationDays: 28,
-      lessonsLimit: 8,
-      weeklyFrequency: 2,
-    });
-    const assigned = await assignTariffToStudent(t.db, director, {
-      studentId: "s1",
-      tariffId: tariff.id,
-    });
-    await adminMarkPaymentPaid(t.db, director, {
-      paymentId: assigned.paymentId,
-      reason: "Оплата теста",
+    const directionId = await physicsDirectionId(t.db, director.organizationId);
+    await seedPaidLessons(t.db, director, "s1", {
+      directionId,
+      lessons: 6,
+      tariffId: "tar_profile_no_dup",
     });
 
     const before = await buildBootstrap(t.db, director);
-    const countBefore = before.tariffAssignments.filter(
-      (a) => a.studentId === "s1"
+    const countBefore = before.lessonOrders.filter(
+      (o) => o.studentId === "s1" && o.status === "paid"
     ).length;
 
     await upsertStudent(t.db, director, {
@@ -198,8 +184,8 @@ describe("student profile fields", () => {
     });
 
     const after = await buildBootstrap(t.db, director);
-    const countAfter = after.tariffAssignments.filter(
-      (a) => a.studentId === "s1"
+    const countAfter = after.lessonOrders.filter(
+      (o) => o.studentId === "s1" && o.status === "paid"
     ).length;
     expect(countAfter).toBe(countBefore);
   });

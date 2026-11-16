@@ -24,40 +24,51 @@ const EMPTY_ALERT: TariffBalanceAlert = {
   allowsDebit: true,
 };
 
+/** Остаток занятий по направлению (SUM журнала). */
 export function tariffBalanceAlert(
   remaining: number | null | undefined
 ): TariffBalanceAlert {
   if (remaining == null) return EMPTY_ALERT;
+
+  const allowsDebit = remaining > -2;
+  const allowsLearning = remaining > 0;
+  const allowsLastDebtLesson = remaining === 0 || remaining === -1;
+
   if (remaining <= -1) {
     return {
       tone: "debt",
-      message: "Занятие в долг — требуется продление",
-      compactLabel: "Занятие в долг — требуется продление",
+      message:
+        remaining === -1
+          ? "Занятие в долг — требуется продление"
+          : "Лимит долга исчерпан — продлите пакет занятий",
+      compactLabel:
+        remaining === -1
+          ? "Занятие в долг — требуется продление"
+          : "Лимит долга исчерпан",
       needsRenewal: true,
       showRenewCta: true,
-      allowsLastDebtLesson: false,
-      allowsLearning: false,
-      allowsDebit: false,
+      allowsLastDebtLesson,
+      allowsLearning,
+      allowsDebit,
     };
   }
   if (remaining === 0) {
     return {
       tone: "zero",
       message:
-        "Тариф закончился. Продлите его, чтобы продолжить обучение без перерыва",
-      compactLabel: "Тариф закончился",
+        "Занятия по направлению закончились. Продлите пакет, чтобы снова открыть материалы",
+      compactLabel: "Занятия закончились",
       needsRenewal: true,
       showRenewCta: true,
       allowsLastDebtLesson: true,
-      allowsLearning: true,
+      allowsLearning: false,
       allowsDebit: true,
     };
   }
   if (remaining === 1) {
     return {
       tone: "warn1",
-      message:
-        "Осталось последнее занятие. Скоро потребуется продление тарифа",
+      message: "Осталось последнее занятие. Скоро потребуется продление",
       compactLabel: "Осталось последнее занятие",
       needsRenewal: false,
       showRenewCta: true,
@@ -78,7 +89,11 @@ export function tariffBalanceAlert(
       allowsDebit: true,
     };
   }
-  return EMPTY_ALERT;
+  return {
+    ...EMPTY_ALERT,
+    allowsLearning: true,
+    allowsDebit: true,
+  };
 }
 
 export function assignmentTariffAlert(
@@ -97,14 +112,13 @@ export function studentLearningLocked(
   remaining: number | null | undefined,
   packageStatus?: StudentPackageStatus | null
 ) {
-  return !assignmentTariffAlert({
-    lessonsRemaining: remaining,
-    packageStatus: packageStatus ?? undefined,
-  }).allowsLearning;
+  if (packageStatus === "unpaid" || packageStatus === "cancelled") return true;
+  return remaining != null && remaining <= 0;
 }
 
 export function canDebitFromRemaining(remaining: number | null | undefined) {
-  return tariffBalanceAlert(remaining).allowsDebit;
+  if (remaining == null) return true;
+  return remaining > -2;
 }
 
 export function allowsLearningFromRemaining(

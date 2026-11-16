@@ -24,6 +24,7 @@ import {
   sendMessage,
 } from "@/server/services/chat-service";
 import { setChatObjectStoreForTests as setStore } from "@/server/media/chat-storage";
+import { physicsDirectionId } from "../helpers/commerce";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
 
 describe("chats", () => {
@@ -327,12 +328,14 @@ describe("chats", () => {
     close = t.close;
     const anna = await asRole(t.db, "anna@example.com");
     const student = await asRole(t.db, "s1@demo.local");
+    const directionId = await physicsDirectionId(t.db, anna.organizationId);
     const startsAt = new Date(Date.now() + 2 * 86_400_000);
     startsAt.setHours(16, 0, 0, 0);
     const endsAt = new Date(startsAt.getTime() + 45 * 60_000);
     const lesson = await upsertLesson(t.db, anna, {
       teacherId: "t1",
       studentIds: ["s1"],
+      directionId,
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
       status: "planned",
@@ -372,6 +375,7 @@ describe("chats", () => {
       id: lesson.id,
       teacherId: "t1",
       studentIds: ["s1"],
+      directionId,
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
       status: "cancelled",

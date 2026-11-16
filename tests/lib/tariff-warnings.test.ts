@@ -21,24 +21,23 @@ describe("tariff balance warnings", () => {
     const alert = tariffBalanceAlert(1);
     expect(alert.tone).toBe("warn1");
     expect(alert.message).toBe(
-      "Осталось последнее занятие. Скоро потребуется продление тарифа"
+      "Осталось последнее занятие. Скоро потребуется продление"
     );
     expect(alert.needsRenewal).toBe(false);
     expect(alert.showRenewCta).toBe(true);
     expect(alert.allowsDebit).toBe(true);
   });
 
-  it("at remaining 0 tariff is finished but last debt lesson is still allowed", () => {
+  it("at remaining 0 package is finished but one more debit is still allowed", () => {
     const alert = tariffBalanceAlert(0);
     expect(alert.tone).toBe("zero");
     expect(alert.message).toBe(
-      "Тариф закончился. Продлите его, чтобы продолжить обучение без перерыва"
+      "Занятия по направлению закончились. Продлите пакет, чтобы снова открыть материалы"
     );
     expect(alert.needsRenewal).toBe(true);
     expect(alert.showRenewCta).toBe(true);
     expect(alert.allowsLastDebtLesson).toBe(true);
-    expect(alert.allowsLearning).toBe(true);
-    expect(alert.message).not.toMatch(/доступно занятие в долг/i);
+    expect(alert.allowsLearning).toBe(false);
     expect(canDebitFromRemaining(0)).toBe(true);
   });
 
@@ -46,10 +45,10 @@ describe("tariff balance warnings", () => {
     const alert = tariffBalanceAlert(-1);
     expect(alert.tone).toBe("debt");
     expect(alert.message).toBe("Занятие в долг — требуется продление");
-    expect(alert.allowsDebit).toBe(false);
+    expect(alert.allowsDebit).toBe(true);
     expect(alert.allowsLearning).toBe(false);
     expect(alert.showRenewCta).toBe(true);
-    expect(canDebitFromRemaining(-1)).toBe(false);
+    expect(canDebitFromRemaining(-1)).toBe(true);
   });
 
   it("uses packageStatus debt/exhausted when remaining is stale", () => {

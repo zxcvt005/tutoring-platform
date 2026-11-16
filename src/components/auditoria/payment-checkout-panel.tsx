@@ -1,137 +1,138 @@
 "use client";
 
-import Image from "next/image";
-import {
-  CreditCard,
-  FileCheck,
-  MessageCircle,
-  MousePointerClick,
-  ShieldCheck,
-} from "lucide-react";
+import { CreditCard, MessageCircle, ShieldCheck } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { PaymentStatusCard } from "@/components/auditoria/payment-flow-view";
 import { requestOpenTeacherChat } from "@/lib/chat/student-teacher-chat";
-import { formatDate } from "@/lib/format";
 import {
   CHANGE_TARIFF_HINT,
+  CHECKOUT_PAYMENT_SESSION_KEY,
   checkoutBannerPayment,
   checkoutBannerStatus,
-  TOCHKA_CHECKOUT_URL,
+  paymentFlowFromRecord,
+  resolveCheckoutUrl,
+  unitPriceLabel,
   type PaymentFlowStatus,
 } from "@/lib/payment-checkout";
 import { apiPlatform } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
-import type { PaymentRecord, Tariff } from "@/lib/types";
+import type { Tariff, TariffPurchaseOption } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 type CheckoutResponse = {
+  orderId: string;
   paymentId: string;
-  alreadyPending: boolean;
-  checkoutUrl: string;
-  returnPath: string;
+  checkoutUrl?: string;
+  alreadyPending?: boolean;
   message?: string;
-  status?: string;
 };
-
-const PROCESS_STEPS = [
-  {
-    icon: MousePointerClick,
-    title: "Нажмите кнопку оплаты",
-    text: "Одним действием запустите оплату выбранного тарифа.",
-  },
-  {
-    icon: FileCheck,
-    title: "Мы создадим заявку",
-    text: "Заявка появится в системе автоматически.",
-  },
-  {
-    icon: CreditCard,
-    title: "Перейдите к оплате",
-    text: "Откроется защищённая страница оплаты школы.",
-  },
-] as const;
-
-const GUIDE_STEPS = [
-  {
-    title: "Перейдите к оплате",
-    text: "Нажмите кнопку. Мы автоматически создадим заявку.",
-  },
-  {
-    title: "Оплатите обучение",
-    text: "Вы попадёте на страницу оплаты школы. При необходимости укажите ФИО ученика.",
-  },
-  {
-    title: "Дождитесь подтверждения",
-    text: "Директор подтвердит поступление средств, после чего тариф активируется.",
-  },
-] as const;
 
 export function PaymentCheckoutPanel() {
   const { data, ready } = useDemoStore();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inflight = useRef(false);
+
   const studentId = data.currentStudentId;
   const student = data.students.find((item) => item.id === studentId) ?? null;
   const teacher =
     data.teachers.find((item) => item.id === student?.teacherId) ?? null;
 
-  const purchaseTariff = useMemo(() => {
-    const tariffId = student?.purchaseTariffId;
-    if (tariffId) {
-      return data.tariffs.find((t) => t.id === tariffId) ?? null;
-    }
-    const latest = [...data.tariffAssignments]
-      .filter((a) => a.studentId === studentId)
-      .sort(
-        (a, b) =>
-          new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime()
-      )[0];
-    return latest
-      ? (data.tariffs.find((t) => t.id === latest.tariffId) ?? null)
-      : null;
-  }, [
-    data.tariffs,
-    data.tariffAssignments,
-    student?.purchaseTariffId,
-    studentId,
-  ]);
+  const directions = data.learningDirections ?? [];
+  const orders = data.lessonOrders ?? [];
+  const payments = data.payments ?? [];
+
+  const [directionId, setDirectionId] = useState("");
+  const [tariffId, setTariffId] = useState("");
+  const [optionId, setOptionId] = useState("");
+
+  const activeDirections = useMemo(
+    () => directions.filter((d) => d.status === "active"),
+    [directions]
+  );
+
+  const tariffsInDirection = useMemo(() => {
+    const dir = directionId || activeDirections[0]?.id || "";
+    return data.tariffs
+      .filter(
+        (t) =>
+          t.status === "active" &&
+          t.directionId === dir &&
+          (t.purchaseOptions ?? []).some((o) => o.isActive)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  }, [data.tariffs, directionId, activeDirections]);
+
+  const selectedTariff = useMemo(
+    () => data.tariffs.find((t) => t.id === tariffId) ?? null,
+    [data.tariffs, tariffId]
+  );
+
+  const options = useMemo(() => {
+    const list = (selectedTariff?.purchaseOptions ?? []).filter(
+      (o) => o.isActive
+    );
+    return [...list].sort((a, b) => a.sortOrder - b.sortOrder);
+  }, [selectedTariff]);
+
+  const selectedOption = useMemo(
+    () => options.find((o) => o.id === optionId) ?? null,
+    [options, optionId]
+  );
+
+  const effectiveDirectionId =
+    directionId || activeDirections[0]?.id || "";
+  const effectiveTariffId = tariffId || tariffsInDirection[0]?.id || "";
+  const effectiveOptionId = optionId || options[0]?.id || "";
 
   const flowStatus: PaymentFlowStatus = useMemo(
-    () =>
-      checkoutBannerStatus(data.payments, data.tariffAssignments, studentId),
-    [data.payments, data.tariffAssignments, studentId]
+    () => checkoutBannerStatus(payments, orders, studentId),
+    [payments, orders, studentId]
   );
 
-  const activePayment = useMemo(
-    () =>
-      checkoutBannerPayment(data.payments, data.tariffAssignments, studentId),
-    [data.payments, data.tariffAssignments, studentId]
+  const bannerPayment = useMemo(
+    () => checkoutBannerPayment(payments, orders, studentId),
+    [payments, orders, studentId]
   );
 
-  const linkedAssignment = activePayment
-    ? (data.tariffAssignments.find(
-        (assignment) => assignment.id === activePayment.assignmentId
-      ) ?? null)
-    : null;
-  const charge = chargeForCheckout(
-    purchaseTariff,
-    data.tariffAssignments,
-    studentId
-  );
+  const displayFlow = bannerPayment
+    ? paymentFlowFromRecord(
+        bannerPayment,
+        orders.find((o) => o.id === bannerPayment.orderId) ?? null
+      )
+    : flowStatus;
 
   async function goToSchoolPayment() {
     if (inflight.current) return;
-    if (!purchaseTariff) return;
+    const tId = tariffId || effectiveTariffId;
+    const oId = optionId || effectiveOptionId;
+    if (!tId || !oId) {
+      toast.error("Выберите тариф и вариант покупки");
+      return;
+    }
     inflight.current = true;
     setBusy(true);
     setError(null);
     try {
-      const res = await apiPlatform<CheckoutResponse>("studentStartCheckout", {});
-      const checkoutUrl = res.checkoutUrl?.trim() || TOCHKA_CHECKOUT_URL;
+      const res = await apiPlatform<CheckoutResponse>("createLessonCheckout", {
+        tariffId: tId,
+        optionId: oId,
+      });
+      const checkoutUrl = resolveCheckoutUrl(res.checkoutUrl);
       if (!checkoutUrl) {
-        throw new Error("Ссылка на оплату школы недоступна. Попробуйте ещё раз.");
+        throw new Error("Ссылка на оплату недоступна. Попробуйте позже.");
+      }
+      if (res.paymentId) {
+        try {
+          sessionStorage.setItem(
+            CHECKOUT_PAYMENT_SESSION_KEY,
+            res.paymentId
+          );
+        } catch {
+          // ignore
+        }
       }
       if (res.alreadyPending) {
         toast.message(res.message || "Заявка уже создана — открываем оплату");
@@ -139,7 +140,7 @@ export function PaymentCheckoutPanel() {
       window.location.assign(checkoutUrl);
     } catch (e) {
       const message =
-        e instanceof Error ? e.message : "Не удалось создать заявку на оплату";
+        e instanceof Error ? e.message : "Не удалось создать заказ";
       setError(message);
       toast.error(message);
       inflight.current = false;
@@ -149,69 +150,88 @@ export function PaymentCheckoutPanel() {
 
   if (!ready) return null;
 
-  const canPay = Boolean(purchaseTariff);
-  const buttonLabel = busy
-    ? "Создаём заявку…"
-    : flowStatus === "pending"
-      ? "Перейти к оплате"
-      : "Оплата на странице школы";
+  const canPay = Boolean(
+    (tariffId || effectiveTariffId) && (optionId || effectiveOptionId)
+  );
+  const charge = selectedOption?.totalPrice ?? 0;
+  const lessons = selectedOption?.lessonsCount ?? 0;
 
   return (
     <div className="min-w-0 space-y-5 overflow-x-hidden">
       <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(16rem,0.7fr)] xl:items-start">
         <div className="min-w-0 space-y-4">
-          {purchaseTariff ? (
-            <>
-              <section className="auditoria-home-card min-w-0">
-                <ol className="grid gap-3 sm:grid-cols-3">
-                  {PROCESS_STEPS.map((step, index) => {
-                    const Icon = step.icon;
-                    return (
-                      <li
-                        key={step.title}
-                        className="rounded-2xl border border-black/10 bg-auditoria-surface p-3.5"
-                      >
-                        <span className="inline-flex size-9 items-center justify-center rounded-full bg-pastel-blue/80">
-                          <Icon className="size-4" aria-hidden />
-                        </span>
-                        <p className="mt-3 text-xs text-muted-foreground">
-                          Шаг {index + 1}
-                        </p>
-                        <p className="mt-1 text-sm font-medium leading-snug">
-                          {step.title}
-                        </p>
-                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                          {step.text}
-                        </p>
-                      </li>
-                    );
-                  })}
-                </ol>
-              </section>
+          <section className="auditoria-home-card min-w-0">
+            <h2 className="font-display text-2xl font-semibold tracking-tight">
+              Покупка занятий
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Выберите направление, тариф и пакет занятий. Оплата проходит на
+              защищённой странице школы.
+            </p>
 
-              <section className="auditoria-home-card min-w-0">
-                <span className="inline-flex rounded-full bg-pastel-blue/80 px-2.5 py-1 text-xs">
-                  Продление обучения
-                </span>
-                <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight break-words">
-                  {purchaseTariff.name}
-                </h2>
-                {purchaseTariff.includesText ? (
-                  <p className="mt-2 max-w-2xl text-sm leading-relaxed text-foreground/80">
-                    {purchaseTariff.includesText}
+            {activeDirections.length === 0 ? (
+              <p className="mt-4 text-sm text-muted-foreground">
+                Тарифы пока не опубликованы. Обратитесь к куратору.
+              </p>
+            ) : (
+              <div className="mt-5 space-y-4">
+                <CatalogPick
+                  label="Направление"
+                  value={effectiveDirectionId}
+                  options={activeDirections.map((d) => ({
+                    id: d.id,
+                    label: d.name,
+                  }))}
+                  onChange={(id) => {
+                    setDirectionId(id);
+                    setTariffId("");
+                    setOptionId("");
+                  }}
+                />
+                <CatalogPick
+                  label="Тариф"
+                  value={effectiveTariffId}
+                  options={tariffsInDirection.map((t) => ({
+                    id: t.id,
+                    label: t.name,
+                  }))}
+                  onChange={(id) => {
+                    setTariffId(id);
+                    setOptionId("");
+                  }}
+                  emptyHint={
+                    tariffsInDirection.length === 0
+                      ? "Нет тарифов в этом направлении"
+                      : undefined
+                  }
+                />
+                <OptionGrid
+                  options={options}
+                  value={effectiveOptionId}
+                  onChange={setOptionId}
+                  tariff={selectedTariff}
+                />
+
+                {selectedTariff?.includesText ? (
+                  <p className="text-sm leading-relaxed text-foreground/80">
+                    {selectedTariff.includesText}
                   </p>
                 ) : null}
-                <TariffFacts tariff={purchaseTariff} />
 
-                <div className="mt-5 grid gap-3 rounded-2xl border border-black/10 bg-auditoria-surface p-4 sm:grid-cols-[1fr_auto] sm:items-end">
+                <div className="grid gap-3 rounded-2xl border border-black/10 bg-auditoria-surface p-4 sm:grid-cols-[1fr_auto] sm:items-end">
                   <div>
-                    <p className="text-xs text-muted-foreground">Срок и занятия</p>
+                    <p className="text-xs text-muted-foreground">Пакет</p>
                     <p className="mt-1 text-sm font-medium">
-                      {periodLabel(purchaseTariff)}
+                      {lessons > 0 ? `${lessons} занятий` : "—"}
                     </p>
+                    {lessons > 0 && charge > 0 ? (
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {unitPriceLabel(charge, lessons)}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="sm:text-right">
-                    <p className="text-xs text-muted-foreground">Стоимость</p>
+                    <p className="text-xs text-muted-foreground">К оплате</p>
                     <p className="mt-1 font-display text-3xl font-semibold tabular-nums">
                       {charge.toLocaleString("ru-RU")} ₽
                     </p>
@@ -222,93 +242,48 @@ export function PaymentCheckoutPanel() {
                   type="button"
                   disabled={!canPay || busy}
                   onClick={() => void goToSchoolPayment()}
-                  className="mt-5 inline-flex h-14 w-full items-center justify-center gap-2 rounded-full bg-[#e7dff6]/95 px-5 text-base font-medium disabled:opacity-60"
+                  className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-full bg-[#e7dff6]/95 px-5 text-base font-medium disabled:opacity-60"
                 >
                   <CreditCard className="size-4 shrink-0" aria-hidden />
-                  {buttonLabel}
+                  {busy ? "Создаём заказ…" : "Перейти к оплате"}
                 </button>
-                <p className="mt-2 text-center text-xs text-muted-foreground">
-                  Заявка создастся автоматически
-                </p>
                 {error ? (
-                  <p className="mt-3 text-sm text-destructive" role="alert">
+                  <p className="text-sm text-destructive" role="alert">
                     {error}
                   </p>
                 ) : null}
-                <p className="mt-4 inline-flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
+                <p className="inline-flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
                   <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                  Оплата проходит на защищённой странице школы. Тариф включится
-                  только после подтверждения поступления директором.
+                  Возврат со страницы банка не означает успешную оплату. Занятия
+                  зачислятся после подтверждения платежа.
                 </p>
-              </section>
-            </>
-          ) : (
-            <section className="auditoria-home-card">
-              <h2 className="font-display text-2xl font-semibold">
-                Тариф для оплаты не назначен
-              </h2>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Администрация ещё не указала тариф, который можно оплатить.
-                Обратитесь к куратору.
-              </p>
-            </section>
-          )}
+              </div>
+            )}
+          </section>
 
           <PaymentStatusCard
-            status={flowStatus}
-            tariffName={linkedAssignment?.tariffName ?? purchaseTariff?.name}
-            queued={linkedAssignment?.status === "queued"}
+            status={displayFlow}
+            tariffName={
+              orders.find((o) => o.id === bannerPayment?.orderId)
+                ?.tariffNameSnapshot
+            }
             detail={
-              flowStatus === "paid"
-                ? activationDetail(activePayment, linkedAssignment)
-                : activePayment?.failureReason
+              bannerPayment?.failureReason ??
+              (displayFlow === "pending"
+                ? "Проверяем статус платежа в банке."
+                : null)
             }
           />
         </div>
 
         <aside className="min-w-0 space-y-4">
-          <section className="auditoria-home-card min-w-0">
-            <h2 className="font-display text-lg font-semibold tracking-tight">
-              Как проходит оплата?
-            </h2>
-            <ol className="mt-4 space-y-4">
-              {GUIDE_STEPS.map((step, index) => (
-                <li key={step.title} className="flex gap-3">
-                  <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-pastel-blue/80 text-xs font-semibold">
-                    {index + 1}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">{step.title}</p>
-                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                      {step.text}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-            <div className="mt-5 rounded-2xl border border-black/10 bg-auditoria-surface p-3">
-              <p className="text-sm font-medium">Куда вводить ФИО?</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                На странице банка укажите ФИО ученика.
-              </p>
-              <Image
-                src="/images/payment-student-name-hint.png"
-                alt="Подсказка: в поле ФИО на странице оплаты необходимо указать ФИО ученика"
-                width={1381}
-                height={1139}
-                sizes="(max-width: 640px) 100vw, 320px"
-                className="mt-3 h-auto w-full rounded-xl"
-                unoptimized
-              />
-            </div>
-          </section>
-
+          <DirectionBalances studentId={studentId} />
           <section className="auditoria-home-card min-w-0">
             <h2 className="font-display text-lg font-semibold tracking-tight">
               Есть вопросы?
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-              Напишите преподавателю — поможем с оплатой и тарифом.
+              Напишите преподавателю — поможем с выбором пакета.
             </p>
             {teacher ? (
               <button
@@ -327,54 +302,133 @@ export function PaymentCheckoutPanel() {
           </section>
         </aside>
       </div>
-
-      <p className="text-sm text-muted-foreground">{CHANGE_TARIFF_HINT}</p>
     </div>
   );
 }
 
-function TariffFacts({ tariff }: { tariff: Tariff }) {
-  const facts = [
-    tariff.lessonsLimit != null ? `${tariff.lessonsLimit} занятий` : null,
-    tariff.durationDays > 0 ? `${tariff.durationDays} дней` : null,
-    tariff.weeklyFrequency > 0 ? `${tariff.weeklyFrequency} в неделю` : null,
-  ].filter((item): item is string => Boolean(item));
-  if (facts.length === 0) return null;
-  return <p className="mt-4 text-sm text-muted-foreground">{facts.join(" · ")}</p>;
-}
-
-function periodLabel(tariff: Tariff): string {
-  const parts = [
-    tariff.durationDays > 0 ? `${tariff.durationDays} дн.` : null,
-    tariff.lessonsLimit != null ? `${tariff.lessonsLimit} занятий` : null,
-  ].filter((item): item is string => Boolean(item));
-  return parts.length > 0 ? parts.join(" · ") : "Один назначенный период";
-}
-
-function chargeForCheckout(
-  tariff: Tariff | null,
-  assignments: {
-    studentId: string;
-    status: string;
-    paymentStatus: string;
-    priceSnapshot: number;
-  }[],
-  studentId: string
-): number {
-  const unpaid = assignments.find(
-    (assignment) =>
-      assignment.studentId === studentId &&
-      assignment.status === "pending_payment" &&
-      assignment.paymentStatus === "unpaid"
+function DirectionBalances({ studentId }: { studentId: string }) {
+  const { data } = useDemoStore();
+  const student = data.students.find((s) => s.id === studentId);
+  const balances = student?.directionBalances ?? [];
+  if (balances.length === 0) return null;
+  return (
+    <section className="auditoria-home-card min-w-0">
+      <h2 className="font-display text-lg font-semibold tracking-tight">
+        Баланс занятий
+      </h2>
+      <ul className="mt-3 space-y-2">
+        {balances.map((b) => (
+          <li
+            key={b.directionId}
+            className="flex items-baseline justify-between gap-2 rounded-xl border border-black/10 bg-auditoria-surface px-3 py-2 text-sm"
+          >
+            <span className="text-muted-foreground">
+              {b.directionName ?? b.directionSlug ?? "Направление"}
+            </span>
+            <span className="font-display font-semibold tabular-nums">
+              {b.balance}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
-  if (unpaid) return unpaid.priceSnapshot;
-  return tariff?.price ?? 0;
 }
 
-function activationDetail(
-  payment: PaymentRecord | null,
-  assignment: { endsAt?: string; status?: string } | null
-): string | null {
-  if (!payment || payment.status !== "paid" || !assignment?.endsAt) return null;
-  return `Действует до ${formatDate(assignment.endsAt)}.`;
+function CatalogPick({
+  label,
+  value,
+  options,
+  onChange,
+  emptyHint,
+}: {
+  label: string;
+  value: string;
+  options: { id: string; label: string }[];
+  onChange: (id: string) => void;
+  emptyHint?: string;
+}) {
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      {options.length === 0 ? (
+        <p className="mt-1 text-sm text-muted-foreground">
+          {emptyHint ?? "Нет вариантов"}
+        </p>
+      ) : (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {options.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => onChange(o.id)}
+              className={cn(
+                "rounded-full border border-black/10 px-3 py-1.5 text-sm transition-colors",
+                value === o.id
+                  ? "bg-[#e7dff6]/95 font-medium"
+                  : "bg-auditoria-surface hover:bg-pastel-beige/60"
+              )}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OptionGrid({
+  options,
+  value,
+  onChange,
+  tariff,
+}: {
+  options: TariffPurchaseOption[];
+  value: string;
+  onChange: (id: string) => void;
+  tariff: Tariff | null;
+}) {
+  if (!tariff) return null;
+  if (options.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        У тарифа нет активных вариантов покупки.
+      </p>
+    );
+  }
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">Вариант покупки</p>
+      <ul className="mt-2 grid gap-2 sm:grid-cols-2">
+        {options.map((o) => {
+          const active = value === o.id;
+          return (
+            <li key={o.id}>
+              <button
+                type="button"
+                onClick={() => onChange(o.id)}
+                className={cn(
+                  "flex w-full flex-col rounded-2xl border border-black/10 px-3 py-3 text-left",
+                  active
+                    ? "bg-pastel-mint/75 ring-1 ring-black/10"
+                    : "bg-auditoria-surface hover:bg-pastel-beige/50"
+                )}
+              >
+                <span className="font-medium tabular-nums">
+                  {o.lessonsCount} занятий
+                </span>
+                <span className="mt-1 font-display text-xl font-semibold tabular-nums">
+                  {o.totalPrice.toLocaleString("ru-RU")} ₽
+                </span>
+                <span className="mt-0.5 text-xs text-muted-foreground">
+                  {unitPriceLabel(o.totalPrice, o.lessonsCount)}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 }

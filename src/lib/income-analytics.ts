@@ -463,7 +463,7 @@ export function paymentsToAnalyticsInput(
   return payments.map((p) => ({
     id: p.id,
     studentId: p.studentId,
-    assignmentId: p.assignmentId,
+    assignmentId: p.orderId,
     amount: p.amount,
     status: p.status,
     paidAt: p.paidAt,

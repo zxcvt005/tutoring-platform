@@ -266,8 +266,19 @@ export function migrateToV5(raw: unknown): DemoData | null {
     mockExamResults: Array.isArray((blob as DemoData).mockExamResults)
       ? (blob as DemoData).mockExamResults
       : [],
+    learningDirections: Array.isArray((blob as DemoData).learningDirections)
+      ? (blob as DemoData).learningDirections
+      : [],
     tariffs: Array.isArray((blob as DemoData).tariffs)
       ? (blob as DemoData).tariffs
+      : [],
+    lessonOrders: Array.isArray((blob as DemoData).lessonOrders)
+      ? (blob as DemoData).lessonOrders
+      : [],
+    studentDirectionBalances: Array.isArray(
+      (blob as DemoData).studentDirectionBalances
+    )
+      ? (blob as DemoData).studentDirectionBalances
       : [],
     tariffAssignments: Array.isArray((blob as DemoData).tariffAssignments)
       ? (blob as DemoData).tariffAssignments

@@ -14,6 +14,7 @@ import {
   setTeacherPayRates,
 } from "@/server/services/teacher-payroll-service";
 import { getPayrollOverview } from "@/server/services/teacher-payroll-overview";
+import { physicsDirectionId, seedPaidLessons } from "../helpers/commerce";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
 
 const RATES = { 1: 120_000, 2: 160_000, 3: 200_000, 4: 240_000, 5: 280_000 };
@@ -43,6 +44,14 @@ describe("teacher payroll", () => {
   ) {
     const director = await asRole(db, "director@demo.local");
     await setTeacherPayRates(db, director, { teacherId: "t1", rates: RATES });
+    const directionId = await physicsDirectionId(db, director.organizationId);
+    for (const studentId of STUDENTS) {
+      await seedPaidLessons(db, director, studentId, {
+        directionId,
+        lessons: 24,
+        tariffId: `tar_payroll_${studentId}`,
+      });
+    }
     return director;
   }
 
@@ -52,6 +61,7 @@ describe("teacher payroll", () => {
     studentIds: string[],
     hour = 16
   ) {
+    const directionId = await physicsDirectionId(db, teacher.organizationId);
     const startsAt = new Date(Date.now() + 3 * 86_400_000);
     startsAt.setHours(hour, 0, 0, 0);
     const endsAt = new Date(startsAt.getTime() + 60 * 60_000);
@@ -60,6 +70,7 @@ describe("teacher payroll", () => {
       const created = await upsertLesson(db, teacher, {
         teacherId: "t1",
         studentIds: [studentId],
+        directionId,
         startsAt: startsAt.toISOString(),
         endsAt: endsAt.toISOString(),
         status: "planned",
@@ -145,10 +156,12 @@ describe("teacher payroll", () => {
     await configureRates(t.db);
     const anna = await asRole(t.db, "anna@example.com");
     const { ids, startsAt } = await makeSlot(t.db, anna, ["s1", "s2"]);
+    const directionId = await physicsDirectionId(t.db, anna.organizationId);
     await upsertLesson(t.db, anna, {
       id: ids[0],
       teacherId: "t1",
       studentIds: ["s1"],
+      directionId,
       startsAt: startsAt.toISOString(),
       endsAt: new Date(startsAt.getTime() + 60 * 60_000).toISOString(),
       status: "cancelled",
@@ -158,6 +171,7 @@ describe("teacher payroll", () => {
       id: ids[1],
       teacherId: "t1",
       studentIds: ["s2"],
+      directionId,
       startsAt: startsAt.toISOString(),
       endsAt: new Date(startsAt.getTime() + 60 * 60_000).toISOString(),
       status: "cancelled",
@@ -198,10 +212,12 @@ describe("teacher payroll", () => {
     const anna = await asRole(t.db, "anna@example.com");
     const { startsAt } = await makeSlot(t.db, anna, ["s1", "s2", "s3", "s5", "s6"], 18);
     const endsAt = new Date(startsAt.getTime() + 60 * 60_000);
+    const directionId = await physicsDirectionId(t.db, anna.organizationId);
     await expect(
       upsertLesson(t.db, anna, {
         teacherId: "t1",
         studentIds: ["s7"],
+        directionId,
         startsAt: startsAt.toISOString(),
         endsAt: endsAt.toISOString(),
         status: "planned",

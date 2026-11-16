@@ -1,13 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
-import { TariffRenewalMark } from "@/components/tariff-balance-notice";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -17,23 +16,35 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { formatDate, formatDateTime } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import {
-  buildCurrentTariffOverview,
   buildMonthSummaries,
   filterIncomePayments,
   monthKeyFromInstant,
-  type CurrentTariffOverview,
-  type IncomePaymentRow,
   type MonthSummary,
 } from "@/lib/income-analytics";
+import {
+  lessonOrderStatusLabel,
+  paymentRecordStatusLabel,
+} from "@/lib/payment-checkout";
 import { apiPlatform } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
-import type { PaymentRecordStatus } from "@/lib/types";
+import type {
+  LessonOrder,
+  PaymentRecord,
+  PaymentRecordStatus,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+type CommerceRow = {
+  payment: PaymentRecord;
+  order: LessonOrder | null;
+  studentName: string;
+};
+
 function money(n: number): string {
-  return `${n.toLocaleString("ru-RU")} ₽`;
+  const abs = Math.abs(n).toLocaleString("ru-RU");
+  return n < 0 ? `−${abs} ₽` : `${abs} ₽`;
 }
 
 function Metric({
@@ -63,17 +74,11 @@ function MonthBlock({
   defaultOpen,
   query,
   statusFilter,
-  onMarkPaid,
-  onReject,
-  busyId,
 }: {
   month: MonthSummary;
   defaultOpen: boolean;
   query: string;
   statusFilter: PaymentRecordStatus | "all";
-  onMarkPaid: (id: string) => void;
-  onReject: (id: string) => void;
-  busyId: string | null;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const visible = useMemo(
@@ -83,6 +88,16 @@ function MonthBlock({
         status: statusFilter,
       }),
     [month.payments, query, statusFilter]
+  );
+
+  const revenue = useMemo(
+    () =>
+      visible.reduce((sum, p) => {
+        if (p.status === "paid" && p.paidAt) return sum + p.amount;
+        if (p.status === "refunded") return sum + p.amount;
+        return sum;
+      }, 0),
+    [visible]
   );
 
   return (
@@ -102,29 +117,16 @@ function MonthBlock({
           <h3 className="font-display text-base font-semibold tracking-tight">
             {month.label}
           </h3>
-          <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
             <Metric
-              label="Учеников на конец месяца"
-              value={String(month.studentsAtMonthEnd)}
-              hint={
-                month.studentsAtMonthEndReliable
-                  ? undefined
-                  : "По дате создания существующих карточек"
-              }
+              label="Операций"
+              value={String(visible.length)}
             />
+            <Metric label="Поступило" value={money(revenue)} />
             <Metric
-              label="Купленных тарифов"
+              label="Купленных пакетов"
               value={String(month.purchasedTariffs)}
             />
-            <Metric
-              label="Средняя стоимость"
-              value={
-                month.averagePurchaseAmount == null
-                  ? "—"
-                  : money(month.averagePurchaseAmount)
-              }
-            />
-            <Metric label="Поступило" value={money(month.revenue)} />
           </div>
         </div>
       </button>
@@ -133,19 +135,46 @@ function MonthBlock({
         <div className="pb-4 pl-6">
           {visible.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Нет платежей за этот месяц
+              Нет операций за этот месяц
               {query || statusFilter !== "all" ? " по фильтру" : ""}.
             </p>
           ) : (
             <ul className="space-y-1">
               {visible.map((p) => (
-                <PaymentLine
+                <li
                   key={p.id}
-                  payment={p}
-                  busy={busyId === p.id}
-                  onMarkPaid={() => onMarkPaid(p.id)}
-                  onReject={() => onReject(p.id)}
-                />
+                  className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 rounded-lg px-2 py-1.5 text-sm hover:bg-muted/40"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">
+                      {p.studentName}
+                      {p.tariffName ? (
+                        <span className="font-normal text-muted-foreground">
+                          {" "}
+                          · {p.tariffName}
+                        </span>
+                      ) : null}
+                    </p>
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      {formatDateTime(p.at)} ·{" "}
+                      {paymentRecordStatusLabel(p.status)}
+                      {p.lessonsLimit != null ? ` · ${p.lessonsLimit} зан.` : ""}
+                    </p>
+                    {p.failureReason ? (
+                      <p className="text-xs text-destructive/90">
+                        {p.failureReason}
+                      </p>
+                    ) : null}
+                  </div>
+                  <span
+                    className={cn(
+                      "tabular-nums font-medium",
+                      p.status === "refunded" && "text-destructive"
+                    )}
+                  >
+                    {money(p.amount)}
+                  </span>
+                </li>
               ))}
             </ul>
           )}
@@ -155,353 +184,222 @@ function MonthBlock({
   );
 }
 
-function PaymentLine({
-  payment,
+function CommercePaymentLine({
+  row,
   busy,
-  onMarkPaid,
-  onReject,
+  onRefund,
+  onRefresh,
 }: {
-  payment: IncomePaymentRow;
+  row: CommerceRow;
   busy: boolean;
-  onMarkPaid: () => void;
-  onReject: () => void;
+  onRefund: () => void;
+  onRefresh: () => void;
 }) {
-  const statusLabel: Record<PaymentRecordStatus, string> = {
-    paid: "Оплачен",
-    pending: "Оплата на проверке",
-    rejected: "Оплата отклонена",
-    cancelled: "Отменён",
-    failed: "Ошибка",
-  };
-
+  const { payment, order, studentName } = row;
   return (
-    <li className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 rounded-lg px-2 py-1.5 text-sm hover:bg-muted/40">
-      <div className="min-w-0">
-        <p className="truncate font-medium">
-          {payment.studentName}
-          {payment.tariffName ? (
+    <li className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border/60 px-3 py-2.5 text-sm hover:bg-muted/30">
+      <div className="min-w-0 flex-1">
+        <p className="font-medium">
+          <Link
+            href={`/direkciya/students/${payment.studentId}`}
+            className="hover:underline"
+          >
+            {studentName}
+          </Link>
+          {order ? (
             <span className="font-normal text-muted-foreground">
               {" "}
-              · {payment.tariffName}
+              · {order.tariffNameSnapshot}
             </span>
           ) : null}
         </p>
-        <p className="text-xs text-muted-foreground tabular-nums">
-          {formatDateTime(payment.at)} · {statusLabel[payment.status]}
-          {payment.lessonsLimit != null ? ` · ${payment.lessonsLimit} зан.` : ""}
-          {payment.currentTariffName
-            ? ` · сейчас: ${payment.currentTariffName}`
-            : ""}
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {formatDateTime(payment.paidAt ?? payment.createdAt)} ·{" "}
+          {paymentRecordStatusLabel(payment.status)}
+          {order
+            ? ` · заказ: ${lessonOrderStatusLabel(order.status)}`
+            : null}
+          {order ? ` · ${order.lessonsCount} зан.` : null}
         </p>
-        {payment.status === "rejected" && payment.failureReason ? (
-          <p className="text-xs text-muted-foreground">{payment.failureReason}</p>
+        {payment.failureReason ? (
+          <p className="mt-1 text-xs text-destructive/90">
+            {payment.failureReason}
+          </p>
         ) : null}
       </div>
-      <div className="flex items-center gap-2">
-        <span className="tabular-nums font-medium">{money(payment.amount)}</span>
+      <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
+        <span
+          className={cn(
+            "tabular-nums font-medium",
+            payment.status === "refunded" && "text-destructive"
+          )}
+        >
+          {money(
+            payment.status === "refunded" ? -payment.amount : payment.amount
+          )}
+        </span>
         {payment.status === "pending" ? (
-          <>
-            <Button
-              type="button"
-              size="sm"
-              className="h-7 rounded-lg px-2 text-xs"
-              disabled={busy}
-              onClick={onMarkPaid}
-            >
-              Подтвердить
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-7 rounded-lg px-2 text-xs"
-              disabled={busy}
-              onClick={onReject}
-            >
-              Отклонить
-            </Button>
-          </>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 rounded-lg"
+            disabled={busy}
+            onClick={onRefresh}
+          >
+            <RefreshCw className="mr-1 size-3.5" />
+            Обновить
+          </Button>
+        ) : null}
+        {payment.status === "paid" ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 rounded-lg"
+            disabled={busy}
+            onClick={onRefund}
+          >
+            Возврат
+          </Button>
         ) : null}
       </div>
     </li>
   );
 }
 
-function AttentionList({
-  overview,
-  query,
-}: {
-  overview: CurrentTariffOverview;
-  query: string;
-}) {
-  const q = query.trim().toLowerCase();
-  const rows = overview.attention.filter((r) =>
-    q ? r.studentName.toLowerCase().includes(q) : true
-  );
-
-  if (rows.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        Нет тарифов, требующих внимания
-        {q ? " по запросу" : " в ближайшие 7 дней"}.
-      </p>
-    );
-  }
-
-  return (
-    <ul className="space-y-1">
-      {rows.map((r) => (
-        <li key={r.assignmentId}>
-          <Link
-            href={`/direkciya/students/${r.studentId}`}
-            className={cn(
-              "flex items-baseline justify-between gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-muted/40",
-              r.isExpired && "bg-destructive/5"
-            )}
-          >
-            <div className="min-w-0">
-              <p className="flex items-center gap-1.5 truncate font-medium">
-                <TariffRenewalMark
-                  remaining={r.lessonsRemaining}
-                  packageStatus={
-                    r.needsRenewal
-                      ? r.lessonsRemaining != null && r.lessonsRemaining <= -1
-                        ? "debt"
-                        : "exhausted"
-                      : "active"
-                  }
-                />
-                <span className="truncate">{r.studentName}</span>
-              </p>
-              <p className="truncate text-xs text-muted-foreground">
-                {r.tariffName} · до {formatDate(r.endsAt)}
-                {r.renewalHint ? ` · ${r.renewalHint}` : ""}
-              </p>
-            </div>
-            <span
-              className={cn(
-                "shrink-0 text-xs tabular-nums",
-                r.isExpired
-                  ? "text-destructive"
-                  : "text-muted-foreground"
-              )}
-            >
-              {r.urgencyLabel}
-            </span>
-          </Link>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function TariffGroups({
-  overview,
-  query,
-}: {
-  overview: CurrentTariffOverview;
-  query: string;
-}) {
-  const q = query.trim().toLowerCase();
-  const [openId, setOpenId] = useState<string | null>(
-    overview.byTariff[0]?.tariffId ?? null
-  );
-
-  if (overview.byTariff.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        Нет учеников с оплаченным действующим назначением.
-      </p>
-    );
-  }
-
-  return (
-    <div className="space-y-1">
-      {overview.byTariff.map((g) => {
-        const students = g.students.filter((s) =>
-          q ? s.studentName.toLowerCase().includes(q) : true
-        );
-        if (q && students.length === 0) return null;
-        const open = openId === g.tariffId;
-        return (
-          <section key={g.tariffId} className="border-b border-border/60 last:border-0">
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 py-2 text-left text-sm"
-              onClick={() =>
-                setOpenId((id) => (id === g.tariffId ? null : g.tariffId))
-              }
-            >
-              {open ? (
-                <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-              ) : (
-                <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-              )}
-              <span className="min-w-0 flex-1 truncate font-medium">
-                {g.tariffName}
-              </span>
-              <span className="tabular-nums text-muted-foreground">
-                {q ? students.length : g.count}
-              </span>
-            </button>
-            {open ? (
-              <ul className="space-y-0.5 pb-2 pl-5">
-                {students.map((s) => (
-                  <li key={s.assignmentId}>
-                    <Link
-                      href={`/direkciya/students/${s.studentId}`}
-                      className="flex items-baseline justify-between gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-muted/40"
-                    >
-                      <span className="flex min-w-0 items-center gap-1.5 truncate">
-                        <TariffRenewalMark
-                          remaining={s.lessonsRemaining}
-                          packageStatus={
-                            s.needsRenewal
-                              ? s.lessonsRemaining != null &&
-                                s.lessonsRemaining <= -1
-                                ? "debt"
-                                : "exhausted"
-                              : "active"
-                          }
-                        />
-                        <span className="truncate">{s.studentName}</span>
-                      </span>
-                      <span
-                        className={cn(
-                          "shrink-0 text-xs tabular-nums",
-                          s.isExpired
-                            ? "text-destructive"
-                            : "text-muted-foreground"
-                        )}
-                      >
-                        {s.urgencyLabel}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </section>
-        );
-      })}
-    </div>
-  );
-}
-
 export function IncomeWorkspace() {
-  const { data, ready } = useDemoStore();
+  const { data, ready, reload } = useDemoStore();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
     PaymentRecordStatus | "all"
   >("all");
-  const [rightQuery, setRightQuery] = useState("");
   const [serverMonths, setServerMonths] = useState<MonthSummary[] | null>(null);
-  const [serverCurrent, setServerCurrent] =
-    useState<CurrentTariffOverview | null>(null);
+
+  const orders = data.lessonOrders ?? [];
+  const payments = data.payments ?? [];
+  const students = data.students ?? [];
+
+  const studentName = useMemo(() => {
+    const map = new Map(students.map((s) => [s.id, s.fullName]));
+    return (id: string) => map.get(id) ?? "Ученик";
+  }, [students]);
+
+  const orderById = useMemo(
+    () => new Map(orders.map((o) => [o.id, o])),
+    [orders]
+  );
+
+  const commerceRows = useMemo((): CommerceRow[] => {
+    return [...payments]
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      )
+      .map((payment) => ({
+        payment,
+        order: orderById.get(payment.orderId) ?? null,
+        studentName: studentName(payment.studentId),
+      }));
+  }, [payments, orderById, studentName]);
+
+  const filteredRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return commerceRows.filter((row) => {
+      if (statusFilter !== "all" && row.payment.status !== statusFilter) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        row.studentName.toLowerCase().includes(q) ||
+        (row.order?.tariffNameSnapshot ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [commerceRows, query, statusFilter]);
 
   const localMonths = useMemo(() => {
     return buildMonthSummaries({
-      payments: data.payments.map((p) => ({
-        id: p.id,
-        studentId: p.studentId,
-        assignmentId: p.assignmentId,
-        amount: p.amount,
-        status: p.status,
-        paidAt: p.paidAt,
-        createdAt: p.createdAt,
-      })),
-      students: data.students.map((s) => ({
+      payments: payments.map((p) => {
+        const order = orderById.get(p.orderId);
+        const signed =
+          p.status === "refunded" ? -Number(p.amount) : Number(p.amount);
+        return {
+          id: p.id,
+          studentId: p.studentId,
+          assignmentId: p.orderId,
+          amount: signed,
+          status: p.status,
+          paidAt: p.paidAt ?? null,
+          createdAt: p.paidAt ?? p.createdAt,
+          failureReason: p.failureReason ?? null,
+        };
+      }),
+      students: students.map((s) => ({
         id: s.id,
         fullName: s.fullName,
         createdAt: s.createdAt ?? "1970-01-01T00:00:00.000Z",
       })),
-      assignments: data.tariffAssignments.map((a) => ({
-        id: a.id,
-        studentId: a.studentId,
-        tariffName: a.tariffName,
-        lessonsLimitSnapshot: a.lessonsLimitSnapshot ?? null,
-        status: a.status,
-        paymentStatus: a.paymentStatus,
-      })),
-    });
-  }, [data.payments, data.students, data.tariffAssignments]);
-
-  const localCurrent = useMemo(
-    () =>
-      buildCurrentTariffOverview({
-        students: data.students.map((s) => ({
-          id: s.id,
-          fullName: s.fullName,
-          status: s.status,
+      assignments: orders
+        .filter((o) => o.status === "paid")
+        .map((o) => ({
+          id: o.id,
+          studentId: o.studentId,
+          tariffName: o.tariffNameSnapshot,
+          lessonsLimitSnapshot: o.lessonsCount,
+          status: "active" as const,
+          paymentStatus: "paid" as const,
         })),
-        assignments: data.tariffAssignments,
-      }),
-    [data.students, data.tariffAssignments]
-  );
+    });
+  }, [payments, orderById, students, orders]);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await apiPlatform<{
-          months: MonthSummary[];
-          current: CurrentTariffOverview;
-        }>("getIncomeOverview", {});
-        if (!cancelled) {
-          setServerMonths(res.months);
-          setServerCurrent(res.current);
-        }
+        const res = await apiPlatform<{ months: MonthSummary[] }>(
+          "getCommerceIncomeOverview",
+          {}
+        );
+        if (!cancelled) setServerMonths(res.months);
       } catch {
-        // Bootstrap-данные остаются запасным источником
+        // bootstrap
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [data.payments.length, data.tariffAssignments.length]);
+  }, [payments.length, orders.length]);
 
   const months = serverMonths ?? localMonths;
-  const current = serverCurrent ?? localCurrent;
   const currentMonthKey = monthKeyFromInstant(new Date());
 
-  async function refreshOverview() {
-    const res = await apiPlatform<{
-      months: MonthSummary[];
-      current: CurrentTariffOverview;
-    }>("getIncomeOverview", {});
-    setServerMonths(res.months);
-    setServerCurrent(res.current);
-    window.location.reload();
-  }
-
-  async function markPaid(paymentId: string) {
-    const reason = window.prompt(
-      "Подтвердите поступление денег. Кратко укажите основание (обязательно):"
-    );
-    if (!reason || reason.trim().length < 3) return;
+  async function refreshPayment(paymentId: string) {
     setBusyId(paymentId);
     try {
-      await apiPlatform("adminMarkPaymentPaid", { paymentId, reason });
-      toast.success("Оплата подтверждена вручную");
-      await refreshOverview();
+      await apiPlatform("refreshLessonOrderPayment", { paymentId });
+      toast.success("Статус обновлён");
+      await reload();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Ошибка");
+      toast.error(e instanceof Error ? e.message : "Не удалось обновить");
     } finally {
       setBusyId(null);
     }
   }
 
-  async function rejectPayment(paymentId: string) {
-    const reason =
-      window.prompt("Причина отклонения (можно оставить пустой):") ?? "";
+  async function refundPayment(paymentId: string) {
+    const reason = window.prompt("Причина возврата (необязательно):");
+    if (reason === null) return;
     setBusyId(paymentId);
     try {
-      await apiPlatform("adminRejectPayment", { paymentId, reason });
-      toast.success("Заявка отклонена");
-      await refreshOverview();
+      await apiPlatform("adminRefundLessonPayment", {
+        paymentId,
+        reason: reason.trim() ? reason.trim() : undefined,
+      });
+      toast.success("Возврат оформлен");
+      await reload();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Ошибка");
+      toast.error(e instanceof Error ? e.message : "Ошибка возврата");
     } finally {
       setBusyId(null);
     }
@@ -515,14 +413,14 @@ export function IncomeWorkspace() {
     <div>
       <PageHeader
         title="Доходы"
-        description="Поступления по месяцам и сроки действующих тарифов. Время — Europe/Moscow."
+        description="Заказы на занятия и платежи. Выручка считается только по оплаченным операциям; возвраты отображаются отдельно."
       />
 
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Поиск ученика в платежах…"
+          placeholder="Поиск ученика или тарифа…"
           className="max-w-xs"
         />
         <Select
@@ -531,44 +429,61 @@ export function IncomeWorkspace() {
             v && setStatusFilter(v as PaymentRecordStatus | "all")
           }
         >
-          <SelectTrigger className="w-[160px] rounded-lg">
+          <SelectTrigger className="w-[200px] rounded-lg">
             <SelectValue>
               {(v) =>
-                v === "paid"
-                  ? "Оплачен"
-                  : v === "pending"
-                    ? "На проверке"
-                    : v === "rejected"
-                      ? "Отклонена"
-                      : v === "cancelled"
-                        ? "Отменён"
-                        : v === "failed"
-                          ? "Ошибка"
-                          : "Все статусы"
+                v === "all"
+                  ? "Все статусы"
+                  : paymentRecordStatusLabel(v as PaymentRecordStatus)
               }
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Все статусы</SelectItem>
             <SelectItem value="paid">Оплачен</SelectItem>
-            <SelectItem value="pending">На проверке</SelectItem>
-            <SelectItem value="rejected">Отклонена</SelectItem>
-            <SelectItem value="cancelled">Отменён</SelectItem>
+            <SelectItem value="pending">Ожидает подтверждения</SelectItem>
+            <SelectItem value="refunded">Возврат</SelectItem>
             <SelectItem value="failed">Ошибка</SelectItem>
+            <SelectItem value="cancelled">Отменён</SelectItem>
+            <SelectItem value="expired">Истёк</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <div className="min-w-0">
           <h2 className="mb-1 font-display text-lg font-semibold tracking-tight">
-            Поступления по месяцам
+            Платежи и заказы
           </h2>
           <p className="mb-3 text-sm text-muted-foreground">
-            «Поступило» — сумма фактически оплаченных платежей.
+            Ручное подтверждение отключено — статус приходит из банка.
+          </p>
+          {filteredRows.length === 0 ? (
+            <EmptyState title="Операций пока нет" />
+          ) : (
+            <ul className="space-y-2">
+              {filteredRows.map((row) => (
+                <CommercePaymentLine
+                  key={row.payment.id}
+                  row={row}
+                  busy={busyId === row.payment.id}
+                  onRefresh={() => void refreshPayment(row.payment.id)}
+                  onRefund={() => void refundPayment(row.payment.id)}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <aside className="min-w-0 lg:border-l lg:border-border/70 lg:pl-6">
+          <h2 className="mb-1 font-display text-lg font-semibold tracking-tight">
+            По месяцам
+          </h2>
+          <p className="mb-3 text-sm text-muted-foreground">
+            «Поступило» — только оплаченные платежи минус возвраты.
           </p>
           {months.length === 0 ? (
-            <EmptyState title="Платежей пока нет" />
+            <EmptyState title="Нет данных по месяцам" />
           ) : (
             <div>
               {months.map((m) => (
@@ -578,42 +493,10 @@ export function IncomeWorkspace() {
                   defaultOpen={m.monthKey === currentMonthKey}
                   query={query}
                   statusFilter={statusFilter}
-                  onMarkPaid={(id) => void markPaid(id)}
-                  onReject={(id) => void rejectPayment(id)}
-                  busyId={busyId}
                 />
               ))}
             </div>
           )}
-          {!current.limitations[0] ? null : (
-            <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground">
-              {current.limitations[0]}
-            </p>
-          )}
-        </div>
-
-        <aside className="min-w-0 lg:border-l lg:border-border/70 lg:pl-6">
-          <h2 className="mb-1 font-display text-lg font-semibold tracking-tight">
-            Текущие тарифы
-          </h2>
-          <div className="mb-4 grid grid-cols-3 gap-2">
-            <Metric label="Действует" value={String(current.activeCount)} />
-            <Metric label="Истёк" value={String(current.expiredCount)} />
-            <Metric label="Скоро" value={String(current.soonCount)} />
-          </div>
-
-          <Input
-            value={rightQuery}
-            onChange={(e) => setRightQuery(e.target.value)}
-            placeholder="Найти ученика…"
-            className="mb-3"
-          />
-
-          <h3 className="mb-2 text-sm font-medium">Ближайшие окончания</h3>
-          <AttentionList overview={current} query={rightQuery} />
-
-          <h3 className="mb-2 mt-6 text-sm font-medium">По тарифам</h3>
-          <TariffGroups overview={current} query={rightQuery} />
         </aside>
       </div>
     </div>

@@ -3,10 +3,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { resolveAuthContext } from "@/server/authz/context";
 import {
+  lessonDebitState,
   lessonTopics,
   lessons,
-  tariffLessonDebitState,
-  tariffLessonLedger,
+  studentLessonLedger,
   testAssignments,
 } from "@/server/db/schema";
 import { loginWithPassword } from "@/server/services/auth-service";
@@ -15,11 +15,7 @@ import {
   setLessonTopics,
   upsertLesson,
 } from "@/server/services/platform-mutations";
-import {
-  adminMarkPaymentPaid,
-  assignTariffToStudent,
-  upsertTariff,
-} from "@/server/services/tariffs-service";
+import { physicsDirectionId, seedPaidLessons } from "../helpers/commerce";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
 
 describe("multiple lesson topics and homework", () => {
@@ -46,22 +42,12 @@ describe("multiple lesson topics and homework", () => {
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
     const anna = await asRole(t.db, "anna@example.com");
-
-    const tariff = await upsertTariff(t.db, director, {
-      name: "Мульти-темы",
-      price: 1000,
-      durationDays: 28,
-      lessonsLimit: 8,
-      weeklyFrequency: 2,
+    const directionId = await physicsDirectionId(t.db, director.organizationId);
+    await seedPaidLessons(t.db, director, "s1", {
+      directionId,
+      lessons: 8,
+      tariffName: "Мульти-темы",
       features: ["individual_lessons", "homework"],
-    });
-    const assigned = await assignTariffToStudent(t.db, director, {
-      studentId: "s1",
-      tariffId: tariff.id,
-    });
-    await adminMarkPaymentPaid(t.db, director, {
-      paymentId: assigned.paymentId,
-      reason: "Тест",
     });
 
     const startsAt = new Date(Date.now() + 2 * 86_400_000);
@@ -70,6 +56,7 @@ describe("multiple lesson topics and homework", () => {
     const created = await upsertLesson(t.db, anna, {
       teacherId: "t1",
       studentIds: ["s1"],
+      directionId,
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
       status: "planned",
@@ -128,8 +115,8 @@ describe("multiple lesson topics and homework", () => {
 
     const ledger = await t.db
       .select()
-      .from(tariffLessonLedger)
-      .where(eq(tariffLessonLedger.lessonId, created.id));
+      .from(studentLessonLedger)
+      .where(eq(studentLessonLedger.lessonId, created.id));
     const net = ledger.reduce((sum, r) => sum + r.delta, 0);
     expect(net).toBe(-1);
 
@@ -142,13 +129,13 @@ describe("multiple lesson topics and homework", () => {
 
     const ledgerAfter = await t.db
       .select()
-      .from(tariffLessonLedger)
-      .where(eq(tariffLessonLedger.lessonId, created.id));
+      .from(studentLessonLedger)
+      .where(eq(studentLessonLedger.lessonId, created.id));
     expect(ledgerAfter.reduce((sum, r) => sum + r.delta, 0)).toBe(-1);
     const states = await t.db
       .select()
-      .from(tariffLessonDebitState)
-      .where(eq(tariffLessonDebitState.lessonId, created.id));
+      .from(lessonDebitState)
+      .where(eq(lessonDebitState.lessonId, created.id));
     expect(states).toHaveLength(1);
   });
 });

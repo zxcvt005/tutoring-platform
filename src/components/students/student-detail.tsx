@@ -23,11 +23,6 @@ import {
 import { TariffBalanceNotice } from "@/components/tariff-balance-notice";
 import { formatDateTime, formatDueAt } from "@/lib/format";
 import {
-  currentAssignmentForStudent,
-  packageStatusLabel,
-  studentTariffLabel,
-} from "@/lib/tariff-package";
-import {
   gradeLabel,
   phoneHref,
   telegramDisplay,
@@ -51,18 +46,18 @@ export function StudentDetail({
     ? data.teachers.find((t) => t.id === student.teacherId) ??
       data.teachers.find((t) => t.id === (student.previousTeacherId ?? ""))
     : undefined;
-  const tariff = currentAssignmentForStudent(
-    data.tariffAssignments,
-    studentId
-  );
-  const tariffLabel = student
-    ? studentTariffLabel({
-        assignments: data.tariffAssignments,
-        studentId,
-        tariffs: data.tariffs,
-        purchaseTariffId: student.purchaseTariffId,
-      })
+  const directionBalances = student?.directionBalances ?? [];
+  const minBalance = directionBalances.length
+    ? Math.min(...directionBalances.map((b) => b.balance))
     : null;
+  const packageStatusFromBalance = (
+    balance: number | null
+  ): "active" | "exhausted" | "debt" | "none" => {
+    if (balance == null) return "none";
+    if (balance <= -1) return "debt";
+    if (balance <= 0) return "exhausted";
+    return "active";
+  };
 
   const lessons = useMemo(
     () =>
@@ -150,29 +145,27 @@ export function StudentDetail({
               <span className="text-muted-foreground">Класс</span>
               <span>{gradeLabel(student.grade)}</span>
             </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-muted-foreground">Тариф</span>
-              <span>{tariffLabel?.name ?? "Нет тарифа"}</span>
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-muted-foreground">Остаток занятий</span>
-              <span className="tabular-nums">
-                {tariff?.lessonsRemaining == null ? "—" : tariff.lessonsRemaining}
-              </span>
-            </div>
-            {tariffLabel ? (
-              <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground">Статус тарифа</span>
-                <span>
-                  {tariff
-                    ? packageStatusLabel[tariff.packageStatus ?? "none"]
-                    : packageStatusLabel.unpaid}
-                </span>
+            {directionBalances.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Баланс по направлениям появится после покупки занятий.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                <p className="text-muted-foreground">Баланс занятий</p>
+                {directionBalances.map((b) => (
+                  <div
+                    key={b.directionId}
+                    className="flex justify-between gap-2 tabular-nums"
+                  >
+                    <span>{b.directionName ?? b.directionSlug ?? "—"}</span>
+                    <span className="font-medium">{b.balance}</span>
+                  </div>
+                ))}
               </div>
-            ) : null}
+            )}
             <TariffBalanceNotice
-              remaining={tariff?.lessonsRemaining}
-              packageStatus={tariff?.packageStatus}
+              remaining={minBalance}
+              packageStatus={packageStatusFromBalance(minBalance)}
             />
             {telegramDisplay(student.telegram) ? (
               <div className="flex justify-between gap-2">

@@ -583,8 +583,10 @@ async function clearDemoStudent(db: AppDb) {
   await db.execute(sql`delete from tests where id like 'demo_alex_test_%'`);
   await db.execute(sql`delete from lesson_ratings where student_id = ${STUDENT}`);
   await db.execute(sql`delete from attendances where student_id = ${STUDENT}`);
-  await db.execute(sql`delete from tariff_lesson_debit_state where student_id = ${STUDENT}`);
-  await db.execute(sql`delete from tariff_lesson_ledger where student_id = ${STUDENT}`);
+  await db.execute(sql`delete from lesson_debit_state where student_id = ${STUDENT}`);
+  await db.execute(sql`delete from student_lesson_ledger where student_id = ${STUDENT}`);
+  await db.execute(sql`delete from lesson_orders where student_id = ${STUDENT}`);
+  await db.execute(sql`delete from tariff_purchase_options where tariff_id like 'demo_alex_tariff_%'`);
   await db.execute(sql`delete from lesson_topics where lesson_id like 'demo_alex_les_%'`);
   await db.execute(sql`delete from lesson_students where lesson_id like 'demo_alex_les_%'`);
   await db.execute(sql`delete from lesson_schedule_exceptions where schedule_id = ${DEMO_ALEX_SCHEDULE_ID}`);
@@ -592,7 +594,6 @@ async function clearDemoStudent(db: AppDb) {
   await db.execute(sql`delete from lesson_schedule_students where schedule_id = ${DEMO_ALEX_SCHEDULE_ID}`);
   await db.execute(sql`delete from lesson_schedules where id = ${DEMO_ALEX_SCHEDULE_ID}`);
   await db.execute(sql`delete from payments where student_id = ${STUDENT}`);
-  await db.execute(sql`delete from student_tariff_assignments where student_id = ${STUDENT}`);
   await db.execute(sql`delete from tariff_products where tariff_id like 'demo_alex_tariff_%'`);
   await db.execute(sql`delete from tariffs where id like 'demo_alex_tariff_%'`);
   await db.execute(sql`delete from formula_trainer_sessions where student_id = ${STUDENT}`);
@@ -852,7 +853,6 @@ export async function seedDemoStudent(
     parentContacts: "Мама, демо-контакт, не настоящий номер +7 900 000-11-12",
     status: "active" as const,
     notes: "Демонстрационный ученик для проверки Аудитории. Не настоящий человек.",
-    purchaseTariffId: null,
     updatedAt: now,
   };
   if (existingStudent) {
@@ -866,11 +866,36 @@ export async function seedDemoStudent(
   }
 
   const product = await ensureDefaultProducts(db, ORG);
+  const { ensureDefaultDirections } = await import(
+    "@/server/services/directions-service"
+  );
+  await ensureDefaultDirections(db, ORG);
+  const [physicsDirection] = await db
+    .select()
+    .from(t.learningDirections)
+    .where(
+      and(
+        eq(t.learningDirections.organizationId, ORG),
+        eq(t.learningDirections.slug, "physics")
+      )
+    )
+    .limit(1);
+  if (!physicsDirection) {
+    throw new Error("Направление physics не найдено");
+  }
+  const directionId = physicsDirection.id;
+  const {
+    insertCancelledLessonOrder,
+    insertPaidLessonOrder,
+    insertPendingLessonOrder,
+    upsertTariffPurchaseOption,
+  } = await import("@/server/db/seed-commerce");
   const lessonPrice = 1500;
   await db.insert(t.tariffs).values([
     {
       id: TARIFF_PREV,
       organizationId: ORG,
+      directionId,
       name: "Стандарт, 12 занятий",
       price: money(tariff.previousLimit * lessonPrice),
       currency: "RUB",
@@ -887,6 +912,7 @@ export async function seedDemoStudent(
     {
       id: TARIFF_CUR,
       organizationId: ORG,
+      directionId,
       name: "Стандарт, занятия и тренажёр",
       price: money(tariff.currentLimit * lessonPrice),
       currency: "RUB",
@@ -903,6 +929,7 @@ export async function seedDemoStudent(
     {
       id: TARIFF_INTENS,
       organizationId: ORG,
+      directionId,
       name: "Интенсив ЕГЭ",
       price: "32000.00",
       currency: "RUB",
@@ -917,158 +944,102 @@ export async function seedDemoStudent(
       updatedAt: now,
     },
   ]);
+  const optPrev = "demo_alex_tpo_prev";
+  const optCur = "demo_alex_tpo_cur";
+  const optIntens = "demo_alex_tpo_intens";
+  await upsertTariffPurchaseOption(db, {
+    id: optPrev,
+    organizationId: ORG,
+    tariffId: TARIFF_PREV,
+    lessonsCount: tariff.previousLimit,
+    totalPrice: money(tariff.previousLimit * lessonPrice),
+    createdAt: courseStart,
+  });
+  await upsertTariffPurchaseOption(db, {
+    id: optCur,
+    organizationId: ORG,
+    tariffId: TARIFF_CUR,
+    lessonsCount: tariff.currentLimit,
+    totalPrice: money(tariff.currentLimit * lessonPrice),
+    createdAt: currentStart,
+  });
+  await upsertTariffPurchaseOption(db, {
+    id: optIntens,
+    organizationId: ORG,
+    tariffId: TARIFF_INTENS,
+    lessonsCount: 16,
+    totalPrice: "32000.00",
+    createdAt: courseStart,
+  });
   await db.insert(t.tariffProducts).values({
     tariffId: TARIFF_CUR,
     productId: product.id,
     organizationId: ORG,
     createdAt: currentStart,
   });
-  await db
-    .update(t.students)
-    .set({ purchaseTariffId: TARIFF_CUR, updatedAt: now })
-    .where(eq(t.students.id, STUDENT));
-
-  await db.insert(t.studentTariffAssignments).values([
-    {
-      id: ASSIGN_PREV,
-      organizationId: ORG,
-      studentId: STUDENT,
-      tariffId: TARIFF_PREV,
-      startsAt: courseStart,
-      endsAt: prevEnd,
-      priceSnapshot: money(tariff.previousLimit * lessonPrice),
-      currency: "RUB",
-      status: "expired",
-      paymentStatus: "paid",
-      lessonsLimitSnapshot: tariff.previousLimit,
-      weeklyFrequencySnapshot: 2,
-      durationDaysSnapshot: 56,
-      tariffNameSnapshot: "Стандарт, 12 занятий",
-      createdAt: courseStart,
-      updatedAt: prevEnd,
-    },
-    {
-      id: ASSIGN_CUR,
-      organizationId: ORG,
-      studentId: STUDENT,
-      tariffId: TARIFF_CUR,
-      startsAt: currentStart,
-      endsAt: currentEnd,
-      priceSnapshot: money(tariff.currentLimit * lessonPrice),
-      currency: "RUB",
-      status: "active",
-      paymentStatus: "paid",
-      lessonsLimitSnapshot: tariff.currentLimit,
-      weeklyFrequencySnapshot: 2,
-      durationDaysSnapshot: 56,
-      tariffNameSnapshot: "Стандарт, занятия и тренажёр",
-      createdAt: currentStart,
-      updatedAt: now,
-    },
-    {
-      id: ASSIGN_PENDING,
-      organizationId: ORG,
-      studentId: STUDENT,
-      tariffId: TARIFF_CUR,
-      startsAt: pendingStart,
-      endsAt: pendingEnd,
-      priceSnapshot: money(tariff.currentLimit * lessonPrice),
-      currency: "RUB",
-      status: "pending_payment",
-      paymentStatus: "unpaid",
-      lessonsLimitSnapshot: tariff.currentLimit,
-      weeklyFrequencySnapshot: 2,
-      durationDaysSnapshot: 56,
-      tariffNameSnapshot: "Продление стандарта",
-      createdAt: addMinutes(now, -2 * 24 * 60),
-      updatedAt: now,
-    },
-    {
-      id: ASSIGN_REJECTED,
-      organizationId: ORG,
-      studentId: STUDENT,
-      tariffId: TARIFF_INTENS,
-      startsAt: courseStart,
-      endsAt: rejectedEnd,
-      priceSnapshot: "32000.00",
-      currency: "RUB",
-      status: "cancelled",
-      paymentStatus: "unpaid",
-      lessonsLimitSnapshot: 16,
-      weeklyFrequencySnapshot: 3,
-      durationDaysSnapshot: 45,
-      tariffNameSnapshot: "Интенсив ЕГЭ",
-      createdAt: addMinutes(courseStart, 3 * 24 * 60),
-      updatedAt: addMinutes(courseStart, 4 * 24 * 60),
-    },
-  ]);
-
-  await db.insert(t.payments).values([
-    {
-      id: "demo_alex_pay_prev",
-      organizationId: ORG,
-      studentId: STUDENT,
-      assignmentId: ASSIGN_PREV,
-      amount: money(tariff.previousLimit * lessonPrice),
-      currency: "RUB",
-      status: "paid",
-      provider: "stub",
-      idempotencyKey: "demo-alex:pay:prev",
-      paidAt: courseStart,
-      metadata: { demo: true, note: "Локальная запись, платёжный провайдер не вызывался" },
-      createdAt: courseStart,
-      updatedAt: courseStart,
-    },
-    {
-      id: "demo_alex_pay_cur",
-      organizationId: ORG,
-      studentId: STUDENT,
-      assignmentId: ASSIGN_CUR,
-      amount: money(tariff.currentLimit * lessonPrice),
-      currency: "RUB",
-      status: "paid",
-      provider: "stub",
-      idempotencyKey: "demo-alex:pay:cur",
-      paidAt: currentStart,
-      metadata: { demo: true, note: "Локальная запись, платёжный провайдер не вызывался" },
-      createdAt: currentStart,
-      updatedAt: currentStart,
-    },
-    {
-      id: "demo_alex_pay_pending",
-      organizationId: ORG,
-      studentId: STUDENT,
-      assignmentId: ASSIGN_PENDING,
-      amount: money(tariff.currentLimit * lessonPrice),
-      currency: "RUB",
-      status: "pending",
-      provider: "stub",
-      idempotencyKey: "demo-alex:pay:pending",
-      metadata: { demo: true, note: "Ожидает подтверждения, денег не списывали" },
-      createdAt: addMinutes(now, -2 * 24 * 60),
-      updatedAt: now,
-    },
-    {
-      id: "demo_alex_pay_rejected",
-      organizationId: ORG,
-      studentId: STUDENT,
-      assignmentId: ASSIGN_REJECTED,
-      amount: "32000.00",
-      currency: "RUB",
-      status: "rejected",
-      provider: "stub",
-      idempotencyKey: "demo-alex:pay:rejected",
-      failureReason: "Демо: оплата отклонена без обращения к платёжному провайдеру",
-      metadata: { demo: true },
-      createdAt: addMinutes(courseStart, 4 * 24 * 60),
-      updatedAt: addMinutes(courseStart, 4 * 24 * 60),
-    },
-  ]);
+  const paidOrderBase = {
+    organizationId: ORG,
+    studentId: STUDENT,
+    payerUserId: USER,
+    directionId,
+    features: ["individual_lessons", "homework"],
+    productIds: [product.id],
+  };
+  await insertPaidLessonOrder(db, {
+    ...paidOrderBase,
+    orderId: ASSIGN_PREV,
+    tariffId: TARIFF_PREV,
+    optionId: optPrev,
+    tariffName: "Стандарт, 12 занятий",
+    lessonsCount: tariff.previousLimit,
+    totalAmount: money(tariff.previousLimit * lessonPrice),
+    paidAt: courseStart,
+    paymentId: "demo_alex_pay_prev",
+  });
+  await insertPaidLessonOrder(db, {
+    ...paidOrderBase,
+    orderId: ASSIGN_CUR,
+    tariffId: TARIFF_CUR,
+    optionId: optCur,
+    tariffName: "Стандарт, занятия и тренажёр",
+    lessonsCount: tariff.currentLimit,
+    totalAmount: money(tariff.currentLimit * lessonPrice),
+    paidAt: currentStart,
+    paymentId: "demo_alex_pay_cur",
+  });
+  await insertPendingLessonOrder(db, {
+    ...paidOrderBase,
+    orderId: ASSIGN_PENDING,
+    tariffId: TARIFF_CUR,
+    optionId: optCur,
+    tariffName: "Продление стандарта",
+    lessonsCount: tariff.currentLimit,
+    totalAmount: money(tariff.currentLimit * lessonPrice),
+    productIds: [product.id],
+    createdAt: addMinutes(now, -2 * 24 * 60),
+    paymentId: "demo_alex_pay_pending",
+  });
+  await insertCancelledLessonOrder(db, {
+    ...paidOrderBase,
+    orderId: ASSIGN_REJECTED,
+    tariffId: TARIFF_INTENS,
+    optionId: optIntens,
+    tariffName: "Интенсив ЕГЭ",
+    lessonsCount: 16,
+    totalAmount: "32000.00",
+    productIds: [],
+    createdAt: addMinutes(courseStart, 3 * 24 * 60),
+    paymentId: "demo_alex_pay_rejected",
+    paymentStatus: "failed",
+    failureReason:
+      "Демо: оплата отклонена без обращения к платёжному провайдеру",
+  });
 
   await db.insert(t.lessonSchedules).values({
     id: DEMO_ALEX_SCHEDULE_ID,
     organizationId: ORG,
     teacherId: teacher.id,
+    directionId,
     subject: "Физика",
     weekdays: [1, 4],
     startTime,
@@ -1088,6 +1059,7 @@ export async function seedDemoStudent(
       id: lesson.id,
       organizationId: ORG,
       teacherId: teacher.id,
+      directionId,
       scheduleId: lesson.scheduleId,
       scheduleOccurrenceKey: lesson.occurrenceKey,
       subject: lesson.topic,
@@ -1158,25 +1130,24 @@ export async function seedDemoStudent(
     })
   );
 
-  await db.insert(t.tariffLessonLedger).values(
+  await db.insert(t.studentLessonLedger).values(
     debitLessons.map((lesson, index) => ({
       id: `demo_alex_led_${String(index + 1).padStart(2, "0")}`,
       organizationId: ORG,
-      assignmentId: index < tariff.previousUsed ? ASSIGN_PREV : ASSIGN_CUR,
-      lessonId: lesson.id,
       studentId: STUDENT,
+      directionId,
+      lessonId: lesson.id,
       delta: -1,
       reason: lesson.kind === "unexcused" ? ("absent_unexcused" as const) : ("present" as const),
-      attendanceStatus: lesson.kind === "unexcused" ? "absent_unexcused" : "present",
       actorUserId: teacher.userId,
       createdAt: lesson.endsAt,
     }))
   );
-  await db.insert(t.tariffLessonDebitState).values(
+  await db.insert(t.lessonDebitState).values(
     debitLessons.map((lesson, index) => ({
       lessonId: lesson.id,
       studentId: STUDENT,
-      assignmentId: index < tariff.previousUsed ? ASSIGN_PREV : ASSIGN_CUR,
+      directionId,
       ledgerEntryId: `demo_alex_led_${String(index + 1).padStart(2, "0")}`,
       updatedAt: lesson.endsAt,
     }))
@@ -2136,17 +2107,24 @@ async function verifyDemoStudent(
     sections[homeworkSectionFor({ ...row, missedNextLesson: missed })] += 1;
   }
   const theoryStatuses = new Set(data.theoryAssignments.map((row) => row.status));
-  const current = data.tariffAssignments.find((row) => row.id === ASSIGN_CUR);
+  const currentOrder = data.lessonOrders.find((row) => row.id === ASSIGN_CUR);
+  const balances = data.studentDirectionBalances.filter(
+    (row) => row.studentId === STUDENT
+  );
+  const balance = {
+    remaining: balances.reduce((sum, row) => sum + row.remaining, 0),
+    used: balances.reduce((sum, row) => sum + row.used, 0),
+  };
   const errors: string[] = [];
   if (!data.teachers.some((row) => row.id === teacherId)) errors.push("нет карточки преподавателя");
-  if (!current || current.paymentStatus !== "paid" || current.status !== "active") {
-    errors.push("текущий тариф не активен");
+  if (!currentOrder || currentOrder.status !== "paid") {
+    errors.push("текущий заказ тарифа не оплачен");
   }
-  if (current && current.lessonsRemaining !== tariff.remaining) {
-    errors.push(`остаток тарифа ${current.lessonsRemaining}, ожидалось ${tariff.remaining}`);
+  if (balance && balance.remaining !== tariff.remaining) {
+    errors.push(`остаток тарифа ${balance.remaining}, ожидалось ${tariff.remaining}`);
   }
-  if (current && current.lessonsUsed !== tariff.currentUsed) {
-    errors.push(`списано ${current.lessonsUsed}, ожидалось ${tariff.currentUsed}`);
+  if (balance && balance.used !== tariff.currentUsed) {
+    errors.push(`списано ${balance.used}, ожидалось ${tariff.currentUsed}`);
   }
   if (past.length < 20) errors.push("мало прошедших занятий");
   if (upcoming.length < 4) errors.push("мало будущих занятий");

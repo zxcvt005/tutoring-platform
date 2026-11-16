@@ -330,6 +330,13 @@
       "when": 1796900000000,
       "tag": "0046_rnp_avito_metric_sync_timestamps",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1797000000000,
+      "tag": "0047_commerce_directions_orders",
+      "breakpoints": true
     }
   ]
 }

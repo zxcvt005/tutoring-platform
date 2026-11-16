@@ -63,10 +63,7 @@ export function HomeworkTake({
     ? data.homeworks.find((h) => h.id === assignment.homeworkId)
     : undefined;
 
-  const learning = studentLearningLock(
-    data.tariffAssignments,
-    data.currentStudentId
-  );
+  const learning = studentLearningLock(data, data.currentStudentId);
   if (
     assignment &&
     assignment.studentId === data.currentStudentId &&

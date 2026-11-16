@@ -6,8 +6,8 @@ import { FORMULA_TRAINER_PRODUCT_SLUG } from "@/lib/products";
 import { resolveAuthContext } from "@/server/authz/context";
 import {
   formulaTrainerProgress,
+  lessonOrders,
   products,
-  studentTariffAssignments,
   tariffProducts,
   tariffs,
 } from "@/server/db/schema";
@@ -23,6 +23,7 @@ import {
   upsertProduct,
 } from "@/server/services/products-service";
 import { upsertTariff } from "@/server/services/tariffs-service";
+import { physicsDirectionId, seedPaidLessons } from "../helpers/commerce";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
 
 describe("products catalog and access", () => {
@@ -111,29 +112,23 @@ describe("products catalog and access", () => {
       .from(tariffs)
       .where(eq(tariffs.id, "tariff_standard"))
       .limit(1);
-    const originalPrice = standard!.price;
+    const originalName = standard!.name;
 
     await upsertTariff(t.db, director, {
       id: "tariff_standard",
+      directionId: standard!.directionId,
       name: standard!.name,
-      price: Number(standard!.price),
-      durationDays: standard!.durationDays,
-      lessonsLimit: standard!.lessonsLimit ?? 12,
-      weeklyFrequency: standard!.weeklyFrequency,
-      includesText: standard!.includesText,
-      features: standard!.features as string[],
+      includesText: standard!.includesText ?? undefined,
+      features: (standard!.features ?? []) as string[],
       status: "active",
       productIds: [trainer.id],
     });
     await upsertTariff(t.db, director, {
       id: "tariff_standard",
+      directionId: standard!.directionId,
       name: standard!.name,
-      price: Number(standard!.price),
-      durationDays: standard!.durationDays,
-      lessonsLimit: standard!.lessonsLimit ?? 12,
-      weeklyFrequency: standard!.weeklyFrequency,
-      includesText: standard!.includesText,
-      features: standard!.features as string[],
+      includesText: standard!.includesText ?? undefined,
+      features: (standard!.features ?? []) as string[],
       status: "active",
       productIds: [trainer.id],
     });
@@ -149,25 +144,29 @@ describe("products catalog and access", () => {
       .from(tariffs)
       .where(eq(tariffs.id, "tariff_standard"))
       .limit(1);
-    expect(after!.price).toBe(originalPrice);
-    expect(after!.name).toBe(standard!.name);
+    expect(after!.name).toBe(originalName);
+
+    const [basicTariff] = await t.db
+      .select()
+      .from(tariffs)
+      .where(eq(tariffs.id, "tariff_basic"))
+      .limit(1);
+    const [intensiveTariff] = await t.db
+      .select()
+      .from(tariffs)
+      .where(eq(tariffs.id, "tariff_intensive"))
+      .limit(1);
 
     await upsertTariff(t.db, director, {
       id: "tariff_basic",
-      name: "Базовый",
-      price: 12000,
-      durationDays: 28,
-      lessonsLimit: 8,
-      weeklyFrequency: 2,
+      directionId: basicTariff!.directionId,
+      name: basicTariff!.name,
       productIds: [trainer.id, extra.id],
     });
     await upsertTariff(t.db, director, {
       id: "tariff_intensive",
-      name: "Интенсив",
-      price: 35000,
-      durationDays: 47,
-      lessonsLimit: 20,
-      weeklyFrequency: 3,
+      directionId: intensiveTariff!.directionId,
+      name: intensiveTariff!.name,
       productIds: [trainer.id],
     });
 
@@ -188,13 +187,14 @@ describe("products catalog and access", () => {
     expect(basicLinks).toHaveLength(2);
   });
 
-  it("computes student access from the current tariff and global product status", async () => {
+  it("computes student access from paid order snapshot and product status", async () => {
     const t = await createTestDb();
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
     const student = await asRole(t.db, "s1@demo.local");
     const other = await asRole(t.db, "s2@demo.local");
     const trainer = await ensureDefaultProducts(t.db, director.organizationId);
+    const directionId = await physicsDirectionId(t.db, director.organizationId);
 
     expect(
       await studentHasProductAccess(t.db, student, FORMULA_TRAINER_PRODUCT_SLUG)
@@ -203,20 +203,12 @@ describe("products catalog and access", () => {
       await studentHasProductAccess(t.db, other, FORMULA_TRAINER_PRODUCT_SLUG)
     ).toBe(false);
 
-    const [standard] = await t.db
-      .select()
-      .from(tariffs)
-      .where(eq(tariffs.id, "tariff_standard"))
-      .limit(1);
-
-    await upsertTariff(t.db, director, {
-      id: "tariff_standard",
-      name: standard!.name,
-      price: Number(standard!.price),
-      durationDays: standard!.durationDays,
-      lessonsLimit: standard!.lessonsLimit ?? 12,
-      weeklyFrequency: standard!.weeklyFrequency,
+    const purchased = await seedPaidLessons(t.db, director, "s1", {
+      directionId,
+      lessons: 8,
       productIds: [trainer.id],
+      tariffName: "С тренажёром",
+      tariffId: "tar_products_access",
     });
     expect(
       await studentHasProductAccess(t.db, student, FORMULA_TRAINER_PRODUCT_SLUG)
@@ -238,15 +230,10 @@ describe("products catalog and access", () => {
       .where(eq(formulaTrainerProgress.studentId, student.studentId!));
     expect(progressBefore.length).toBeGreaterThan(0);
 
-    await upsertTariff(t.db, director, {
-      id: "tariff_standard",
-      name: standard!.name,
-      price: Number(standard!.price),
-      durationDays: standard!.durationDays,
-      lessonsLimit: standard!.lessonsLimit ?? 12,
-      weeklyFrequency: standard!.weeklyFrequency,
-      productIds: [],
-    });
+    await t.db
+      .update(lessonOrders)
+      .set({ productIdsSnapshot: [], updatedAt: new Date() })
+      .where(eq(lessonOrders.id, purchased.orderId));
     expect(
       await studentHasProductAccess(t.db, student, FORMULA_TRAINER_PRODUCT_SLUG)
     ).toBe(false);
@@ -260,31 +247,26 @@ describe("products catalog and access", () => {
       .where(eq(formulaTrainerProgress.studentId, student.studentId!));
     expect(progressAfterRevoke).toHaveLength(progressBefore.length);
 
-    await upsertTariff(t.db, director, {
-      id: "tariff_standard",
-      name: standard!.name,
-      price: Number(standard!.price),
-      durationDays: standard!.durationDays,
-      lessonsLimit: standard!.lessonsLimit ?? 12,
-      weeklyFrequency: standard!.weeklyFrequency,
-      productIds: [trainer.id],
-    });
+    await t.db
+      .update(lessonOrders)
+      .set({ productIdsSnapshot: [trainer.id], updatedAt: new Date() })
+      .where(eq(lessonOrders.id, purchased.orderId));
     expect(
       await studentHasProductAccess(t.db, student, FORMULA_TRAINER_PRODUCT_SLUG)
     ).toBe(true);
 
     await t.db
-      .update(studentTariffAssignments)
-      .set({ tariffId: "tariff_basic" })
-      .where(eq(studentTariffAssignments.id, "sta_s1"));
+      .update(lessonOrders)
+      .set({ accessRevoked: true, updatedAt: new Date() })
+      .where(eq(lessonOrders.id, purchased.orderId));
     expect(
       await studentHasProductAccess(t.db, student, FORMULA_TRAINER_PRODUCT_SLUG)
     ).toBe(false);
 
     await t.db
-      .update(studentTariffAssignments)
-      .set({ tariffId: "tariff_standard" })
-      .where(eq(studentTariffAssignments.id, "sta_s1"));
+      .update(lessonOrders)
+      .set({ accessRevoked: false, updatedAt: new Date() })
+      .where(eq(lessonOrders.id, purchased.orderId));
     expect(
       await studentHasProductAccess(t.db, student, FORMULA_TRAINER_PRODUCT_SLUG)
     ).toBe(true);
@@ -309,19 +291,12 @@ describe("products catalog and access", () => {
       name: "Будущий тренажёр",
       description: "Пока только в каталоге",
     });
-    const [standard] = await t.db
-      .select()
-      .from(tariffs)
-      .where(eq(tariffs.id, "tariff_standard"))
-      .limit(1);
-    await upsertTariff(t.db, director, {
-      id: "tariff_standard",
-      name: standard!.name,
-      price: Number(standard!.price),
-      durationDays: standard!.durationDays,
-      lessonsLimit: standard!.lessonsLimit ?? 12,
-      weeklyFrequency: standard!.weeklyFrequency,
+    const directionId = await physicsDirectionId(t.db, director.organizationId);
+    await seedPaidLessons(t.db, director, "s1", {
+      directionId,
+      lessons: 4,
       productIds: [extra.id],
+      tariffId: "tar_catalog_only",
     });
 
     const catalog = await listProducts(t.db, director);

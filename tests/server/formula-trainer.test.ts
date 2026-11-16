@@ -36,7 +36,7 @@ describe("formula trainer service", () => {
     });
     const ctx = await resolveAuthContext(db, session.rawToken);
     if (email === "s1@demo.local") {
-      await grantFormulaTrainerOnTariff(db, ctx.organizationId, "tariff_standard");
+      await grantFormulaTrainerOnTariff(db, ctx.organizationId, "s1");
     }
     return ctx;
   }

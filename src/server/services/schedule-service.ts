@@ -72,6 +72,7 @@ export type CreateScheduleInput = {
   startTime: string;
   durationMin: number;
   subject?: string;
+  directionId?: string;
   /** ISO; если не задано — сейчас */
   activeFrom?: string;
   activeUntil?: string;
@@ -148,6 +149,7 @@ export async function createLessonSchedule(
     id,
     organizationId: ctx.organizationId,
     teacherId: input.teacherId,
+    directionId: input.directionId?.trim() || null,
     subject: input.subject?.trim() || null,
     weekdays,
     startTime: input.startTime.trim(),
@@ -250,6 +252,7 @@ export async function materializeSchedule(
         id: draftId,
         organizationId,
         teacherId: sch.teacherId,
+        directionId: sch.directionId,
         subject: sch.subject,
         scheduleId,
         scheduleOccurrenceKey: occ.occurrenceKey,

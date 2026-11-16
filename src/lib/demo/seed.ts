@@ -932,6 +932,8 @@ export function createSeedData(): DemoData {
     },
   ];
 
+  const demoDirectionId = "ldir_demo_physics";
+
   return {
     version: 6,
     teachers,
@@ -950,12 +952,26 @@ export function createSeedData(): DemoData {
     intensiveAssignments: [],
     mockExams: [],
     mockExamResults: [],
+    learningDirections: [
+      {
+        id: demoDirectionId,
+        name: "Физика",
+        slug: "physics",
+        status: "active" as const,
+      },
+    ],
     tariffs: tariffs.map((t) => ({
       ...t,
+      directionId: demoDirectionId,
       features: [...t.features],
     })),
+    lessonOrders: [],
+    studentDirectionBalances: [],
     tariffAssignments,
-    payments,
+    payments: payments.map((p) => ({
+      ...p,
+      orderId: p.assignmentId,
+    })),
     products: [],
     availableProductSlugs: [],
     currentTeacherId: "t1",

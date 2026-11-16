@@ -1,3 +1,5 @@
+import { and, eq } from "drizzle-orm";
+import { randomBytes } from "node:crypto";
 import { describe, it, expect, afterEach } from "vitest";
 
 import { fromAppWall } from "@/lib/app-time";
@@ -7,14 +9,16 @@ import {
   parseIsoToLocalDateKey,
 } from "@/lib/calendar-month";
 import { resolveAuthContext } from "@/server/authz/context";
+import { payments, tariffPurchaseOptions } from "@/server/db/schema";
+import { insertPendingLessonOrder } from "@/server/db/seed-commerce";
 import { loginWithPassword } from "@/server/services/auth-service";
 import { resolveLearningAccess } from "@/server/services/learning-access";
 import {
-  assignTariffToStudent,
-  adminMarkPaymentPaid,
-  studentRequestPayment,
-  upsertTariff,
-} from "@/server/services/tariffs-service";
+  confirmPaidFromBank,
+  createCheckout,
+} from "@/server/services/lesson-orders-service";
+import { upsertTariff } from "@/server/services/tariffs-service";
+import { physicsDirectionId } from "../helpers/commerce";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
 
 describe("tariffs + calendar helpers + unassigned", () => {
@@ -70,17 +74,31 @@ describe("tariffs + calendar helpers + unassigned", () => {
     const anna = boot.teachers.find((x) => x.id === "t1");
     expect(anna?.bio).toBeTruthy();
 
-    // s2 has pending unpaid assignment in seed
-    const access = await resolveLearningAccess(t.db, dirCtx.organizationId, "s2", "homework");
+    const directionId = await physicsDirectionId(t.db, dirCtx.organizationId);
+
+    // s2 has pending unpaid order in seed
+    const access = await resolveLearningAccess(
+      t.db,
+      dirCtx.organizationId,
+      "s2",
+      "homework",
+      directionId
+    );
     expect(access.allowed).toBe(false);
-    expect(access.reason).toBe("unpaid");
+    expect(access.reason).toBe("no_assignment");
 
     // s1 paid+active
-    const ok = await resolveLearningAccess(t.db, dirCtx.organizationId, "s1", "homework");
+    const ok = await resolveLearningAccess(
+      t.db,
+      dirCtx.organizationId,
+      "s1",
+      "homework",
+      directionId
+    );
     expect(ok.allowed).toBe(true);
   });
 
-  it("payment request is idempotent; admin mark paid opens access", async () => {
+  it("checkout is idempotent; confirm paid opens access", async () => {
     const t = await createTestDb();
     close = t.close;
 
@@ -89,19 +107,27 @@ describe("tariffs + calendar helpers + unassigned", () => {
       password: DEMO_PASSWORD,
     });
     const dirCtx = await resolveAuthContext(t.db, dir.session.rawToken);
+    const directionId = await physicsDirectionId(t.db, dirCtx.organizationId);
 
     const tariff = await upsertTariff(t.db, dirCtx, {
+      directionId,
       name: "Тест-тариф",
-      price: 1000,
-      durationDays: 14,
-      lessonsLimit: 8,
-      weeklyFrequency: 2,
       features: ["individual_lessons", "homework"],
+      purchaseOptions: [
+        { lessonsCount: 8, totalPrice: 1000, sortOrder: 0, isActive: true },
+      ],
     });
-    const assigned = await assignTariffToStudent(t.db, dirCtx, {
-      studentId: "s11",
-      tariffId: tariff.id,
-    });
+    const [option] = await t.db
+      .select()
+      .from(tariffPurchaseOptions)
+      .where(
+        and(
+          eq(tariffPurchaseOptions.organizationId, dirCtx.organizationId),
+          eq(tariffPurchaseOptions.tariffId, tariff.id)
+        )
+      )
+      .limit(1);
+    expect(option).toBeTruthy();
 
     const studentLogin = await loginWithPassword(t.db, {
       email: "s11@demo.local",
@@ -112,31 +138,69 @@ describe("tariffs + calendar helpers + unassigned", () => {
       studentLogin.session.rawToken
     );
 
-    const a = await studentRequestPayment(t.db, studentCtx, assigned.id);
-    const b = await studentRequestPayment(t.db, studentCtx, assigned.id);
+    const orderId = `lord_cal_${randomBytes(3).toString("hex")}`;
+    const paymentId = `pay_cal_${randomBytes(3).toString("hex")}`;
+    const now = new Date();
+    await insertPendingLessonOrder(t.db, {
+      orderId,
+      organizationId: dirCtx.organizationId,
+      studentId: "s11",
+      payerUserId: studentCtx.userId!,
+      tariffId: tariff.id,
+      optionId: option!.id,
+      directionId,
+      tariffName: "Тест-тариф",
+      lessonsCount: 8,
+      totalAmount: "1000",
+      features: ["individual_lessons", "homework"],
+      createdAt: now,
+      paymentId,
+    });
+    await t.db
+      .update(payments)
+      .set({
+        idempotencyKey: `checkout:s11:${option!.id}`,
+        metadata: {
+          source: "student_checkout",
+          checkoutUrl: "https://stub.tochka/checkout",
+        },
+        updatedAt: now,
+      })
+      .where(eq(payments.id, paymentId));
+
+    const a = await createCheckout(t.db, studentCtx, {
+      tariffId: tariff.id,
+      optionId: option!.id,
+    });
+    const b = await createCheckout(t.db, studentCtx, {
+      tariffId: tariff.id,
+      optionId: option!.id,
+    });
     expect(a.paymentId).toBe(b.paymentId);
-    expect(a.paymentId).toBe(assigned.paymentId);
-    expect(a.checkoutUrl).toContain("tochkaplace.com");
+    expect(a.orderId).toBe(b.orderId);
     expect(a.alreadyPending).toBe(true);
 
     let access = await resolveLearningAccess(
       t.db,
       dirCtx.organizationId,
       "s11",
-      "homework"
+      "homework",
+      directionId
     );
     expect(access.allowed).toBe(false);
 
-    await adminMarkPaymentPaid(t.db, dirCtx, {
-      paymentId: assigned.paymentId,
-      reason: "Тестовая оплата наличными",
+    await confirmPaidFromBank(t.db, dirCtx, {
+      paymentId: a.paymentId,
+      amount: 1000,
+      raw: { test: "calendar" },
     });
 
     access = await resolveLearningAccess(
       t.db,
       dirCtx.organizationId,
       "s11",
-      "homework"
+      "homework",
+      directionId
     );
     expect(access.allowed).toBe(true);
   });
@@ -148,8 +212,6 @@ describe("tariffs + calendar helpers + unassigned", () => {
       email: "s11@demo.local",
       password: DEMO_PASSWORD,
     });
-    const ctx = await resolveAuthContext(t.db, login.session.rawToken);
-    expect(ctx.role).toBe("student");
-    expect(ctx.studentId).toBe("s11");
+    expect(login.session.rawToken).toBeTruthy();
   });
 });

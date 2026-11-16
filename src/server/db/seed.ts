@@ -3,7 +3,7 @@
  * Идемпотентен по фиксированным id: повторный запуск обновляет/дописывает demo-org.
  * Не трогает другие organization id.
  */
-import { eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 
 import { createSeedData } from "@/lib/demo/seed";
 import type { StudentAnswer, TestQuestion } from "@/lib/types";
@@ -29,6 +29,8 @@ type DbLike = {
   insert: (...args: any[]) => any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   delete: (...args: any[]) => any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  update: (...args: any[]) => any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   select: (...args: any[]) => any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -65,6 +67,7 @@ export async function backfillLedgerFromAttendances(
 ) {
   const lessonRows: {
     id: string;
+    directionId: string | null;
     startsAt: Date;
     status: string;
   }[] = await db
@@ -81,48 +84,83 @@ export async function backfillLedgerFromAttendances(
     .select()
     .from(t.attendances)
     .where(inArray(t.attendances.lessonId, lessonIds));
-  const assignments: {
-    id: string;
-    studentId: string;
-    paymentStatus: string;
-    startsAt: Date;
-  }[] = await db
-    .select()
-    .from(t.studentTariffAssignments)
-    .where(eq(t.studentTariffAssignments.organizationId, organizationId));
-
   const lessonById = new Map(lessonRows.map((l) => [l.id, l]));
+  const paidOrders: {
+    studentId: string;
+    paidAt: Date | null;
+    createdAt: Date;
+    status: string;
+  }[] = await db
+    .select({
+      studentId: t.lessonOrders.studentId,
+      paidAt: t.lessonOrders.paidAt,
+      createdAt: t.lessonOrders.createdAt,
+      status: t.lessonOrders.status,
+    })
+    .from(t.lessonOrders)
+    .where(eq(t.lessonOrders.organizationId, organizationId));
+  const paidCovering = (studentId: string, at: Date): boolean =>
+    paidOrders.some((order) => {
+      if (order.studentId !== studentId || order.status !== "paid") return false;
+      const coveredAt = order.paidAt ?? order.createdAt;
+      return coveredAt.getTime() <= at.getTime();
+    });
+  const existingDebits: { lessonId: string; studentId: string }[] = await db
+    .select({
+      lessonId: t.lessonDebitState.lessonId,
+      studentId: t.lessonDebitState.studentId,
+    })
+    .from(t.lessonDebitState)
+    .where(inArray(t.lessonDebitState.lessonId, lessonIds));
+  const existingLedgerDebits: {
+    lessonId: string | null;
+    studentId: string;
+  }[] = await db
+    .select({
+      lessonId: t.studentLessonLedger.lessonId,
+      studentId: t.studentLessonLedger.studentId,
+    })
+    .from(t.studentLessonLedger)
+    .where(
+      and(
+        eq(t.studentLessonLedger.organizationId, organizationId),
+        inArray(t.studentLessonLedger.lessonId, lessonIds)
+      )
+    );
+  const debited = new Set([
+    ...existingDebits.map((d) => `${d.lessonId}:${d.studentId}`),
+    ...existingLedgerDebits
+      .filter((d) => d.lessonId)
+      .map((d) => `${d.lessonId}:${d.studentId}`),
+  ]);
 
   for (const att of attendances) {
     if (att.status !== "present" && att.status !== "absent_unexcused") continue;
     const lesson = lessonById.get(att.lessonId);
-    if (!lesson || lesson.status === "cancelled") continue;
-    const sta = assignments
-      .filter(
-        (a) =>
-          a.studentId === att.studentId &&
-          a.paymentStatus === "paid" &&
-          a.startsAt.getTime() <= lesson.startsAt.getTime()
-      )
-      .sort((a, b) => b.startsAt.getTime() - a.startsAt.getTime())[0];
-    if (!sta) continue;
+    if (!lesson || lesson.status === "cancelled" || !lesson.directionId) continue;
+    if (!paidCovering(att.studentId, lesson.startsAt)) continue;
+    const key = `${att.lessonId}:${att.studentId}`;
+    if (debited.has(key)) continue;
     const ledId = `led_seed_${att.lessonId}_${att.studentId}`;
-    await db.insert(t.tariffLessonLedger).values({
+    const reason =
+      att.status === "present" ? ("present" as const) : ("absent_unexcused" as const);
+    await db.insert(t.studentLessonLedger).values({
       id: ledId,
       organizationId,
-      assignmentId: sta.id,
-      lessonId: att.lessonId,
       studentId: att.studentId,
+      directionId: lesson.directionId,
+      lessonId: att.lessonId,
       delta: -1,
-      reason: att.status === "present" ? "present" : "absent_unexcused",
-      attendanceStatus: att.status,
+      reason,
     });
-    await db.insert(t.tariffLessonDebitState).values({
+    await db.insert(t.lessonDebitState).values({
       lessonId: att.lessonId,
       studentId: att.studentId,
-      assignmentId: sta.id,
+      directionId: lesson.directionId,
       ledgerEntryId: ledId,
+      updatedAt: lesson.startsAt,
     });
+    debited.add(key);
   }
 }
 
@@ -476,56 +514,110 @@ export async function seedDemoOrganization(
   );
   await ensureDefaultProducts(db as never, DEMO_ORG_ID);
 
+  const { ensureDefaultDirections } = await import(
+    "@/server/services/directions-service"
+  );
+  await ensureDefaultDirections(db as never, DEMO_ORG_ID);
+  const [physicsDirection] = await db
+    .select()
+    .from(t.learningDirections)
+    .where(
+      and(
+        eq(t.learningDirections.organizationId, DEMO_ORG_ID),
+        eq(t.learningDirections.slug, "physics")
+      )
+    )
+    .limit(1);
+  if (!physicsDirection) {
+    throw new Error("Направление physics не найдено после ensureDefaultDirections");
+  }
+  const directionId = physicsDirection.id;
+
+  for (const lesson of demo.lessons) {
+    await db
+      .update(t.lessons)
+      .set({ directionId, updatedAt: new Date() })
+      .where(eq(t.lessons.id, lesson.id));
+  }
+
+  const {
+    insertPaidLessonOrder,
+    insertPendingLessonOrder,
+    upsertTariffPurchaseOption,
+  } = await import("@/server/db/seed-commerce");
+
   for (const tariff of demo.tariffs) {
+    const lessonsLimit = tariff.lessonsLimit ?? 8;
+    const price = num(tariff.price ?? lessonsLimit * 1500)!;
     await db.insert(t.tariffs).values({
       id: tariff.id,
       organizationId: DEMO_ORG_ID,
+      directionId,
       name: tariff.name,
-      price: num(tariff.price)!,
+      price,
       currency: "RUB",
       durationDays: tariff.durationDays,
-      lessonsLimit: tariff.lessonsLimit ?? null,
+      lessonsLimit,
       weeklyFrequency: tariff.weeklyFrequency ?? 1,
       includesText: tariff.includesText ?? null,
       features: tariff.features,
       status: tariff.status,
       adminNotes: tariff.adminNotes ?? null,
     });
-  }
-
-  for (const a of demo.tariffAssignments) {
-    await db.insert(t.studentTariffAssignments).values({
-      id: a.id,
+    await upsertTariffPurchaseOption(db, {
+      id: `tpo_${tariff.id}`,
       organizationId: DEMO_ORG_ID,
-      studentId: a.studentId,
-      tariffId: a.tariffId,
-      startsAt: new Date(a.startsAt),
-      endsAt: new Date(a.endsAt),
-      priceSnapshot: num(a.priceSnapshot)!,
-      currency: "RUB",
-      status: a.status,
-      paymentStatus: a.paymentStatus,
-      lessonsLimitSnapshot: a.lessonsLimitSnapshot ?? null,
-      weeklyFrequencySnapshot: a.weeklyFrequencySnapshot ?? null,
-      durationDaysSnapshot: a.durationDaysSnapshot ?? null,
-      tariffNameSnapshot: a.tariffName ?? null,
+      tariffId: tariff.id,
+      lessonsCount: lessonsLimit,
+      totalPrice: price,
     });
   }
 
-  for (const p of demo.payments) {
-    await db.insert(t.payments).values({
-      id: p.id,
+  const assignments = demo.tariffAssignments ?? [];
+  const tariffById = new Map(demo.tariffs.map((tar) => [tar.id, tar]));
+  for (const a of assignments) {
+    const tar = tariffById.get(a.tariffId);
+    const lessonsCount = a.lessonsLimitSnapshot ?? tar?.lessonsLimit ?? 8;
+    const totalAmount = num(a.priceSnapshot)!;
+    const optionId = `tpo_${a.tariffId}`;
+    const payerUserId = userIdForStudent(a.studentId);
+    const productIds: string[] = [];
+    if (a.paymentStatus === "paid") {
+      await insertPaidLessonOrder(db, {
+        orderId: a.id,
+        organizationId: DEMO_ORG_ID,
+        studentId: a.studentId,
+        payerUserId,
+        tariffId: a.tariffId,
+        optionId,
+        directionId,
+        tariffName: a.tariffName ?? tar?.name ?? "Тариф",
+        lessonsCount,
+        totalAmount,
+        features: [...(tar?.features ?? ["individual_lessons"])],
+        productIds,
+        paidAt: new Date(a.startsAt),
+        paymentId: `pay_${a.id}`,
+      });
+      continue;
+    }
+    const pay = demo.payments.find((p) => p.studentId === a.studentId);
+    await insertPendingLessonOrder(db, {
+      orderId: a.id,
       organizationId: DEMO_ORG_ID,
-      studentId: p.studentId,
-      assignmentId: p.assignmentId,
-      amount: num(p.amount)!,
-      currency: "RUB",
-      status: p.status,
-      provider: p.provider,
-      externalId: p.externalId ?? null,
-      idempotencyKey: `seed:${p.id}`,
-      paidAt: p.paidAt ? new Date(p.paidAt) : null,
-      createdAt: new Date(p.createdAt),
+      studentId: a.studentId,
+      payerUserId,
+      tariffId: a.tariffId,
+      optionId,
+      directionId,
+      tariffName: a.tariffName ?? tar?.name ?? "Тариф",
+      lessonsCount,
+      totalAmount,
+      features: [...(tar?.features ?? ["individual_lessons"])],
+      productIds,
+      createdAt: new Date(a.startsAt),
+      paymentId: pay?.id ?? `pay_${a.id}`,
+      paymentStatus: pay?.status === "failed" ? "failed" : "pending",
     });
   }
 

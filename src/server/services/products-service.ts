@@ -13,13 +13,14 @@ import type { Product } from "@/lib/types";
 import type { AuthContext } from "@/server/authz/context";
 import { requireRoles, requireStudentProfile } from "@/server/authz/require";
 import {
+  lessonOrders,
   products,
-  studentTariffAssignments,
   tariffProducts,
   tariffs,
 } from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
 import { conflict, forbidden, notFound, validationError } from "@/server/errors";
+import { getDirectionBalancesMap } from "@/server/services/lesson-balance";
 
 function newId(prefix: string) {
   return `${prefix}_${randomBytes(6).toString("hex")}`;
@@ -285,55 +286,46 @@ export async function replaceTariffProducts(
   );
 }
 
-function pickCurrentAssignment<
-  T extends { status: string; paymentStatus: string; startsAt: Date },
->(rows: T[]): T | null {
-  const list = [...rows].sort(
-    (a, b) => b.startsAt.getTime() - a.startsAt.getTime()
-  );
-  return (
-    list.find((a) => a.status === "active" && a.paymentStatus === "paid") ??
-    list[0] ??
-    null
-  );
-}
-
 export async function studentAccessibleProductSlugs(
   db: AppDb,
   ctx: AuthContext
 ): Promise<string[]> {
   if (ctx.role !== "student" || !ctx.studentId) return [];
 
-  const assignments = await db
+  const orders = await db
     .select({
-      tariffId: studentTariffAssignments.tariffId,
-      status: studentTariffAssignments.status,
-      paymentStatus: studentTariffAssignments.paymentStatus,
-      startsAt: studentTariffAssignments.startsAt,
+      directionId: lessonOrders.directionId,
+      productIdsSnapshot: lessonOrders.productIdsSnapshot,
     })
-    .from(studentTariffAssignments)
+    .from(lessonOrders)
     .where(
       and(
-        eq(studentTariffAssignments.studentId, ctx.studentId),
-        eq(studentTariffAssignments.organizationId, ctx.organizationId)
+        eq(lessonOrders.studentId, ctx.studentId),
+        eq(lessonOrders.organizationId, ctx.organizationId),
+        eq(lessonOrders.status, "paid"),
+        eq(lessonOrders.accessRevoked, false)
       )
     );
 
-  const current = pickCurrentAssignment(assignments);
-  if (!current) return [];
+  if (orders.length === 0) return [];
 
-  const links = await db
-    .select({
-      productId: tariffProducts.productId,
-    })
-    .from(tariffProducts)
-    .where(
-      and(
-        eq(tariffProducts.tariffId, current.tariffId),
-        eq(tariffProducts.organizationId, ctx.organizationId)
-      )
-    );
-  if (links.length === 0) return [];
+  const directionIds = [...new Set(orders.map((o) => o.directionId))];
+  const balances = await getDirectionBalancesMap(
+    db,
+    ctx.organizationId,
+    ctx.studentId,
+    directionIds
+  );
+
+  const productIdSet = new Set<string>();
+  for (const order of orders) {
+    const remaining = balances.get(order.directionId) ?? 0;
+    if (remaining <= 0) continue;
+    for (const productId of (order.productIdsSnapshot ?? []) as string[]) {
+      if (productId) productIdSet.add(productId);
+    }
+  }
+  if (productIdSet.size === 0) return [];
 
   const rows = await db
     .select()
@@ -341,10 +333,7 @@ export async function studentAccessibleProductSlugs(
     .where(
       and(
         eq(products.organizationId, ctx.organizationId),
-        inArray(
-          products.id,
-          links.map((l) => l.productId)
-        )
+        inArray(products.id, [...productIdSet])
       )
     );
 
@@ -369,6 +358,6 @@ export async function requireStudentProductAccess(
 ) {
   await requireStudentProfile(ctx);
   if (!(await studentHasProductAccess(db, ctx, slug))) {
-    throw forbidden("Продукт недоступен по текущему тарифу");
+    throw forbidden("Продукт недоступен: нет оплаченного пакета с положительным остатком");
   }
 }

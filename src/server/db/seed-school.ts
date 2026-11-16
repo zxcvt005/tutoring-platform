@@ -2,7 +2,7 @@
  * Демонстрационный набор «Школа Неодин» для локального QA.
  * Отдельная организация — не затирает org_demo.
  */
-import { eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 
 import {
   addAppDateKey,
@@ -396,9 +396,36 @@ export async function seedSchoolOrganization(
     });
   }
 
+  const { ensureDefaultDirections } = await import(
+    "@/server/services/directions-service"
+  );
+  await ensureDefaultDirections(db as never, SCHOOL_ORG_ID);
+  const [physicsDirection] = await db
+    .select()
+    .from(t.learningDirections)
+    .where(
+      and(
+        eq(t.learningDirections.organizationId, SCHOOL_ORG_ID),
+        eq(t.learningDirections.slug, "physics")
+      )
+    )
+    .limit(1);
+  if (!physicsDirection) {
+    throw new Error("Направление physics не найдено после ensureDefaultDirections");
+  }
+  const schoolDirectionId = physicsDirection.id;
+
+  const {
+    insertCancelledLessonOrder,
+    insertPaidLessonOrder,
+    insertPendingLessonOrder,
+    upsertTariffPurchaseOption,
+  } = await import("@/server/db/seed-commerce");
+
   const tariffs = [
     {
       id: "sch_tariff_basic",
+      optionId: "sch_tpo_basic",
       name: "Базовый (8 занятий)",
       price: "16000",
       durationDays: 30,
@@ -409,6 +436,7 @@ export async function seedSchoolOrganization(
     },
     {
       id: "sch_tariff_standard",
+      optionId: "sch_tpo_standard",
       name: "Стандарт (12 занятий)",
       price: "22000",
       durationDays: 30,
@@ -419,6 +447,7 @@ export async function seedSchoolOrganization(
     },
     {
       id: "sch_tariff_intensive",
+      optionId: "sch_tpo_intensive",
       name: "Интенсив ЕГЭ",
       price: "32000",
       durationDays: 45,
@@ -430,10 +459,25 @@ export async function seedSchoolOrganization(
   ];
   for (const tariff of tariffs) {
     await db.insert(t.tariffs).values({
-      ...tariff,
+      id: tariff.id,
       organizationId: SCHOOL_ORG_ID,
+      directionId: schoolDirectionId,
+      name: tariff.name,
+      price: tariff.price,
       currency: "RUB",
+      durationDays: tariff.durationDays,
+      lessonsLimit: tariff.lessonsLimit,
+      weeklyFrequency: tariff.weeklyFrequency,
+      includesText: tariff.includesText,
+      features: tariff.features,
       status: "active",
+    });
+    await upsertTariffPurchaseOption(db, {
+      id: tariff.optionId,
+      organizationId: SCHOOL_ORG_ID,
+      tariffId: tariff.id,
+      lessonsCount: tariff.lessonsLimit,
+      totalPrice: tariff.price,
     });
   }
 
@@ -560,62 +604,53 @@ export async function seedSchoolOrganization(
   }
 
   const tariffById = new Map(tariffs.map((x) => [x.id, x]));
-  for (const a of assignments) {
+  const optionByTariff = new Map(tariffs.map((x) => [x.id, x.optionId]));
+  for (let i = 0; i < assignments.length; i++) {
+    const a = assignments[i]!;
     const tar = tariffById.get(a.tariffId);
-    await db.insert(t.studentTariffAssignments).values({
-      id: a.id,
+    const optionId = optionByTariff.get(a.tariffId)!;
+    const paymentId = `sch_pay_${String(i + 1).padStart(2, "0")}`;
+    const payerUserId = `user_${a.studentId}`;
+  const lessonsCount = a.lessonsLimit ?? tar?.lessonsLimit ?? 8;
+    const orderInput = {
+      orderId: a.id,
       organizationId: SCHOOL_ORG_ID,
       studentId: a.studentId,
+      payerUserId,
       tariffId: a.tariffId,
-      startsAt: a.startsAt,
-      endsAt: a.endsAt,
-      priceSnapshot: a.price,
-      currency: "RUB",
-      status: a.status,
-      paymentStatus: a.paymentStatus,
-      lessonsLimitSnapshot: a.lessonsLimit,
-      weeklyFrequencySnapshot: tar?.weeklyFrequency ?? null,
-      durationDaysSnapshot: tar?.durationDays ?? null,
-      tariffNameSnapshot: tar?.name ?? null,
-    });
-  }
-
-  const payments = assignments.map((a, i) => {
-    const n = String(i + 1).padStart(2, "0");
-    if (a.paymentStatus === "unpaid") {
-      return {
-        id: `sch_pay_${n}`,
-        studentId: a.studentId,
-        assignmentId: a.id,
-        amount: a.price,
-        status: a.studentId === "sch_s15" ? ("failed" as const) : ("pending" as const),
-        paidAt: null as Date | null,
-        key: `school:pay:${n}`,
-      };
-    }
-    return {
-      id: `sch_pay_${n}`,
-      studentId: a.studentId,
-      assignmentId: a.id,
-      amount: a.price,
-      status: "paid" as const,
-      paidAt: a.startsAt,
-      key: `school:pay:${n}`,
+      optionId,
+      directionId: schoolDirectionId,
+      tariffName: tar?.name ?? "Тариф",
+      lessonsCount,
+      totalAmount: a.price,
+      features: tar?.features ?? ["individual_lessons"],
+      productIds: [] as string[],
     };
-  });
-  for (const p of payments) {
-    await db.insert(t.payments).values({
-      id: p.id,
-      organizationId: SCHOOL_ORG_ID,
-      studentId: p.studentId,
-      assignmentId: p.assignmentId,
-      amount: p.amount,
-      currency: "RUB",
-      status: p.status,
-      provider: "stub",
-      idempotencyKey: p.key,
-      paidAt: p.paidAt,
-      failureReason: p.status === "failed" ? "stub: card declined" : null,
+    if (a.paymentStatus === "paid") {
+      await insertPaidLessonOrder(db, {
+        ...orderInput,
+        paidAt: a.startsAt,
+        paymentId,
+      });
+      continue;
+    }
+    if (a.status === "cancelled") {
+      await insertCancelledLessonOrder(db, {
+        ...orderInput,
+        createdAt: a.startsAt,
+        paymentId,
+        paymentStatus: "cancelled",
+      });
+      continue;
+    }
+    await insertPendingLessonOrder(db, {
+      ...orderInput,
+      createdAt: a.startsAt,
+      paymentId,
+      paymentStatus:
+        a.studentId === "sch_s15" ? ("failed" as const) : ("pending" as const),
+      failureReason:
+        a.studentId === "sch_s15" ? "stub: card declined" : null,
     });
   }
 
@@ -647,6 +682,16 @@ export async function seedSchoolOrganization(
     schedules
   );
 
+  await db
+    .update(t.lessons)
+    .set({ directionId: schoolDirectionId, updatedAt: new Date() })
+    .where(
+      and(
+        eq(t.lessons.organizationId, SCHOOL_ORG_ID),
+        isNull(t.lessons.directionId)
+      )
+    );
+
   await backfillLedgerFromAttendances(db, SCHOOL_ORG_ID);
 
   const { ensureDefaultProducts } = await import(
@@ -665,7 +710,7 @@ export async function seedSchoolOrganization(
     pastLessons: history.pastLessons,
     tariffs: tariffs.length,
     assignments: assignments.length,
-    payments: payments.length,
+    payments: assignments.length,
     tests: history.tests,
     questions: history.questions,
     topics: history.topics,
@@ -680,9 +725,24 @@ async function wipeSchoolOperationalData(db: DbLike) {
     .delete(t.testAssignments)
     .where(eq(t.testAssignments.organizationId, org));
   await db.delete(t.tests).where(eq(t.tests.organizationId, org));
+  const orgLessonIds = (
+    await db
+      .select({ id: t.lessons.id })
+      .from(t.lessons)
+      .where(eq(t.lessons.organizationId, org))
+  ).map((row: { id: string }) => row.id);
+  if (orgLessonIds.length > 0) {
+    await db
+      .delete(t.lessonDebitState)
+      .where(inArray(t.lessonDebitState.lessonId, orgLessonIds));
+  }
   await db
-    .delete(t.tariffLessonLedger)
-    .where(eq(t.tariffLessonLedger.organizationId, org));
+    .delete(t.studentLessonLedger)
+    .where(eq(t.studentLessonLedger.organizationId, org));
+  await db.delete(t.payments).where(eq(t.payments.organizationId, org));
+  await db
+    .delete(t.lessonOrders)
+    .where(eq(t.lessonOrders.organizationId, org));
   await db.delete(t.lessons).where(eq(t.lessons.organizationId, org));
   await db
     .delete(t.lessonSchedules)
@@ -691,10 +751,9 @@ async function wipeSchoolOperationalData(db: DbLike) {
   await db
     .delete(t.topicSections)
     .where(eq(t.topicSections.organizationId, org));
-  await db.delete(t.payments).where(eq(t.payments.organizationId, org));
   await db
-    .delete(t.studentTariffAssignments)
-    .where(eq(t.studentTariffAssignments.organizationId, org));
+    .delete(t.tariffPurchaseOptions)
+    .where(eq(t.tariffPurchaseOptions.organizationId, org));
   await db.delete(t.tariffs).where(eq(t.tariffs.organizationId, org));
 }
 
@@ -791,8 +850,8 @@ export async function verifySchoolOrganization(
     .where(eq(t.tariffs.organizationId, org));
   const assignments = await db
     .select()
-    .from(t.studentTariffAssignments)
-    .where(eq(t.studentTariffAssignments.organizationId, org));
+    .from(t.lessonOrders)
+    .where(eq(t.lessonOrders.organizationId, org));
   const payments = await db
     .select()
     .from(t.payments)
@@ -974,15 +1033,15 @@ export async function verifySchoolOrganization(
   for (const p of payments as Array<{
     id: string;
     studentId: string;
-    assignmentId: string;
+    orderId: string;
   }>) {
-    const a = assignmentById.get(p.assignmentId);
+    const a = assignmentById.get(p.orderId);
     if (!a) {
-      errors.push(`платёж ${p.id}: нет назначения ${p.assignmentId}`);
+      errors.push(`платёж ${p.id}: нет заказа ${p.orderId}`);
       continue;
     }
     if (a.studentId !== p.studentId) {
-      errors.push(`платёж ${p.id}: ученик не совпадает с назначением`);
+      errors.push(`платёж ${p.id}: ученик не совпадает с заказом`);
     }
   }
 
@@ -1012,8 +1071,8 @@ export async function verifySchoolOrganization(
       : [];
   const ledger = await db
     .select()
-    .from(t.tariffLessonLedger)
-    .where(eq(t.tariffLessonLedger.organizationId, org));
+    .from(t.studentLessonLedger)
+    .where(eq(t.studentLessonLedger.organizationId, org));
   const lessonById = new Map(
     (lessons as Array<{ id: string; startsAt: Date; status: string }>).map(
       (l) => [l.id, l]
@@ -1025,14 +1084,14 @@ export async function verifySchoolOrganization(
   ): boolean =>
     (assignments as Array<{
       studentId: string;
-      paymentStatus: string;
-      startsAt: Date;
-    }>).some(
-      (a) =>
-        a.studentId === studentId &&
-        a.paymentStatus === "paid" &&
-        a.startsAt.getTime() <= at.getTime()
-    );
+      status: string;
+      paidAt: Date | null;
+      createdAt: Date;
+    }>).some((a) => {
+      if (a.studentId !== studentId || a.status !== "paid") return false;
+      const coveredAt = a.paidAt ?? a.createdAt;
+      return coveredAt.getTime() <= at.getTime();
+    });
   let expectedDebits = 0;
   for (const att of attendances as Array<{
     lessonId: string;

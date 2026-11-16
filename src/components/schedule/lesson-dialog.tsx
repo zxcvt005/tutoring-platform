@@ -37,6 +37,7 @@ import {
 } from "@/lib/schedule";
 import {
   DURATION_OPTIONS,
+  type LearningDirection,
   type Lesson,
   type Student,
 } from "@/lib/types";
@@ -50,6 +51,7 @@ export type RecurringSaveInput = {
   startTime: string;
   durationMin: number;
   subject?: string;
+  directionId?: string;
   activeFrom?: string;
   activeUntil?: string;
 };
@@ -59,6 +61,7 @@ type LessonDialogProps = {
   onOpenChange: (open: boolean) => void;
   teacherId: string;
   students: Student[];
+  learningDirections: LearningDirection[];
   initial?: Initial;
   onSave: (
     lesson: Omit<Lesson, "id"> & { id?: string }
@@ -117,6 +120,7 @@ export function LessonDialog({
   onOpenChange,
   teacherId,
   students,
+  learningDirections,
   initial,
   onSave,
   onSaveRecurring,
@@ -135,6 +139,7 @@ export function LessonDialog({
             key={formKey(initial)}
             teacherId={teacherId}
             students={students}
+            learningDirections={learningDirections}
             initial={initial}
             onSave={onSave}
             onSaveRecurring={onSaveRecurring}
@@ -150,6 +155,7 @@ export function LessonDialog({
 function LessonForm({
   teacherId,
   students,
+  learningDirections,
   initial,
   onSave,
   onSaveRecurring,
@@ -158,6 +164,7 @@ function LessonForm({
 }: {
   teacherId: string;
   students: Student[];
+  learningDirections: LearningDirection[];
   initial?: Initial;
   onSave: (
     lesson: Omit<Lesson, "id"> & { id?: string }
@@ -187,6 +194,15 @@ function LessonForm({
     return m?.[1] ?? "10:00";
   });
   const [showSeriesExtras, setShowSeriesExtras] = useState(false);
+  const activeDirections = useMemo(
+    () => learningDirections.filter((d) => d.status === "active"),
+    [learningDirections]
+  );
+  const defaultDirectionId =
+    initial?.directionId ??
+    activeDirections[0]?.id ??
+    "";
+  const [directionId, setDirectionId] = useState(defaultDirectionId);
 
   const preview = useMemo(() => {
     if (!repeat || !startTime) return null;
@@ -214,7 +230,7 @@ function LessonForm({
   }
 
   function save() {
-    if (!studentId) return;
+    if (!studentId || !directionId) return;
     void (async () => {
       if (repeat && !isEdit && onSaveRecurring) {
         const days = fromSlot ? [defaults.defaultWeekday] : weekdays;
@@ -225,6 +241,7 @@ function LessonForm({
           weekdays: days,
           startTime,
           durationMin: duration,
+          directionId,
           activeFrom: activeFrom || undefined,
           activeUntil:
             !fromSlot || showSeriesExtras
@@ -246,6 +263,7 @@ function LessonForm({
         id: initial?.id,
         teacherId,
         studentIds: [studentId],
+        directionId,
         startsAt,
         endsAt,
         status: initial?.status ?? "planned",
@@ -289,6 +307,36 @@ function LessonForm({
             />
           )}
         </div>
+
+        {activeDirections.length === 0 ? (
+          <p className="text-sm text-amber-800 dark:text-amber-300">
+            Нет активных направлений. Обратитесь к дирекции.
+          </p>
+        ) : (
+          <div className="space-y-1.5">
+            <Label>Направление</Label>
+            <Select
+              value={directionId || null}
+              onValueChange={(v) => v && setDirectionId(v)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Выберите направление">
+                  {(v) =>
+                    activeDirections.find((d) => d.id === v)?.name ??
+                    "Направление"
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {activeDirections.map((d) => (
+                  <SelectItem key={d.id} value={d.id}>
+                    {d.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         {!isEdit && onSaveRecurring ? (
           <div className="flex items-center gap-2">
@@ -476,9 +524,9 @@ function LessonForm({
             onClick={save}
             disabled={
               !studentId ||
-              (repeat &&
-                !fromSlot &&
-                weekdays.length === 0)
+              !directionId ||
+              activeDirections.length === 0 ||
+              (repeat && !fromSlot && weekdays.length === 0)
             }
           >
             Сохранить

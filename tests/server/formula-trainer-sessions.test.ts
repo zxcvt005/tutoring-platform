@@ -34,7 +34,7 @@ describe("formula trainer sessions", () => {
       password: DEMO_PASSWORD,
     });
     const ctx = await resolveAuthContext(db, session.rawToken);
-    await grantFormulaTrainerOnTariff(db, ctx.organizationId, "tariff_standard");
+    await grantFormulaTrainerOnTariff(db, ctx.organizationId, "s1");
     return ctx;
   }
 

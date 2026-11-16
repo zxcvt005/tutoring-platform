@@ -15,7 +15,7 @@ import {
   studentContactTasks,
   studentInteractionNotes,
   studentSalesProfiles,
-  studentTariffAssignments,
+  lessonOrders,
   students,
   teachers,
   users,
@@ -86,27 +86,29 @@ export async function listPressStudents(
     .where(eq(teachers.organizationId, ctx.organizationId));
   const teacherName = new Map(teacherRows.map((t) => [t.id, t.fullName]));
 
-  const tariffRows = await db
+  const orderRows = await db
     .select({
-      studentId: studentTariffAssignments.studentId,
-      tariffName: studentTariffAssignments.tariffNameSnapshot,
-      status: studentTariffAssignments.status,
-      paymentStatus: studentTariffAssignments.paymentStatus,
-      startsAt: studentTariffAssignments.startsAt,
+      studentId: lessonOrders.studentId,
+      tariffName: lessonOrders.tariffNameSnapshot,
+      status: lessonOrders.status,
+      paidAt: lessonOrders.paidAt,
+      createdAt: lessonOrders.createdAt,
     })
-    .from(studentTariffAssignments)
-    .where(eq(studentTariffAssignments.organizationId, ctx.organizationId));
+    .from(lessonOrders)
+    .where(eq(lessonOrders.organizationId, ctx.organizationId));
   const tariffByStudent = new Map<string, string>();
-  const sortedTariffs = [...tariffRows].sort(
-    (a, b) => b.startsAt.getTime() - a.startsAt.getTime()
+  const sortedOrders = [...orderRows].sort(
+    (a, b) =>
+      (b.paidAt?.getTime() ?? b.createdAt.getTime()) -
+      (a.paidAt?.getTime() ?? a.createdAt.getTime())
   );
-  for (const row of sortedTariffs) {
+  for (const row of sortedOrders) {
     if (tariffByStudent.has(row.studentId)) continue;
-    if (row.status === "active" && row.paymentStatus === "paid") {
+    if (row.status === "paid") {
       tariffByStudent.set(row.studentId, row.tariffName ?? "Тариф");
     }
   }
-  for (const row of sortedTariffs) {
+  for (const row of sortedOrders) {
     if (tariffByStudent.has(row.studentId)) continue;
     if (row.tariffName) tariffByStudent.set(row.studentId, row.tariffName);
   }
@@ -187,15 +189,13 @@ export async function getPressStudentCard(
     .where(eq(studentInteractionNotes.studentId, studentId))
     .orderBy(desc(studentInteractionNotes.createdAt));
 
-  const tariffRows = await db
+  const orderRows = await db
     .select()
-    .from(studentTariffAssignments)
-    .where(eq(studentTariffAssignments.studentId, studentId))
-    .orderBy(desc(studentTariffAssignments.startsAt));
+    .from(lessonOrders)
+    .where(eq(lessonOrders.studentId, studentId))
+    .orderBy(desc(lessonOrders.paidAt), desc(lessonOrders.createdAt));
   const currentTariff =
-    tariffRows.find((a) => a.status === "active" && a.paymentStatus === "paid") ??
-    tariffRows[0] ??
-    null;
+    orderRows.find((a) => a.status === "paid") ?? orderRows[0] ?? null;
 
   const bucket = pressStudentBucket({
     status: student.status as "active" | "paused" | "archived",

@@ -237,50 +237,114 @@ export type TariffFeatureKey =
 
 export type TariffStatus = "active" | "archived";
 
-export type TariffAssignmentStatus =
-  | "pending_payment"
-  | "active"
-  | "queued"
-  | "expired"
+export type LearningDirectionStatus = "active" | "archived";
+
+export type LearningDirection = {
+  id: string;
+  name: string;
+  slug: string;
+  status: LearningDirectionStatus;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type TariffPurchaseOption = {
+  id: string;
+  tariffId: string;
+  lessonsCount: number;
+  totalPrice: number;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type LessonOrderStatus =
+  | "awaiting_payment"
+  | "paid"
   | "cancelled"
-  | "paused";
+  | "expired"
+  | "refunded"
+  | "disputed";
 
-export type TariffPaymentStatus = "unpaid" | "paid" | "refunded";
+export type LessonOrder = {
+  id: string;
+  studentId: string;
+  payerUserId: string;
+  tariffId: string;
+  optionId?: string | null;
+  directionId: string;
+  tariffNameSnapshot: string;
+  lessonsCount: number;
+  totalAmount: number;
+  unitPrice: number;
+  currency: "RUB";
+  featuresSnapshot: TariffFeatureKey[];
+  productIdsSnapshot: string[];
+  status: LessonOrderStatus;
+  paidAt?: string | null;
+  creditedAt?: string | null;
+  creditLedgerEntryId?: string | null;
+  accessRevoked?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
 
-export type StudentPackageStatus =
-  | "none"
-  | "unpaid"
-  | "active"
-  | "queued"
-  | "exhausted"
-  | "debt"
-  | "paused"
-  | "cancelled";
+export type StudentLessonLedgerReason =
+  | "purchase"
+  | "present"
+  | "absent_unexcused"
+  | "reversal"
+  | "manual_adjustment"
+  | "refund_clawback";
+
+/** Агрегированный баланс занятий ученика по направлению (вычисляемый). */
+export type StudentDirectionBalance = {
+  directionId: string;
+  directionName?: string;
+  directionSlug?: string;
+  balance: number;
+};
+
+/** Сводка баланса для bootstrap (все ученики дирекции / пул преподавателя). */
+export type StudentDirectionBalanceRow = {
+  studentId: string;
+  directionId: string;
+  remaining: number;
+  used: number;
+};
 
 export type PaymentRecordStatus =
   | "pending"
   | "paid"
-  | "cancelled"
   | "failed"
-  | "rejected";
+  | "cancelled"
+  | "expired"
+  | "refunded";
 
 export type Tariff = {
   id: string;
+  directionId: string;
   name: string;
-  price: number;
+  /** Legacy одиночная цена; для новых тарифов см. purchaseOptions */
+  price?: number;
   currency: "RUB";
   /** Прогнозируемая длительность пакета, дни */
-  durationDays: number;
-  lessonsLimit?: number;
+  durationDays?: number | null;
+  lessonsLimit?: number | null;
   weeklyFrequency: number;
   includesText?: string;
   features: TariffFeatureKey[];
   status: TariffStatus;
   adminNotes?: string;
-  /** Сколько активных/текущих назначений (для UI дирекции) */
-  assignedCount?: number;
+  /** Варианты покупки (N занятий за сумму) */
+  purchaseOptions?: TariffPurchaseOption[];
+  /** Сколько активных заказов (для UI дирекции) */
+  activeOrderCount?: number;
   /** Продукты каталога, включённые в тариф */
   productIds?: string[];
+  /** Денормализация для UI */
+  directionName?: string;
 };
 
 export type Product = {
@@ -297,6 +361,32 @@ export type Product = {
   updatedAt?: string;
 };
 
+/** @deprecated Используйте lessonOrders + studentLessonLedger. */
+export type TariffAssignmentStatus =
+  | "pending_payment"
+  | "active"
+  | "queued"
+  | "expired"
+  | "cancelled"
+  | "paused";
+
+/** @deprecated */
+export type TariffPaymentStatus = "unpaid" | "paid" | "refunded";
+
+/** @deprecated */
+export type StudentPackageStatus =
+  | "none"
+  | "unpaid"
+  | "active"
+  | "queued"
+  | "exhausted"
+  | "debt"
+  | "paused"
+  | "cancelled";
+
+/**
+ * @deprecated Заменено моделью lessonOrders + studentLessonLedger.
+ */
 export type StudentTariffAssignment = {
   id: string;
   studentId: string;
@@ -313,7 +403,6 @@ export type StudentTariffAssignment = {
   lessonsUsed?: number;
   lessonsRemaining?: number | null;
   packageStatus?: StudentPackageStatus;
-  /** Денормализация для UI */
   tariffName?: string;
   includesText?: string;
 };
@@ -321,12 +410,13 @@ export type StudentTariffAssignment = {
 export type PaymentRecord = {
   id: string;
   studentId: string;
-  assignmentId: string;
+  orderId: string;
   amount: number;
   currency: "RUB";
   status: PaymentRecordStatus;
   provider: string;
-  externalId?: string;
+  externalId?: string | null;
+  paymentLinkId?: string | null;
   paidAt?: string;
   createdAt: string;
   failureReason?: string | null;
@@ -388,8 +478,8 @@ export type Student = {
   userId?: string | null;
   accountEmail?: string | null;
   accountRole?: "student" | null;
-  /** Тариф, который ученик может оплатить сам. Не текущий списывающий пакет. */
-  purchaseTariffId?: string | null;
+  /** Балансы занятий по направлениям (денормализация для UI). */
+  directionBalances?: StudentDirectionBalance[];
 };
 
 export type LessonTopicLink = {
@@ -402,6 +492,7 @@ export type LessonTopicLink = {
 export type Lesson = {
   id: string;
   teacherId: string;
+  directionId?: string | null;
   /**
    * Ровно один ученик. Массив сохранён для совместимости UI:
    * всегда `studentId ? [studentId] : []`.
@@ -633,8 +724,12 @@ export type DemoData = {
   intensiveAssignments: IntensiveAssignment[];
   mockExams: MockExam[];
   mockExamResults: MockExamResult[];
+  learningDirections: LearningDirection[];
   tariffs: Tariff[];
+  lessonOrders: LessonOrder[];
+  /** @deprecated См. lessonOrders; в новых данных — пустой массив */
   tariffAssignments: StudentTariffAssignment[];
+  studentDirectionBalances: StudentDirectionBalanceRow[];
   payments: PaymentRecord[];
   products: Product[];
   /** Реализованные продукты, доступные текущему ученику по тарифу */

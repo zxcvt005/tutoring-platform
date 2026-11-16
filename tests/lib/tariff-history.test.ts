@@ -33,7 +33,7 @@ function asg(
 }
 
 function pay(
-  partial: Partial<PaymentRecord> & Pick<PaymentRecord, "id" | "assignmentId">
+  partial: Partial<PaymentRecord> & Pick<PaymentRecord, "id" | "orderId">
 ): PaymentRecord {
   return {
     studentId: "s1",
@@ -49,7 +49,7 @@ function pay(
 function historyFor(assignments: StudentTariffAssignment[]) {
   return buildTariffHistoryItems(
     assignments,
-    assignments.map((a) => pay({ id: `p-${a.id}`, assignmentId: a.id })),
+    assignments.map((a) => pay({ id: `p-${a.id}`, orderId: a.id })),
     "s1"
   );
 }
@@ -100,7 +100,7 @@ describe("tariff history statuses", () => {
       packageStatus: "exhausted",
     });
     expect(remainingLooksExhausted(current)).toBe(true);
-    expect(assignmentHistoryStatus(current, pay({ id: "p1", assignmentId: "a1" }))).toBe(
+    expect(assignmentHistoryStatus(current, pay({ id: "p1", orderId: "a1" }))).toBe(
       "expired"
     );
     expect(tariffHistoryStatusLabel.expired).toBe("Истёк");
@@ -108,7 +108,7 @@ describe("tariff history statuses", () => {
     expect(tariffBalanceAlert(0).message).not.toMatch(/в долг/);
   });
 
-  it("shows remaining -1 as expired without debt warning in the status", () => {
+  it("treats remaining -1 as debt: no learning, one more debit allowed", () => {
     const current = asg({
       id: "a1",
       studentId: "s1",
@@ -116,14 +116,14 @@ describe("tariff history statuses", () => {
       packageStatus: "debt",
     });
     expect(remainingLooksExhausted(current)).toBe(true);
-    expect(assignmentHistoryStatus(current, pay({ id: "p1", assignmentId: "a1" }))).toBe(
+    expect(assignmentHistoryStatus(current, pay({ id: "p1", orderId: "a1" }))).toBe(
       "expired"
     );
     expect(tariffHistoryStatusLabel.expired).toBe("Истёк");
-    expect(tariffHistoryStatusLabel.expired).not.toMatch(/в долг/);
     const alert = tariffBalanceAlert(-1);
     expect(alert.allowsLearning).toBe(false);
-    expect(alert.allowsDebit).toBe(false);
+    expect(alert.allowsDebit).toBe(true);
+    expect(alert.tone).toBe("debt");
   });
 
   it("shows a paid queued tariff as queued even when the old package is exhausted", () => {
@@ -158,8 +158,8 @@ describe("tariff history statuses", () => {
       [
         pay({
           id: "p1",
-          assignmentId: "a1",
-          status: "rejected",
+          orderId: "a1",
+          status: "failed",
         }),
       ],
       "s1"

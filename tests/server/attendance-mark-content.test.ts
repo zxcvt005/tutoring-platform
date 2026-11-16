@@ -6,7 +6,7 @@ import { resolveAuthContext } from "@/server/authz/context";
 import {
   lessonTopics,
   lessons,
-  tariffLessonLedger,
+  studentLessonLedger,
   testAssignments,
 } from "@/server/db/schema";
 import { loginWithPassword } from "@/server/services/auth-service";
@@ -19,10 +19,9 @@ import {
   upsertLesson,
 } from "@/server/services/platform-mutations";
 import {
-  adminMarkPaymentPaid,
-  assignTariffToStudent,
-  upsertTariff,
-} from "@/server/services/tariffs-service";
+  physicsDirectionId,
+  seedPaidLessons,
+} from "../helpers/commerce";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
 
 describe("attendance requires topic, homework is optional", () => {
@@ -47,7 +46,8 @@ describe("attendance requires topic, homework is optional", () => {
   async function pastLesson(
     db: Awaited<ReturnType<typeof createTestDb>>["db"],
     teacher: Awaited<ReturnType<typeof asRole>>,
-    studentId: string
+    studentId: string,
+    directionId: string
   ) {
     const startsAt = new Date(Date.now() + 2 * 86_400_000);
     startsAt.setHours(16, 0, 0, 0);
@@ -55,6 +55,7 @@ describe("attendance requires topic, homework is optional", () => {
     const created = await upsertLesson(db, teacher, {
       teacherId: "t1",
       studentIds: [studentId],
+      directionId,
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
       status: "planned",
@@ -74,22 +75,13 @@ describe("attendance requires topic, homework is optional", () => {
     director: Awaited<ReturnType<typeof asRole>>,
     studentId: string
   ) {
-    const tariff = await upsertTariff(db, director, {
-      name: "Пакет",
-      price: 1000,
-      durationDays: 28,
-      lessonsLimit: 8,
-      weeklyFrequency: 2,
+    const directionId = await physicsDirectionId(db, director.organizationId);
+    await seedPaidLessons(db, director, studentId, {
+      directionId,
+      lessons: 8,
       features: ["individual_lessons", "homework"],
     });
-    const assigned = await assignTariffToStudent(db, director, {
-      studentId,
-      tariffId: tariff.id,
-    });
-    await adminMarkPaymentPaid(db, director, {
-      paymentId: assigned.paymentId,
-      reason: "Тест",
-    });
+    return directionId;
   }
 
   async function netDebit(
@@ -98,8 +90,8 @@ describe("attendance requires topic, homework is optional", () => {
   ) {
     const ledger = await db
       .select()
-      .from(tariffLessonLedger)
-      .where(eq(tariffLessonLedger.lessonId, lessonId));
+      .from(studentLessonLedger)
+      .where(eq(studentLessonLedger.lessonId, lessonId));
     return ledger.reduce((sum, row) => sum + row.delta, 0);
   }
 
@@ -119,8 +111,8 @@ describe("attendance requires topic, homework is optional", () => {
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
     const anna = await asRole(t.db, "anna@example.com");
-    await pay(t.db, director, "s11");
-    const lessonId = await pastLesson(t.db, anna, "s11");
+    const directionId = await pay(t.db, director, "s11");
+    const lessonId = await pastLesson(t.db, anna, "s11", directionId);
 
     await expect(
       setAttendance(t.db, anna, lessonId, "s11", "present")
@@ -135,8 +127,8 @@ describe("attendance requires topic, homework is optional", () => {
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
     const anna = await asRole(t.db, "anna@example.com");
-    await pay(t.db, director, "s11");
-    const lessonId = await pastLesson(t.db, anna, "s11");
+    const directionId = await pay(t.db, director, "s11");
+    const lessonId = await pastLesson(t.db, anna, "s11", directionId);
 
     await setLessonTopics(t.db, anna, {
       lessonId,
@@ -160,8 +152,8 @@ describe("attendance requires topic, homework is optional", () => {
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
     const anna = await asRole(t.db, "anna@example.com");
-    await pay(t.db, director, "s11");
-    const lessonId = await pastLesson(t.db, anna, "s11");
+    const directionId = await pay(t.db, director, "s11");
+    const lessonId = await pastLesson(t.db, anna, "s11", directionId);
 
     await completeLesson(t.db, anna, {
       lessonId,
@@ -191,8 +183,8 @@ describe("attendance requires topic, homework is optional", () => {
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
     const anna = await asRole(t.db, "anna@example.com");
-    await pay(t.db, director, "s11");
-    const lessonId = await pastLesson(t.db, anna, "s11");
+    const directionId = await pay(t.db, director, "s11");
+    const lessonId = await pastLesson(t.db, anna, "s11", directionId);
     await publishHomework(t.db, anna, "hw1").catch(() => undefined);
 
     await completeLesson(t.db, anna, {
@@ -215,8 +207,8 @@ describe("attendance requires topic, homework is optional", () => {
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
     const anna = await asRole(t.db, "anna@example.com");
-    await pay(t.db, director, "s11");
-    const lessonId = await pastLesson(t.db, anna, "s11");
+    const directionId = await pay(t.db, director, "s11");
+    const lessonId = await pastLesson(t.db, anna, "s11", directionId);
     await setLessonTopics(t.db, anna, {
       lessonId,
       topics: [{ title: "Оптика" }],
@@ -232,8 +224,8 @@ describe("attendance requires topic, homework is optional", () => {
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
     const anna = await asRole(t.db, "anna@example.com");
-    await pay(t.db, director, "s11");
-    const lessonId = await pastLesson(t.db, anna, "s11");
+    const directionId = await pay(t.db, director, "s11");
+    const lessonId = await pastLesson(t.db, anna, "s11", directionId);
     await setLessonTopics(t.db, anna, {
       lessonId,
       topics: [{ title: "Термодинамика" }],
@@ -249,8 +241,8 @@ describe("attendance requires topic, homework is optional", () => {
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
     const anna = await asRole(t.db, "anna@example.com");
-    await pay(t.db, director, "s11");
-    const lessonId = await pastLesson(t.db, anna, "s11");
+    const directionId = await pay(t.db, director, "s11");
+    const lessonId = await pastLesson(t.db, anna, "s11", directionId);
 
     await setLessonTopics(t.db, anna, {
       lessonId,

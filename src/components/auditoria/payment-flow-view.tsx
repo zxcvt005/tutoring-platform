@@ -10,7 +10,7 @@ import {
 } from "@/lib/payment-checkout";
 import { cn } from "@/lib/utils";
 
-const STEP_LABELS = ["Выбор тарифа", "Оплата", "Подтверждение"] as const;
+const STEP_LABELS = ["Пакет занятий", "Оплата", "Подтверждение"] as const;
 
 export function CheckoutStepper({
   status,
@@ -89,9 +89,8 @@ export function PaymentStatusCard({
           Оплата ожидает подтверждения
         </p>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-foreground/80">
-          Мы получили вашу заявку и проверяем поступление. Обычно это занимает
-          несколько минут. Переход на страницу банка ещё не означает, что тариф
-          активирован.
+          Мы проверяем платёж в банке. Переход со страницы оплаты ещё не
+          означает, что занятия зачислены.
         </p>
         {detail ? (
           <p className="mt-2 text-sm text-muted-foreground">{detail}</p>

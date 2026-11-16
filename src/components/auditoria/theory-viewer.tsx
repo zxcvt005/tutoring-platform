@@ -52,10 +52,7 @@ export function StudentTheoryViewer({ assignmentId }: { assignmentId: string }) 
     );
   }
 
-  const learning = studentLearningLock(
-    data.tariffAssignments,
-    data.currentStudentId
-  );
+  const learning = studentLearningLock(data, data.currentStudentId);
   if (learning.locked) {
     return (
       <div className="space-y-3 rounded-2xl border border-border/70 bg-auditoria-surface p-4">

@@ -31,10 +31,7 @@ export function StudentTheoryWorkspace() {
   const { data, theoryAssignmentsForStudent } = useDemoStore();
   const items = theoryAssignmentsForStudent(data.currentStudentId);
   const ordered = groupStudentTheories(items).flatMap((section) => section.items);
-  const learning = studentLearningLock(
-    data.tariffAssignments,
-    data.currentStudentId
-  );
+  const learning = studentLearningLock(data, data.currentStudentId);
 
   return (
     <div className="space-y-5">

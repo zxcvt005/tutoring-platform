@@ -235,6 +235,12 @@ export async function POST(request: Request) {
           );
         case "upsertTariff":
           return m.upsertTariffAction(db, ctx, p);
+        case "listLearningDirections":
+          return m.listLearningDirectionsAction(db, ctx);
+        case "upsertLearningDirection":
+          return m.upsertLearningDirectionAction(db, ctx, p);
+        case "archiveLearningDirection":
+          return m.archiveLearningDirectionAction(db, ctx, p);
         case "listProducts":
           return m.listProductsAction(db, ctx);
         case "upsertProduct":
@@ -290,13 +296,19 @@ export async function POST(request: Request) {
         case "adminRejectPayment":
           return m.adminRejectPaymentAction(db, ctx, p);
         case "studentRequestPayment":
-          return m.studentPayAction(
-            db,
-            ctx,
-            p.assignmentId ? String(p.assignmentId) : undefined
-          );
+          return m.studentPayAction(db, ctx, p);
         case "studentStartCheckout":
-          return m.studentStartCheckoutAction(db, ctx);
+          return m.studentStartCheckoutAction(db, ctx, p);
+        case "createLessonCheckout":
+          return m.createLessonCheckoutAction(db, ctx, p);
+        case "refreshLessonOrderPayment":
+          return m.refreshLessonOrderPaymentAction(db, ctx, p);
+        case "adminRefundLessonPayment":
+          return m.adminRefundLessonPaymentAction(db, ctx, p);
+        case "adminAdjustLessonBalance":
+          return m.adminAdjustLessonBalanceAction(db, ctx, p);
+        case "getCommerceIncomeOverview":
+          return m.getCommerceIncomeOverviewAction(db, ctx);
         case "getIncomeOverview":
           return m.getIncomeOverviewAction(db, ctx);
         case "getTeacherPayRates":
@@ -379,6 +391,8 @@ export async function POST(request: Request) {
       "resetLessonConduct",
       "studentRequestPayment",
       "studentStartCheckout",
+      "createLessonCheckout",
+      "refreshLessonOrderPayment",
       "assignTariff",
       "setStudentPurchaseTariff",
       "adminMarkPaymentPaid",

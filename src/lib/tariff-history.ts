@@ -42,9 +42,10 @@ export const tariffHistoryStatusLabel: Record<
 export const paymentRecordStatusLabel: Record<PaymentRecordStatus, string> = {
   paid: "Оплачен",
   pending: "Оплата на проверке",
-  rejected: "Оплата отклонена",
   cancelled: "Отменён",
   failed: "Ошибка",
+  expired: "Истёк",
+  refunded: "Возврат",
 };
 
 export function latestPaymentForAssignment(
@@ -53,7 +54,7 @@ export function latestPaymentForAssignment(
 ): PaymentRecord | null {
   return (
     [...payments]
-      .filter((p) => p.assignmentId === assignmentId)
+      .filter((p) => p.orderId === assignmentId)
       .sort(
         (a, b) =>
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -116,7 +117,7 @@ export function assignmentHistoryStatus(
   _opts?: { hasQueuedPaid?: boolean }
 ): TariffHistoryDisplayStatus {
   void _opts;
-  if (payment?.status === "rejected") return "rejected";
+  if (payment?.status === "failed") return "rejected";
   if (payment?.status === "pending" || assignment.status === "pending_payment") {
     return "review";
   }

@@ -68,10 +68,7 @@ function TestTakeForm({
   );
   const title = getAssignmentTitle(assignment, hw);
 
-  const learning = studentLearningLock(
-    data.tariffAssignments,
-    assignment.studentId
-  );
+  const learning = studentLearningLock(data, assignment.studentId);
   const canEdit =
     !learning.locked &&
     (assignment.status === "assigned" ||

@@ -121,6 +121,7 @@ export type DemoStoreValue = {
     startTime: string;
     durationMin: number;
     subject?: string;
+    directionId?: string;
     activeFrom?: string;
     activeUntil?: string;
   }) => Promise<OkResult>;
@@ -338,7 +339,10 @@ const EMPTY_DATA: DemoData = {
   intensiveAssignments: [],
   mockExams: [],
   mockExamResults: [],
+  learningDirections: [],
   tariffs: [],
+  lessonOrders: [],
+  studentDirectionBalances: [],
   tariffAssignments: [],
   payments: [],
   products: [],

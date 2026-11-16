@@ -33,7 +33,7 @@ export function AuditoriaHomePanel() {
   const href = useStudentCabinetHref();
   const studentId = data.currentStudentId;
   const student = data.students.find((s) => s.id === studentId);
-  const learning = studentLearningLock(data.tariffAssignments, studentId);
+  const learning = studentLearningLock(data, studentId);
   const teacher = data.teachers.find((t) => t.id === student?.teacherId);
 
   const lessons = useMemo(

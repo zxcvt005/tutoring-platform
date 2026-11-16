@@ -2,16 +2,18 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 
 import { canDebitFromRemaining } from "@/lib/tariff-warnings";
-import type { AttendanceStatus, StudentPackageStatus } from "@/lib/types";
+import type { AttendanceStatus, StudentDirectionBalance } from "@/lib/types";
 import type { AuthContext } from "@/server/authz/context";
 import { badRequest } from "@/server/errors";
 import {
+  lessonDebitState,
   lessonScheduleExceptions,
-  studentTariffAssignments,
-  tariffLessonDebitState,
-  tariffLessonLedger,
+  lessons,
+  studentLessonLedger,
 } from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
+
+export { canDebitFromRemaining };
 
 function newId(prefix: string) {
   return `${prefix}_${randomBytes(6).toString("hex")}`;
@@ -21,103 +23,91 @@ export function attendanceDebitsLesson(status: AttendanceStatus): boolean {
   return status === "present" || status === "absent_unexcused";
 }
 
-export type AssignmentBalance = {
-  used: number;
-  remaining: number | null;
-  limit: number | null;
+export type DirectionBalance = {
+  remaining: number;
 };
 
-export function derivePackageStatus(input: {
-  status: string;
-  paymentStatus: string;
-  remaining: number | null;
-}): StudentPackageStatus {
-  if (input.status === "cancelled") return "cancelled";
-  if (input.status === "paused") return "paused";
-  if (input.status === "queued") return "queued";
-  if (input.paymentStatus !== "paid" || input.status === "pending_payment") {
-    return "unpaid";
-  }
-  if (input.remaining != null && input.remaining < 0) return "debt";
-  if (input.remaining != null && input.remaining <= 0) return "exhausted";
-  return "active";
-}
-
-export async function sumLedgerDelta(
+export async function sumDirectionLedgerDelta(
   db: AppDb,
-  assignmentId: string
+  organizationId: string,
+  studentId: string,
+  directionId: string
 ): Promise<number> {
   const [row] = await db
     .select({
-      total: sql<number>`coalesce(sum(${tariffLessonLedger.delta}), 0)`,
+      total: sql<number>`coalesce(sum(${studentLessonLedger.delta}), 0)`,
     })
-    .from(tariffLessonLedger)
-    .where(eq(tariffLessonLedger.assignmentId, assignmentId));
+    .from(studentLessonLedger)
+    .where(
+      and(
+        eq(studentLessonLedger.organizationId, organizationId),
+        eq(studentLessonLedger.studentId, studentId),
+        eq(studentLessonLedger.directionId, directionId)
+      )
+    );
   return Number(row?.total ?? 0);
 }
 
-export function balanceFromDelta(
-  delta: number,
-  lessonsLimitSnapshot: number | null | undefined
-): AssignmentBalance {
-  const used = Math.max(0, -delta);
-  const limit =
-    lessonsLimitSnapshot == null ? null : Number(lessonsLimitSnapshot);
-  const remaining = limit == null ? null : limit + delta;
-  return { used, remaining, limit };
-}
-
-export async function getAssignmentBalance(
+export async function getDirectionBalance(
   db: AppDb,
-  assignmentId: string,
-  lessonsLimitSnapshot: number | null | undefined
-): Promise<AssignmentBalance> {
-  const delta = await sumLedgerDelta(db, assignmentId);
-  return balanceFromDelta(delta, lessonsLimitSnapshot);
+  organizationId: string,
+  studentId: string,
+  directionId: string
+): Promise<DirectionBalance> {
+  const remaining = await sumDirectionLedgerDelta(
+    db,
+    organizationId,
+    studentId,
+    directionId
+  );
+  return { remaining };
 }
 
-export async function getLedgerDeltaByAssignmentIds(
-  db: AppDb,
-  assignmentIds: string[]
-): Promise<Map<string, number>> {
-  const map = new Map<string, number>();
-  if (assignmentIds.length === 0) return map;
-  const rows = await db
-    .select({
-      assignmentId: tariffLessonLedger.assignmentId,
-      total: sql<number>`coalesce(sum(${tariffLessonLedger.delta}), 0)`,
-    })
-    .from(tariffLessonLedger)
-    .where(inArray(tariffLessonLedger.assignmentId, assignmentIds))
-    .groupBy(tariffLessonLedger.assignmentId);
-  for (const r of rows) map.set(r.assignmentId, Number(r.total ?? 0));
-  return map;
-}
-
-export async function findDebitAssignment(
+export async function getBalancesByStudent(
   db: AppDb,
   organizationId: string,
   studentId: string
-) {
-  const [row] = await db
-    .select()
-    .from(studentTariffAssignments)
+): Promise<StudentDirectionBalance[]> {
+  const rows = await db
+    .select({
+      directionId: studentLessonLedger.directionId,
+      balance: sql<number>`coalesce(sum(${studentLessonLedger.delta}), 0)`,
+    })
+    .from(studentLessonLedger)
     .where(
       and(
-        eq(studentTariffAssignments.organizationId, organizationId),
-        eq(studentTariffAssignments.studentId, studentId),
-        eq(studentTariffAssignments.status, "active"),
-        eq(studentTariffAssignments.paymentStatus, "paid")
+        eq(studentLessonLedger.organizationId, organizationId),
+        eq(studentLessonLedger.studentId, studentId)
       )
     )
-    .orderBy(sql`${studentTariffAssignments.startsAt} desc`)
+    .groupBy(studentLessonLedger.directionId);
+
+  return rows.map((r) => ({
+    directionId: r.directionId,
+    balance: Number(r.balance ?? 0),
+  }));
+}
+
+async function loadLessonDirection(
+  db: AppDb,
+  organizationId: string,
+  lessonId: string
+) {
+  const [lesson] = await db
+    .select({
+      id: lessons.id,
+      directionId: lessons.directionId,
+      organizationId: lessons.organizationId,
+    })
+    .from(lessons)
+    .where(eq(lessons.id, lessonId))
     .limit(1);
-  return row ?? null;
+  if (!lesson || lesson.organizationId !== organizationId) return null;
+  return lesson;
 }
 
 /**
- * Применяет правило списания к журналу. Идемпотентно при том же статусе.
- * Сторно — отдельная строка журнала, история не удаляется.
+ * Применяет правило списания к журналу по направлению занятия. Идемпотентно при том же статусе.
  */
 export async function applyAttendanceBalance(
   db: AppDb,
@@ -128,42 +118,46 @@ export async function applyAttendanceBalance(
     attendanceStatus: AttendanceStatus;
     lessonCancelled: boolean;
   }
-): Promise<AssignmentBalance | null> {
+): Promise<DirectionBalance | null> {
+  const lesson = await loadLessonDirection(
+    db,
+    ctx.organizationId,
+    input.lessonId
+  );
+  if (!lesson) return null;
+
   if (input.lessonCancelled) {
     await reverseLessonDebits(db, ctx, input.lessonId);
-    const assignment = await findDebitAssignment(
+    if (!lesson.directionId) return null;
+    return getDirectionBalance(
       db,
       ctx.organizationId,
-      input.studentId
-    );
-    if (!assignment) return null;
-    return getAssignmentBalance(
-      db,
-      assignment.id,
-      assignment.lessonsLimitSnapshot
+      input.studentId,
+      lesson.directionId
     );
   }
 
+  if (!lesson.directionId) {
+    throw badRequest(
+      "Нельзя списать занятие: у урока не указано направление обучения"
+    );
+  }
+
+  const directionId = lesson.directionId;
   const shouldDebit = attendanceDebitsLesson(input.attendanceStatus);
-  const assignment = await findDebitAssignment(
-    db,
-    ctx.organizationId,
-    input.studentId
-  );
-  if (!assignment) return null;
 
   await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select id from student_tariff_assignments where id = ${assignment.id} for update`
+      sql`select id from students where id = ${input.studentId} and organization_id = ${ctx.organizationId} for update`
     );
 
     const [state] = await tx
       .select()
-      .from(tariffLessonDebitState)
+      .from(lessonDebitState)
       .where(
         and(
-          eq(tariffLessonDebitState.lessonId, input.lessonId),
-          eq(tariffLessonDebitState.studentId, input.studentId)
+          eq(lessonDebitState.lessonId, input.lessonId),
+          eq(lessonDebitState.studentId, input.studentId)
         )
       )
       .limit(1);
@@ -172,14 +166,16 @@ export async function applyAttendanceBalance(
     if (!shouldDebit && !state) return;
 
     if (shouldDebit && !state) {
-      const current = await getAssignmentBalance(
-        tx as unknown as AppDb,
-        assignment.id,
-        assignment.lessonsLimitSnapshot
+      const txDb = tx as unknown as AppDb;
+      const current = await getDirectionBalance(
+        txDb,
+        ctx.organizationId,
+        input.studentId,
+        directionId
       );
       if (!canDebitFromRemaining(current.remaining)) {
         throw badRequest(
-          "Нельзя списать занятие: занятие в долг уже использовано. Сначала продлите тариф."
+          "Нельзя списать занятие: занятие в долг уже использовано. Сначала продлите пакет."
         );
       }
       const ledgerId = newId("led");
@@ -187,21 +183,20 @@ export async function applyAttendanceBalance(
         input.attendanceStatus === "present"
           ? ("present" as const)
           : ("absent_unexcused" as const);
-      await tx.insert(tariffLessonLedger).values({
+      await tx.insert(studentLessonLedger).values({
         id: ledgerId,
         organizationId: ctx.organizationId,
-        assignmentId: assignment.id,
-        lessonId: input.lessonId,
         studentId: input.studentId,
+        directionId,
+        lessonId: input.lessonId,
         delta: -1,
         reason,
-        attendanceStatus: input.attendanceStatus,
         actorUserId: ctx.userId,
       });
-      await tx.insert(tariffLessonDebitState).values({
+      await tx.insert(lessonDebitState).values({
         lessonId: input.lessonId,
         studentId: input.studentId,
-        assignmentId: assignment.id,
+        directionId,
         ledgerEntryId: ledgerId,
         updatedAt: new Date(),
       });
@@ -210,51 +205,34 @@ export async function applyAttendanceBalance(
 
     if (!shouldDebit && state) {
       const reversalId = newId("led");
-      await tx.insert(tariffLessonLedger).values({
+      await tx.insert(studentLessonLedger).values({
         id: reversalId,
         organizationId: ctx.organizationId,
-        assignmentId: state.assignmentId,
-        lessonId: input.lessonId,
         studentId: input.studentId,
+        directionId: state.directionId,
+        lessonId: input.lessonId,
         delta: 1,
         reason: "reversal",
-        attendanceStatus: input.attendanceStatus,
         supersedesId: state.ledgerEntryId,
         actorUserId: ctx.userId,
       });
       await tx
-        .delete(tariffLessonDebitState)
+        .delete(lessonDebitState)
         .where(
           and(
-            eq(tariffLessonDebitState.lessonId, input.lessonId),
-            eq(tariffLessonDebitState.studentId, input.studentId)
+            eq(lessonDebitState.lessonId, input.lessonId),
+            eq(lessonDebitState.studentId, input.studentId)
           )
         );
     }
   });
 
-  const balance = await getAssignmentBalance(
+  return getDirectionBalance(
     db,
-    assignment.id,
-    assignment.lessonsLimitSnapshot
+    ctx.organizationId,
+    input.studentId,
+    directionId
   );
-  if (balance.remaining != null && balance.remaining < 0) {
-    const { activateQueuedIfNeeded } = await import(
-      "@/server/services/tariff-queue"
-    );
-    const activated = await activateQueuedIfNeeded(db, ctx, input.studentId);
-    if (activated.activated && activated.assignmentId) {
-      const next = await findDebitAssignment(
-        db,
-        ctx.organizationId,
-        input.studentId
-      );
-      if (next) {
-        return getAssignmentBalance(db, next.id, next.lessonsLimitSnapshot);
-      }
-    }
-  }
-  return balance;
 }
 
 export async function reverseLessonDebits(
@@ -264,34 +242,33 @@ export async function reverseLessonDebits(
 ) {
   const states = await db
     .select()
-    .from(tariffLessonDebitState)
-    .where(eq(tariffLessonDebitState.lessonId, lessonId));
+    .from(lessonDebitState)
+    .where(eq(lessonDebitState.lessonId, lessonId));
   if (states.length === 0) return;
 
   await db.transaction(async (tx) => {
     for (const state of states) {
       await tx.execute(
-        sql`select id from student_tariff_assignments where id = ${state.assignmentId} for update`
+        sql`select id from students where id = ${state.studentId} and organization_id = ${ctx.organizationId} for update`
       );
       const reversalId = newId("led");
-      await tx.insert(tariffLessonLedger).values({
+      await tx.insert(studentLessonLedger).values({
         id: reversalId,
         organizationId: ctx.organizationId,
-        assignmentId: state.assignmentId,
-        lessonId,
         studentId: state.studentId,
+        directionId: state.directionId,
+        lessonId,
         delta: 1,
         reason: "reversal",
-        attendanceStatus: null,
         supersedesId: state.ledgerEntryId,
         actorUserId: ctx.userId,
       });
       await tx
-        .delete(tariffLessonDebitState)
+        .delete(lessonDebitState)
         .where(
           and(
-            eq(tariffLessonDebitState.lessonId, lessonId),
-            eq(tariffLessonDebitState.studentId, state.studentId)
+            eq(lessonDebitState.lessonId, lessonId),
+            eq(lessonDebitState.studentId, state.studentId)
           )
         );
     }
@@ -316,4 +293,34 @@ export async function recordScheduleException(
       lessonId: input.lessonId ?? null,
     })
     .onConflictDoNothing();
+}
+
+/** Суммарный остаток по нескольким направлениям (для батч-загрузки). */
+export async function getDirectionBalancesMap(
+  db: AppDb,
+  organizationId: string,
+  studentId: string,
+  directionIds: string[]
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (directionIds.length === 0) return map;
+  const rows = await db
+    .select({
+      directionId: studentLessonLedger.directionId,
+      total: sql<number>`coalesce(sum(${studentLessonLedger.delta}), 0)`,
+    })
+    .from(studentLessonLedger)
+    .where(
+      and(
+        eq(studentLessonLedger.organizationId, organizationId),
+        eq(studentLessonLedger.studentId, studentId),
+        inArray(studentLessonLedger.directionId, directionIds)
+      )
+    )
+    .groupBy(studentLessonLedger.directionId);
+  for (const r of rows) map.set(r.directionId, Number(r.total ?? 0));
+  for (const id of directionIds) {
+    if (!map.has(id)) map.set(id, 0);
+  }
+  return map;
 }

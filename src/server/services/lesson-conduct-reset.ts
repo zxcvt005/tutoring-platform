@@ -12,12 +12,11 @@ import {
   lessonStudents,
   lessonTopics,
   lessons,
-  tariffLessonDebitState,
-  tariffLessonLedger,
   testAssignments,
 } from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
 import { forbidden, notFound } from "@/server/errors";
+import { reverseLessonDebits } from "@/server/services/lesson-balance";
 import { recordChatSystemEventSafe } from "@/server/services/chat-events";
 import { settleLessonPayroll } from "@/server/services/teacher-payroll-service";
 
@@ -96,35 +95,7 @@ export async function resetLessonConduct(
       return { ok: true as const, alreadyReset: true as const };
     }
 
-    const debitStates = await conn
-      .select()
-      .from(tariffLessonDebitState)
-      .where(eq(tariffLessonDebitState.lessonId, id));
-    for (const state of debitStates) {
-      await conn.execute(
-        sql`select id from student_tariff_assignments where id = ${state.assignmentId} for update`
-      );
-      await conn.insert(tariffLessonLedger).values({
-        id: newId("led"),
-        organizationId: ctx.organizationId,
-        assignmentId: state.assignmentId,
-        lessonId: id,
-        studentId: state.studentId,
-        delta: 1,
-        reason: "reversal",
-        attendanceStatus: null,
-        supersedesId: state.ledgerEntryId,
-        actorUserId: ctx.userId,
-      });
-      await conn
-        .delete(tariffLessonDebitState)
-        .where(
-          and(
-            eq(tariffLessonDebitState.lessonId, id),
-            eq(tariffLessonDebitState.studentId, state.studentId)
-          )
-        );
-    }
+    await reverseLessonDebits(conn, ctx, id);
 
     await conn.delete(attendances).where(eq(attendances.lessonId, id));
     await conn.delete(lessonTopics).where(eq(lessonTopics.lessonId, id));

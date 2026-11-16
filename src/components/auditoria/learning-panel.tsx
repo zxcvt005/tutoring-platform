@@ -39,7 +39,7 @@ export function AuditoriaLearningPanel() {
   } = useDemoStore();
   const studentId = data.currentStudentId;
   const student = data.students.find((s) => s.id === studentId);
-  const learning = studentLearningLock(data.tariffAssignments, studentId);
+  const learning = studentLearningLock(data, studentId);
   const teacherId = student?.teacherId ?? "";
   const [openHw, setOpenHw] = useState<HomeworkAssignment | null>(null);
 

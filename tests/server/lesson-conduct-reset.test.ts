@@ -7,7 +7,7 @@ import {
   lessonScheduleExceptions,
   lessonTopics,
   lessons,
-  tariffLessonLedger,
+  studentLessonLedger,
   teacherPayrollEntries,
   teacherPayrollSlots,
   testAssignments,
@@ -23,10 +23,9 @@ import {
 } from "@/server/services/platform-mutations";
 import { setTeacherPayRates } from "@/server/services/teacher-payroll-service";
 import {
-  adminMarkPaymentPaid,
-  assignTariffToStudent,
-  upsertTariff,
-} from "@/server/services/tariffs-service";
+  physicsDirectionId,
+  seedPaidLessons,
+} from "../helpers/commerce";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
 
 const RATES = { 1: 120_000, 2: 160_000, 3: 200_000, 4: 240_000, 5: 280_000 };
@@ -55,28 +54,20 @@ describe("reset lesson conduct", () => {
     director: Awaited<ReturnType<typeof asRole>>,
     studentId: string
   ) {
-    const tariff = await upsertTariff(db, director, {
-      name: "Пакет сброса",
-      price: 1000,
-      durationDays: 28,
-      lessonsLimit: 8,
-      weeklyFrequency: 2,
-      features: ["individual_lessons", "homework"],
+    const directionId = await physicsDirectionId(db, director.organizationId);
+    await seedPaidLessons(db, director, studentId, {
+      directionId,
+      lessons: 8,
+      tariffName: "Пакет сброса",
     });
-    const assigned = await assignTariffToStudent(db, director, {
-      studentId,
-      tariffId: tariff.id,
-    });
-    await adminMarkPaymentPaid(db, director, {
-      paymentId: assigned.paymentId!,
-      reason: "Тест сброса",
-    });
+    return directionId;
   }
 
   async function pastLesson(
     db: Awaited<ReturnType<typeof createTestDb>>["db"],
     teacher: Awaited<ReturnType<typeof asRole>>,
     studentId: string,
+    directionId: string,
     hour = 16
   ) {
     const startsAt = new Date(Date.now() + 2 * 86_400_000);
@@ -85,6 +76,7 @@ describe("reset lesson conduct", () => {
     const created = await upsertLesson(db, teacher, {
       teacherId: "t1",
       studentIds: [studentId],
+      directionId,
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
       status: "planned",
@@ -106,8 +98,8 @@ describe("reset lesson conduct", () => {
   ) {
     const ledger = await db
       .select()
-      .from(tariffLessonLedger)
-      .where(eq(tariffLessonLedger.lessonId, lessonId));
+      .from(studentLessonLedger)
+      .where(eq(studentLessonLedger.lessonId, lessonId));
     return ledger.reduce((sum, row) => sum + row.delta, 0);
   }
 
@@ -116,8 +108,8 @@ describe("reset lesson conduct", () => {
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
     const anna = await asRole(t.db, "anna@example.com");
-    await pay(t.db, director, "s11");
-    const lessonId = await pastLesson(t.db, anna, "s11");
+    const directionId = await pay(t.db, director, "s11");
+    const lessonId = await pastLesson(t.db, anna, "s11", directionId);
     await setLessonTopics(t.db, anna, {
       lessonId,
       topics: [{ title: "Кинематика" }],
@@ -161,12 +153,15 @@ describe("reset lesson conduct", () => {
     const t = await createTestDb();
     close = t.close;
     const anna = await asRole(t.db, "anna@example.com");
-    const lessonId = await pastLesson(t.db, anna, "s11", 15);
+    const director = await asRole(t.db, "director@demo.local");
+    const directionId = await physicsDirectionId(t.db, director.organizationId);
+    const lessonId = await pastLesson(t.db, anna, "s11", directionId, 15);
     const [before] = await t.db.select().from(lessons).where(eq(lessons.id, lessonId));
     await upsertLesson(t.db, anna, {
       id: lessonId,
       teacherId: before.teacherId,
       studentIds: ["s11"],
+      directionId,
       startsAt: before.startsAt.toISOString(),
       endsAt: before.endsAt.toISOString(),
       status: "cancelled",
@@ -190,8 +185,8 @@ describe("reset lesson conduct", () => {
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
     const anna = await asRole(t.db, "anna@example.com");
-    await pay(t.db, director, "s11");
-    const lessonId = await pastLesson(t.db, anna, "s11", 14);
+    const directionId = await pay(t.db, director, "s11");
+    const lessonId = await pastLesson(t.db, anna, "s11", directionId, 14);
     await setLessonTopics(t.db, anna, {
       lessonId,
       topics: [{ title: "Статика" }],
@@ -249,8 +244,8 @@ describe("reset lesson conduct", () => {
     const director = await asRole(t.db, "director@demo.local");
     await setTeacherPayRates(t.db, director, { teacherId: "t1", rates: RATES });
     const anna = await asRole(t.db, "anna@example.com");
-    await pay(t.db, director, "s1");
-    const lessonId = await pastLesson(t.db, anna, "s1", 11);
+    const directionId = await pay(t.db, director, "s1");
+    const lessonId = await pastLesson(t.db, anna, "s1", directionId, 11);
     await setLessonTopics(t.db, anna, {
       lessonId,
       topics: [{ title: "Оптика" }],
@@ -275,8 +270,10 @@ describe("reset lesson conduct", () => {
   it("forbids a student from resetting a lesson", async () => {
     const t = await createTestDb();
     close = t.close;
+    const director = await asRole(t.db, "director@demo.local");
     const anna = await asRole(t.db, "anna@example.com");
-    const lessonId = await pastLesson(t.db, anna, "s11", 10);
+    const directionId = await physicsDirectionId(t.db, director.organizationId);
+    const lessonId = await pastLesson(t.db, anna, "s11", directionId, 10);
     const student = await asRole(t.db, "s11@demo.local");
     await expect(resetLessonConduct(t.db, student, lessonId)).rejects.toMatchObject({
       status: 403,

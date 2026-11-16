@@ -121,6 +121,7 @@ export function ScheduleWorkspace({
         onOpenChange={setDialogOpen}
         teacherId={teacherId}
         students={students}
+        learningDirections={data.learningDirections}
         initial={editing}
         onSave={(lesson) => upsertLesson(lesson)}
         onSaveRecurring={(input) => createRecurringSchedule(input)}

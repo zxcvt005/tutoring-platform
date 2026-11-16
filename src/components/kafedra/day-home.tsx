@@ -33,8 +33,9 @@ import { topicsForLesson } from "@/lib/lesson-topics";
 import { canCompleteAttendanceMark } from "@/lib/lesson-mark-requirements";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { TariffBalanceNotice } from "@/components/tariff-balance-notice";
-import { currentAssignmentForStudent } from "@/lib/tariff-package";
-import { assignmentTariffAlert } from "@/lib/tariff-warnings";
+import { studentMinDirectionRemaining } from "@/lib/learning-lock";
+import { tariffBalanceAlert } from "@/lib/tariff-warnings";
+import type { StudentDirectionBalanceRow } from "@/lib/types";
 import type { Attendance, AttendanceStatus, Lesson, Topic } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -274,7 +275,7 @@ export function KafedraDayHome() {
                     lesson={lesson}
                     attendances={data.attendances}
                     nameOf={nameOf}
-                    tariffAssignments={data.tariffAssignments}
+                    directionBalances={data.studentDirectionBalances ?? []}
                     now={now}
                     highlightNeedsMark
                     showDate={false}
@@ -317,7 +318,7 @@ export function KafedraDayHome() {
             onOpen={setOpenLessonId}
             onClose={() => setOpenLessonId(null)}
             cardProps={{
-              tariffAssignments: data.tariffAssignments,
+              directionBalances: data.studentDirectionBalances ?? [],
               now,
               busyKey,
               markErrors,
@@ -340,7 +341,7 @@ export function KafedraDayHome() {
             onOpen={setOpenLessonId}
             onClose={() => setOpenLessonId(null)}
             cardProps={{
-              tariffAssignments: data.tariffAssignments,
+              directionBalances: data.studentDirectionBalances ?? [],
               now,
               busyKey,
               markErrors,
@@ -376,6 +377,7 @@ export function KafedraDayHome() {
         onOpenChange={(o) => !o && setEditLesson(null)}
         teacherId={teacherId}
         students={students}
+        learningDirections={data.learningDirections}
         initial={editLesson ?? undefined}
         onSave={(lesson) => upsertLesson(lesson)}
         onDelete={deleteLesson}
@@ -416,7 +418,7 @@ function lessonTopicText(lesson: Lesson, topics: Topic[]) {
 }
 
 type TodayCardHandlers = {
-  tariffAssignments: Parameters<typeof currentAssignmentForStudent>[0];
+  directionBalances: StudentDirectionBalanceRow[];
   now: Date;
   busyKey: string | null;
   markErrors: Record<string, string>;
@@ -467,7 +469,7 @@ function TodayColumn({
                 lesson={lesson}
                 attendances={attendances}
                 nameOf={nameOf}
-                tariffAssignments={cardProps.tariffAssignments}
+                directionBalances={cardProps.directionBalances}
                 now={cardProps.now}
                 highlightNeedsMark={false}
                 showDate={false}
@@ -566,7 +568,7 @@ function LessonCard({
   lesson,
   attendances,
   nameOf,
-  tariffAssignments,
+  directionBalances,
   now,
   highlightNeedsMark,
   showDate,
@@ -584,7 +586,7 @@ function LessonCard({
   lesson: Lesson;
   attendances: Attendance[];
   nameOf: (id: string) => string;
-  tariffAssignments: Parameters<typeof currentAssignmentForStudent>[0];
+  directionBalances: StudentDirectionBalanceRow[];
   now: Date;
   highlightNeedsMark: boolean;
   showDate: boolean;
@@ -682,7 +684,15 @@ function LessonCard({
           const att = attendances.find(
             (a) => a.lessonId === lesson.id && a.studentId === sid
           );
-          const asg = currentAssignmentForStudent(tariffAssignments, sid);
+          const directionId = lesson.directionId ?? null;
+          const balRow = directionId
+            ? directionBalances.find(
+                (b) => b.studentId === sid && b.directionId === directionId
+              )
+            : null;
+          const remaining =
+            balRow?.remaining ??
+            studentMinDirectionRemaining(directionBalances, sid);
           const waiting = studentNeedsAttendanceMark(
             lesson,
             sid,
@@ -706,7 +716,7 @@ function LessonCard({
           const cancelBusy =
             busyKey === `cancel:${lesson.id}` || busyKey === key;
           const debitBlocked =
-            !assignmentTariffAlert(asg).allowsDebit &&
+            !tariffBalanceAlert(remaining).allowsDebit &&
             !isFinalAttendanceStatus(att?.status);
           const errorText =
             markErrors[key] ?? markErrors[`cancel:${lesson.id}`];
@@ -716,18 +726,15 @@ function LessonCard({
                 <div>
                   <p className="text-sm font-medium">{nameOf(sid)}</p>
                   <p className="text-xs text-muted-foreground">
-                    {asg?.lessonsRemaining != null
-                      ? `Остаток: ${asg.lessonsRemaining}`
-                      : asg
-                        ? "Остаток: —"
-                        : "Нет тарифа"}
-                    {asg?.lessonsUsed != null
-                      ? ` · использовано ${asg.lessonsUsed}`
-                      : ""}
+                    {remaining != null
+                      ? `Остаток: ${remaining}`
+                      : directionId
+                        ? "Остаток: 0"
+                        : "Направление урока не задано"}
+                    {balRow?.used != null ? ` · использовано ${balRow.used}` : ""}
                   </p>
                   <TariffBalanceNotice
-                    remaining={asg?.lessonsRemaining}
-                    packageStatus={asg?.packageStatus}
+                    remaining={remaining}
                     compact
                     className="mt-1"
                   />

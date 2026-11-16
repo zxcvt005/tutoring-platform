@@ -26,10 +26,7 @@ export function StudentIntensiveWorkspace() {
   const { data, intensiveAssignmentsForStudent } = useDemoStore();
   const href = useStudentCabinetHref();
   const items = intensiveAssignmentsForStudent(data.currentStudentId);
-  const learning = studentLearningLock(
-    data.tariffAssignments,
-    data.currentStudentId
-  );
+  const learning = studentLearningLock(data, data.currentStudentId);
   const teacherName =
     data.teachers.find((t) => t.id === data.currentTeacherId)?.fullName ??
     "Преподаватель";

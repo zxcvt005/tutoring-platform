@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { canManageSchoolKnowledgeBase } from "@/lib/auth/school-knowledge";
 import type { AuthContext } from "@/server/authz/context";
@@ -9,9 +9,12 @@ import {
   attendances,
   lessonStudents,
   lessons,
+  learningDirections,
+  lessonOrders,
   payments,
-  studentTariffAssignments,
+  studentLessonLedger,
   students,
+  tariffPurchaseOptions,
   tariffs,
   teachers,
   testAnswerKeys,
@@ -24,11 +27,6 @@ import {
   users,
 } from "@/server/db/schema";
 import { publicMediaUrl } from "@/server/media/storage";
-import {
-  balanceFromDelta,
-  derivePackageStatus,
-  getLedgerDeltaByAssignmentIds,
-} from "@/server/services/lesson-balance";
 import { refreshExpiredAssignments } from "@/server/services/tariffs-service";
 import type { AppDb } from "@/server/db/types";
 import { isMissedNextLesson } from "@/lib/homework-missed";
@@ -50,13 +48,17 @@ import type {
   HomeworkAssignment,
   HomeworkAssignmentStatus,
   Lesson,
+  LearningDirection,
+  LessonOrder,
   PaymentRecord,
   Product,
   Student,
   StudentAnswer,
-  StudentTariffAssignment,
+  StudentDirectionBalance,
+  StudentDirectionBalanceRow,
   Tariff,
   TariffFeatureKey,
+  TariffPurchaseOption,
   Teacher,
   Topic,
   TopicSection,
@@ -498,7 +500,6 @@ export async function buildBootstrap(
       userId: s.userId,
       accountEmail: s.userId ? accountEmailById.get(s.userId) ?? null : null,
       accountRole: s.userId ? ("student" as const) : null,
-      purchaseTariffId: s.purchaseTariffId ?? null,
     };
     // Ученик не получает внутренние заметки и контакты родителей
     if (ctx.role === "student") {
@@ -520,6 +521,7 @@ export async function buildBootstrap(
   const mappedLessons: Lesson[] = lessonRows.map((l) => ({
     id: l.id,
     teacherId: l.teacherId,
+    directionId: l.directionId ?? null,
     studentIds: studentsByLesson.get(l.id) ?? [],
     subject: l.subject ?? undefined,
     startsAt: l.startsAt.toISOString(),
@@ -588,53 +590,96 @@ export async function buildBootstrap(
     };
   });
 
+  const directionRows = await db
+    .select()
+    .from(learningDirections)
+    .where(eq(learningDirections.organizationId, orgId));
+  const directionById = new Map(directionRows.map((d) => [d.id, d]));
+  const mappedDirections: LearningDirection[] = directionRows.map((d) => ({
+    id: d.id,
+    name: d.name,
+    slug: d.slug,
+    status: d.status as LearningDirection["status"],
+    createdAt: d.createdAt.toISOString(),
+    updatedAt: d.updatedAt.toISOString(),
+  }));
+
   let tariffRows = await db
     .select()
     .from(tariffs)
     .where(eq(tariffs.organizationId, orgId));
-  let assignmentRowsTariff = await db
+  let orderRows = await db
     .select()
-    .from(studentTariffAssignments)
-    .where(eq(studentTariffAssignments.organizationId, orgId));
+    .from(lessonOrders)
+    .where(eq(lessonOrders.organizationId, orgId));
   let paymentRows = await db
     .select()
     .from(payments)
     .where(eq(payments.organizationId, orgId));
 
   if (ctx.role === "student" && ctx.studentId) {
-    assignmentRowsTariff = assignmentRowsTariff.filter(
-      (a) => a.studentId === ctx.studentId
-    );
+    orderRows = orderRows.filter((o) => o.studentId === ctx.studentId);
     paymentRows = paymentRows.filter((p) => p.studentId === ctx.studentId);
-    const tariffIds = new Set(assignmentRowsTariff.map((a) => a.tariffId));
-    const purchaseId = studentRows[0]?.purchaseTariffId;
-    if (purchaseId) tariffIds.add(purchaseId);
-    tariffRows = tariffRows.filter((t) => tariffIds.has(t.id));
+    tariffRows = tariffRows.filter((t) => t.status === "active");
   }
 
   if (ctx.role === "teacher") {
     const studentIds = new Set(studentRows.map((s) => s.id));
-    assignmentRowsTariff = assignmentRowsTariff.filter((a) =>
-      studentIds.has(a.studentId)
-    );
+    orderRows = orderRows.filter((o) => studentIds.has(o.studentId));
     paymentRows = [];
-    const tariffIds = new Set(assignmentRowsTariff.map((a) => a.tariffId));
-    for (const student of studentRows) {
-      if (student.purchaseTariffId) tariffIds.add(student.purchaseTariffId);
-    }
-    tariffRows = tariffRows.filter((t) => tariffIds.has(t.id));
+    const tariffIds = new Set(orderRows.map((o) => o.tariffId));
+    tariffRows = tariffRows.filter(
+      (t) => tariffIds.has(t.id) || t.status === "active"
+    );
   }
 
   if (ctx.role === "press") {
     paymentRows = [];
+    orderRows = [];
+    tariffRows = [];
   }
 
-  const assignedCount = new Map<string, number>();
-  for (const a of await db
+  const optionRows = await db
     .select()
-    .from(studentTariffAssignments)
-    .where(eq(studentTariffAssignments.organizationId, orgId))) {
-    assignedCount.set(a.tariffId, (assignedCount.get(a.tariffId) ?? 0) + 1);
+    .from(tariffPurchaseOptions)
+    .where(eq(tariffPurchaseOptions.organizationId, orgId));
+  const optionsByTariff = new Map<string, TariffPurchaseOption[]>();
+  for (const opt of optionRows) {
+    if (ctx.role === "press") continue;
+    if (
+      (ctx.role === "student" || ctx.role === "teacher") &&
+      !tariffRows.some((t) => t.id === opt.tariffId)
+    ) {
+      continue;
+    }
+    const list = optionsByTariff.get(opt.tariffId) ?? [];
+    list.push({
+      id: opt.id,
+      tariffId: opt.tariffId,
+      lessonsCount: opt.lessonsCount,
+      totalPrice: Number(opt.totalPrice),
+      sortOrder: opt.sortOrder,
+      isActive: opt.isActive,
+      createdAt: opt.createdAt.toISOString(),
+      updatedAt: opt.updatedAt.toISOString(),
+    });
+    optionsByTariff.set(opt.tariffId, list);
+  }
+
+  const activeOrderCount = new Map<string, number>();
+  const allOrders =
+    ctx.role === "press"
+      ? []
+      : await db
+          .select({
+            tariffId: lessonOrders.tariffId,
+            status: lessonOrders.status,
+          })
+          .from(lessonOrders)
+          .where(eq(lessonOrders.organizationId, orgId));
+  for (const o of allOrders) {
+    if (o.status !== "awaiting_payment" && o.status !== "paid") continue;
+    activeOrderCount.set(o.tariffId, (activeOrderCount.get(o.tariffId) ?? 0) + 1);
   }
 
   const { loadTariffProductIdsByTariff } = await import(
@@ -642,71 +687,115 @@ export async function buildBootstrap(
   );
   const productIdsByTariff = await loadTariffProductIdsByTariff(db, orgId);
 
-  const mappedTariffs: Tariff[] = tariffRows.map((t) => ({
-    id: t.id,
-    name: t.name,
-    price: Number(t.price),
-    currency: "RUB",
-    durationDays: t.durationDays,
-    lessonsLimit: t.lessonsLimit ?? undefined,
-    weeklyFrequency: t.weeklyFrequency,
-    includesText: t.includesText ?? undefined,
-    features: (t.features as TariffFeatureKey[]) ?? [],
-    status: t.status as Tariff["status"],
-    adminNotes:
-      ctx.role === "director" ? t.adminNotes ?? undefined : undefined,
-    assignedCount: assignedCount.get(t.id) ?? 0,
-    productIds: productIdsByTariff.get(t.id) ?? [],
-  }));
+  const mappedTariffs: Tariff[] = tariffRows.map((t) => {
+    const direction = directionById.get(t.directionId);
+    return {
+      id: t.id,
+      directionId: t.directionId,
+      name: t.name,
+      price: t.price != null ? Number(t.price) : undefined,
+      currency: "RUB",
+      durationDays: t.durationDays ?? undefined,
+      lessonsLimit: t.lessonsLimit ?? undefined,
+      weeklyFrequency: t.weeklyFrequency,
+      includesText: t.includesText ?? undefined,
+      features: (t.features as TariffFeatureKey[]) ?? [],
+      status: t.status as Tariff["status"],
+      adminNotes:
+        ctx.role === "director" ? t.adminNotes ?? undefined : undefined,
+      activeOrderCount: activeOrderCount.get(t.id) ?? 0,
+      purchaseOptions: optionsByTariff.get(t.id) ?? [],
+      productIds: productIdsByTariff.get(t.id) ?? [],
+      directionName: direction?.name,
+    };
+  });
 
-  const tariffNameById = new Map(tariffRows.map((t) => [t.id, t]));
-  const ledgerDelta = await getLedgerDeltaByAssignmentIds(
-    db,
-    assignmentRowsTariff.map((a) => a.id)
-  );
-  const mappedTariffAssignments: StudentTariffAssignment[] =
-    assignmentRowsTariff.map((a) => {
-      const t = tariffNameById.get(a.tariffId);
-      const limit = a.lessonsLimitSnapshot ?? t?.lessonsLimit ?? null;
-      const bal = balanceFromDelta(ledgerDelta.get(a.id) ?? 0, limit);
-      return {
-        id: a.id,
-        studentId: a.studentId,
-        tariffId: a.tariffId,
-        startsAt: a.startsAt.toISOString(),
-        endsAt: a.endsAt.toISOString(),
-        priceSnapshot: Number(a.priceSnapshot),
-        currency: "RUB" as const,
-        status: a.status as StudentTariffAssignment["status"],
-        paymentStatus: a.paymentStatus as StudentTariffAssignment["paymentStatus"],
-        lessonsLimitSnapshot: a.lessonsLimitSnapshot,
-        weeklyFrequencySnapshot: a.weeklyFrequencySnapshot ?? t?.weeklyFrequency,
-        durationDaysSnapshot: a.durationDaysSnapshot ?? t?.durationDays,
-        lessonsUsed: bal.used,
-        lessonsRemaining: bal.remaining,
-        packageStatus: derivePackageStatus({
-          status: a.status,
-          paymentStatus: a.paymentStatus,
-          remaining: bal.remaining,
-        }),
-        tariffName: a.tariffNameSnapshot ?? t?.name,
-        includesText: t?.includesText ?? undefined,
-      };
-    });
+  const mappedLessonOrders: LessonOrder[] = orderRows.map((o) => ({
+    id: o.id,
+    studentId: o.studentId,
+    payerUserId: o.payerUserId,
+    tariffId: o.tariffId,
+    optionId: o.optionId,
+    directionId: o.directionId,
+    tariffNameSnapshot: o.tariffNameSnapshot,
+    lessonsCount: o.lessonsCount,
+    totalAmount: Number(o.totalAmount),
+    unitPrice: Number(o.unitPrice),
+    currency: "RUB",
+    featuresSnapshot: (o.featuresSnapshot as TariffFeatureKey[]) ?? [],
+    productIdsSnapshot: (o.productIdsSnapshot as string[]) ?? [],
+    status: o.status as LessonOrder["status"],
+    paidAt: o.paidAt?.toISOString() ?? null,
+    creditedAt: o.creditedAt?.toISOString() ?? null,
+    creditLedgerEntryId: o.creditLedgerEntryId,
+    accessRevoked: o.accessRevoked,
+    createdAt: o.createdAt.toISOString(),
+    updatedAt: o.updatedAt.toISOString(),
+  }));
 
   const mappedPayments: PaymentRecord[] = paymentRows.map((p) => ({
     id: p.id,
     studentId: p.studentId,
-    assignmentId: p.assignmentId,
+    orderId: p.orderId,
     amount: Number(p.amount),
     currency: "RUB",
     status: p.status as PaymentRecord["status"],
     provider: p.provider,
     externalId: p.externalId ?? undefined,
+    paymentLinkId: p.paymentLinkId ?? undefined,
     paidAt: p.paidAt?.toISOString(),
     createdAt: p.createdAt.toISOString(),
     failureReason: p.failureReason ?? null,
   }));
+
+  const relevantStudentIds = studentRows.map((s) => s.id);
+  let studentDirectionBalances: StudentDirectionBalanceRow[] = [];
+  if (relevantStudentIds.length > 0 && ctx.role !== "press") {
+    const balanceRows = await db
+      .select({
+        studentId: studentLessonLedger.studentId,
+        directionId: studentLessonLedger.directionId,
+        remaining: sql<number>`coalesce(sum(${studentLessonLedger.delta}), 0)`,
+        used: sql<number>`coalesce(sum(case when ${studentLessonLedger.delta} < 0 then -${studentLessonLedger.delta} else 0 end), 0)`,
+      })
+      .from(studentLessonLedger)
+      .where(
+        and(
+          eq(studentLessonLedger.organizationId, orgId),
+          inArray(studentLessonLedger.studentId, relevantStudentIds)
+        )
+      )
+      .groupBy(
+        studentLessonLedger.studentId,
+        studentLessonLedger.directionId
+      );
+    studentDirectionBalances = balanceRows.map((r) => ({
+      studentId: r.studentId,
+      directionId: r.directionId,
+      remaining: Number(r.remaining ?? 0),
+      used: Number(r.used ?? 0),
+    }));
+  }
+
+  const balancesByStudent = new Map<string, StudentDirectionBalance[]>();
+  for (const row of studentDirectionBalances) {
+    const direction = directionById.get(row.directionId);
+    const list = balancesByStudent.get(row.studentId) ?? [];
+    list.push({
+      directionId: row.directionId,
+      directionName: direction?.name,
+      directionSlug: direction?.slug,
+      balance: row.remaining,
+    });
+    balancesByStudent.set(row.studentId, list);
+  }
+  for (let i = 0; i < mappedStudents.length; i++) {
+    const sid = mappedStudents[i]!.id;
+    const dirBalances = balancesByStudent.get(sid);
+    if (dirBalances?.length) {
+      mappedStudents[i] = { ...mappedStudents[i]!, directionBalances: dirBalances };
+    }
+  }
 
   const now = new Date();
   const homeworkWithMissed: HomeworkAssignment[] = homeworkAssignments.map(
@@ -808,8 +897,11 @@ export async function buildBootstrap(
     intensiveAssignments,
     mockExams,
     mockExamResults,
+    learningDirections: mappedDirections,
     tariffs: mappedTariffs,
-    tariffAssignments: mappedTariffAssignments,
+    lessonOrders: mappedLessonOrders,
+    tariffAssignments: [],
+    studentDirectionBalances,
     payments: mappedPayments,
     products: productsCatalog,
     availableProductSlugs,
@@ -830,8 +922,11 @@ export async function buildBootstrap(
       intensiveAssignments: [],
       mockExams: [],
       mockExamResults: [],
+      learningDirections: [],
       tariffs: [],
+      lessonOrders: [],
       tariffAssignments: [],
+      studentDirectionBalances: [],
       payments: [],
       products: [],
       availableProductSlugs: [],

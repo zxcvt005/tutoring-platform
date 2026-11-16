@@ -7,7 +7,7 @@ import {
   lessons,
   pressReminders,
   studentInteractionNotes,
-  tariffLessonLedger,
+  studentLessonLedger,
   teacherPayrollEntries,
   trialLessons,
 } from "@/server/db/schema";
@@ -45,6 +45,7 @@ import {
   listTrialLessonsForSchedule,
   updateTrialLesson,
 } from "@/server/services/trial-lessons-service";
+import { physicsDirectionId } from "../helpers/commerce";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
 
 describe("press cabinet", () => {
@@ -448,7 +449,7 @@ describe("press cabinet", () => {
     const director = await asRole(t.db, "director@demo.local");
     const anna = await asRole(t.db, "anna@example.com");
 
-    const ledgerBefore = await t.db.select().from(tariffLessonLedger);
+    const ledgerBefore = await t.db.select().from(studentLessonLedger);
     const payBefore = await t.db.select().from(teacherPayrollEntries);
 
     const time = slot(25, 7, 30);
@@ -458,15 +459,17 @@ describe("press cabinet", () => {
       ...time,
     });
 
-    const ledgerAfter = await t.db.select().from(tariffLessonLedger);
+    const ledgerAfter = await t.db.select().from(studentLessonLedger);
     const payAfter = await t.db.select().from(teacherPayrollEntries);
     expect(ledgerAfter.length).toBe(ledgerBefore.length);
     expect(payAfter.length).toBe(payBefore.length);
 
+    const directionId = await physicsDirectionId(t.db, director.organizationId);
     const lessonTime = slot(26, 16);
     const lesson = await upsertLesson(t.db, anna, {
       teacherId: "t1",
       studentIds: ["s1"],
+      directionId,
       ...lessonTime,
       status: "planned",
       subject: "Обычный",

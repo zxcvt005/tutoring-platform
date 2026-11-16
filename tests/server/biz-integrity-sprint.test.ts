@@ -26,6 +26,7 @@ import {
   upsertTeacher,
   upsertTopic,
 } from "@/server/services/platform-mutations";
+import { physicsDirectionId } from "../helpers/commerce";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
 
 /**
@@ -141,6 +142,7 @@ describe("biz integrity sprint scenarios", () => {
     const db = await openDb();
     const anna = await asRole(db, "anna@example.com");
     const teacherId = anna.teacherId!;
+    const directionId = await physicsDirectionId(db, anna.organizationId);
     const startsAt = new Date(Date.now() + 9 * 86_400_000);
     startsAt.setHours(18, 0, 0, 0);
     const endsAt = new Date(startsAt.getTime() + 60 * 60_000);
@@ -159,6 +161,7 @@ describe("biz integrity sprint scenarios", () => {
     const lessonA = await upsertLesson(db, anna, {
       teacherId,
       studentIds: ["s1"],
+      directionId,
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
       status: "planned",
@@ -169,6 +172,7 @@ describe("biz integrity sprint scenarios", () => {
     const lessonB = await upsertLesson(db, anna, {
       teacherId,
       studentIds: ["s11"],
+      directionId,
       startsAt: startsB.toISOString(),
       endsAt: endsB.toISOString(),
       status: "planned",

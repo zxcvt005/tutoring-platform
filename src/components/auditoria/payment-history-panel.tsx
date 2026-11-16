@@ -2,385 +2,201 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
-import { Calendar, Plus } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
-import { formatDate } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import {
-  CHANGE_TARIFF_HINT,
+  lessonOrderStatusLabel,
+  paymentRecordStatusLabel,
   STUDENT_CHECKOUT_PATH,
 } from "@/lib/payment-checkout";
-import {
-  buildTariffHistoryItems,
-  pendingReviewPaymentForStudent,
-  queuedAssignmentForStudent,
-  tariffDaysLeftLabel,
-  tariffHistoryStatusLabel,
-  tariffTermView,
-  type TariffHistoryDisplayStatus,
-  type TariffHistoryItem,
-  type TariffTermView,
-} from "@/lib/tariff-history";
-import { currentAssignmentForStudent } from "@/lib/tariff-package";
-import { assignmentTariffAlert } from "@/lib/tariff-warnings";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { useStudentCabinetHref } from "@/lib/student-tour/paths";
-import type { StudentTariffAssignment } from "@/lib/types";
+import { TariffBalanceNotice } from "@/components/tariff-balance-notice";
+import type { LessonOrder, PaymentRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const rowLabel: Record<TariffHistoryDisplayStatus, string> = {
-  current: "Активен",
-  expired: "Завершён",
-  review: tariffHistoryStatusLabel.review,
-  queued: tariffHistoryStatusLabel.queued,
-  rejected: tariffHistoryStatusLabel.rejected,
-};
-
-const rowTone: Record<TariffHistoryDisplayStatus, string> = {
-  current: "bg-pastel-mint/80",
-  expired: "bg-[#eceaf3]/85",
-  review: "bg-pastel-beige/80",
-  queued: "bg-pastel-beige/80",
-  rejected: "bg-pastel-rose/80",
-};
-
-const rowStripe: Record<TariffHistoryDisplayStatus, string> = {
-  current: "border-l-[#8fbfa0]",
-  expired: "border-l-[#c5c2d4]",
-  review: "border-l-[#e4c48a]",
-  queued: "border-l-[#e4c48a]",
-  rejected: "border-l-[#e3a4aa]",
+const rowTone: Record<string, string> = {
+  paid: "bg-pastel-mint/80",
+  awaiting_payment: "bg-pastel-beige/80",
+  pending: "bg-pastel-beige/80",
+  failed: "bg-pastel-rose/80",
+  cancelled: "bg-pastel-rose/80",
+  refunded: "bg-pastel-rose/70",
 };
 
 function money(value: number): string {
   return `${value.toLocaleString("ru-RU")} ₽`;
 }
 
-function lessonsLabel(count: number): string {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  const word =
-    mod10 === 1 && mod100 !== 11
-      ? "занятие"
-      : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
-        ? "занятия"
-        : "занятий";
-  return `${count} ${word}`;
+function packageStatusFromBalance(balance: number | null): "active" | "exhausted" | "debt" | "none" {
+  if (balance == null) return "none";
+  if (balance <= -1) return "debt";
+  if (balance <= 0) return "exhausted";
+  return "active";
 }
 
 export function PaymentHistoryPanel() {
   const { data, ready } = useDemoStore();
+  const href = useStudentCabinetHref();
   const studentId = data.currentStudentId;
+  const student = data.students.find((s) => s.id === studentId);
 
-  const items = useMemo(
+  const orders = data.lessonOrders ?? [];
+  const payments = data.payments ?? [];
+
+  const paymentByOrder = useMemo(() => {
+    const map = new Map<string, PaymentRecord>();
+    for (const p of payments.filter((x) => x.studentId === studentId)) {
+      const prev = map.get(p.orderId);
+      if (
+        !prev ||
+        new Date(p.createdAt).getTime() > new Date(prev.createdAt).getTime()
+      ) {
+        map.set(p.orderId, p);
+      }
+    }
+    return map;
+  }, [payments, studentId]);
+
+  const history = useMemo(
     () =>
-      buildTariffHistoryItems(
-        data.tariffAssignments,
-        data.payments,
-        studentId
-      ),
-    [data.tariffAssignments, data.payments, studentId]
+      [...orders]
+        .filter((o) => o.studentId === studentId)
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt ?? 0).getTime() -
+            new Date(a.createdAt ?? 0).getTime()
+        ),
+    [orders, studentId]
   );
-  const current = useMemo(
-    () => currentAssignmentForStudent(data.tariffAssignments, studentId),
-    [data.tariffAssignments, studentId]
-  );
-  const pending = useMemo(
-    () => pendingReviewPaymentForStudent(data.payments, studentId),
-    [data.payments, studentId]
-  );
-  const queued = useMemo(
-    () => queuedAssignmentForStudent(data.tariffAssignments, studentId),
-    [data.tariffAssignments, studentId]
-  );
-  const currentAlert = assignmentTariffAlert(current);
-  const featuredStatus = current
-    ? (items.find((item) => item.id === current.id)?.displayStatus ?? null)
+
+  const balances = student?.directionBalances ?? [];
+  const minBalance = balances.length
+    ? Math.min(...balances.map((b) => b.balance))
     : null;
-  const isCurrent = featuredStatus === "current";
+
+  const pendingPayment = useMemo(
+    () =>
+      payments.find(
+        (p) => p.studentId === studentId && p.status === "pending"
+      ) ?? null,
+    [payments, studentId]
+  );
 
   if (!ready) return null;
 
   return (
     <div className="min-w-0 space-y-5 overflow-x-hidden">
-      {pending ? (
+      {pendingPayment ? (
         <p className="rounded-2xl border border-black/10 bg-pastel-beige/75 px-4 py-3 text-sm">
-          Заявка на оплату уже на проверке. Дождитесь решения администрации —
-          повторную заявку создать нельзя, пока не будет подтверждения или
-          отклонения.
-        </p>
-      ) : null}
-      {queued ? (
-        <p className="rounded-2xl border border-black/10 bg-auditoria-surface px-4 py-3 text-sm">
-          Следующий тариф «{queued.tariffName ?? "Тариф"}» оплачен и ждёт
-          активации, когда закончится текущий пакет.
+          Есть заказ, ожидающий подтверждения оплаты. Повторный заказ можно
+          оформить после завершения текущего платежа.
         </p>
       ) : null}
 
-      {current ? (
-        <CurrentTariffCard
-          assignment={current}
-          isCurrent={isCurrent}
-          status={featuredStatus}
-          alertMessage={
-            currentAlert.tone === "warn1" || currentAlert.tone === "warn2"
-              ? currentAlert.message
-              : null
-          }
-          pending={Boolean(pending)}
-        />
-      ) : (
-        <section className="auditoria-home-card">
-          <p className="text-sm text-muted-foreground">Тариф</p>
-          <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight">
-            Тариф пока не назначен
-          </h2>
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            Когда администратор назначит тариф, здесь появятся срок, занятия и
-            стоимость.
+      <section className="auditoria-home-card">
+        <h2 className="font-display text-2xl font-semibold tracking-tight">
+          Баланс занятий
+        </h2>
+        {balances.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            После первой покупки здесь появятся остатки по направлениям.
           </p>
-          <div className="mt-4">
-            <RenewLink pending={Boolean(pending)} label="Продлить обучение" icon />
-          </div>
-        </section>
-      )}
+        ) : (
+          <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+            {balances.map((b) => (
+              <li
+                key={b.directionId}
+                className="rounded-2xl border border-black/10 bg-auditoria-surface px-3 py-3"
+              >
+                <p className="text-xs text-muted-foreground">
+                  {b.directionName ?? b.directionSlug ?? "Направление"}
+                </p>
+                <p className="mt-1 font-display text-3xl font-semibold tabular-nums">
+                  {b.balance}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+        <TariffBalanceNotice
+          remaining={minBalance}
+          packageStatus={packageStatusFromBalance(minBalance)}
+          className="mt-3"
+        />
+        <Link
+          href={href(STUDENT_CHECKOUT_PATH)}
+          className="mt-4 inline-flex h-11 items-center justify-center rounded-full bg-[#e7dff6]/90 px-4 text-sm"
+        >
+          Купить занятия →
+        </Link>
+      </section>
 
       <section className="auditoria-home-card min-w-0">
         <h2 className="font-display text-xl font-semibold tracking-tight">
-          История тарифов
+          История заказов
         </h2>
-        {items.length === 0 ? (
+        {history.length === 0 ? (
           <div className="mt-4">
             <EmptyState
-              title="Пока нет тарифов"
-              description="Покупки и заявки на оплату появятся здесь отдельными строками."
+              title="Пока нет заказов"
+              description="Оформленные покупки появятся здесь со статусом оплаты."
             />
           </div>
         ) : (
           <ul className="mt-4 space-y-2">
-            {items.map((item) => (
-              <HistoryRow key={item.id} item={item} />
+            {history.map((order) => (
+              <OrderRow
+                key={order.id}
+                order={order}
+                payment={paymentByOrder.get(order.id) ?? null}
+              />
             ))}
           </ul>
         )}
       </section>
-
-      {!pending && current ? (
-        <section className="rounded-3xl border border-black/10 bg-[#e7e4f6]/70 p-5 sm:p-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="max-w-2xl">
-              <h2 className="font-display text-xl font-semibold tracking-tight sm:text-2xl">
-                Не прерывайте подготовку
-              </h2>
-              <p className="mt-2 text-sm leading-relaxed text-foreground/80 sm:text-base">
-                Продлите обучение, чтобы сохранить темп подготовки, доступ к
-                материалам и поддержку куратора.
-              </p>
-            </div>
-            <RenewLink pending={false} label="Продлить обучение →" />
-          </div>
-          <p className="mt-4 text-sm text-muted-foreground">{CHANGE_TARIFF_HINT}</p>
-        </section>
-      ) : (
-        <p className="text-sm text-muted-foreground">{CHANGE_TARIFF_HINT}</p>
-      )}
     </div>
   );
 }
 
-function RenewLink({
-  pending,
-  label,
-  icon = false,
+function OrderRow({
+  order,
+  payment,
 }: {
-  pending: boolean;
-  label: string;
-  icon?: boolean;
+  order: LessonOrder;
+  payment: PaymentRecord | null;
 }) {
-  const href = useStudentCabinetHref();
-  if (pending) {
-    return (
-      <button
-        type="button"
-        disabled
-        className="inline-flex h-11 shrink-0 items-center justify-center rounded-full border border-black/10 bg-auditoria-surface px-4 text-sm text-muted-foreground"
-      >
-        Заявка на проверке
-      </button>
-    );
-  }
-  return (
-    <Link
-      href={href(STUDENT_CHECKOUT_PATH)}
-      className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-full bg-[#e7dff6]/90 px-4 text-sm text-foreground"
-    >
-      {icon ? <Plus className="size-4" /> : null}
-      {label}
-    </Link>
-  );
-}
+  const statusKey = payment?.status ?? order.status;
+  const tone =
+    rowTone[statusKey] ?? rowTone[order.status] ?? "bg-auditoria-surface";
 
-function CurrentTariffCard({
-  assignment,
-  isCurrent,
-  status,
-  alertMessage,
-  pending,
-}: {
-  assignment: StudentTariffAssignment;
-  isCurrent: boolean;
-  status: TariffHistoryDisplayStatus | null;
-  alertMessage: string | null;
-  pending: boolean;
-}) {
-  const term = tariffTermView({
-    startsAt: assignment.startsAt,
-    endsAt: assignment.endsAt,
-  });
-  const metrics = [
-    { label: "Стоимость", value: money(assignment.priceSnapshot) },
-    assignment.lessonsLimitSnapshot != null
-      ? { label: "Всего занятий", value: String(assignment.lessonsLimitSnapshot) }
-      : null,
-    assignment.lessonsUsed != null
-      ? { label: "Использовано", value: String(assignment.lessonsUsed) }
-      : null,
-    assignment.lessonsRemaining != null
-      ? { label: "Осталось", value: String(assignment.lessonsRemaining) }
-      : null,
-    { label: "Начало", value: formatDate(assignment.startsAt) },
-    assignment.endsAt
-      ? { label: "Прогноз окончания", value: formatDate(assignment.endsAt) }
-      : null,
-  ].filter((item): item is { label: string; value: string } => Boolean(item));
-
-  return (
-    <section className="auditoria-home-card grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(16rem,0.75fr)] lg:items-stretch">
-      <div className="min-w-0">
-        <span
-          className={cn(
-            "inline-flex rounded-full px-2.5 py-1 text-xs",
-            isCurrent ? "bg-pastel-mint/80" : status ? rowTone[status] : "bg-auditoria-surface"
-          )}
-        >
-          {isCurrent ? "Текущий тариф" : status ? rowLabel[status] : "Тариф"}
-        </span>
-        <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight break-words">
-          {assignment.tariffName ?? "Тариф"}
-        </h2>
-        {assignment.includesText ? (
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-foreground/80 sm:text-base">
-            {assignment.includesText}
-          </p>
-        ) : null}
-        <dl className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {metrics.map((metric) => (
-            <div key={metric.label} className="min-w-0">
-              <dt className="text-xs text-muted-foreground">{metric.label}</dt>
-              <dd className="mt-0.5 text-sm font-medium break-words tabular-nums">
-                {metric.value}
-              </dd>
-            </div>
-          ))}
-        </dl>
-        {alertMessage ? (
-          <p className="mt-4 rounded-2xl bg-pastel-beige/75 px-3 py-2 text-sm">
-            {alertMessage}
-          </p>
-        ) : null}
-      </div>
-      <TermPanel term={term} pending={pending} isCurrent={isCurrent} />
-    </section>
-  );
-}
-
-function TermPanel({
-  term,
-  pending,
-  isCurrent,
-}: {
-  term: TariffTermView;
-  pending: boolean;
-  isCurrent: boolean;
-}) {
-  const fill =
-    term.state === "unknown"
-      ? null
-      : term.tone === "ended"
-        ? "bg-[#e3a4aa]"
-        : term.tone === "soon"
-          ? "bg-[#e4c48a]"
-          : "bg-[#c9b7e6]";
-  const caption =
-    term.state === "ended" || !isCurrent
-      ? "Срок тарифа"
-      : "Тариф действует ещё";
-  const value =
-    term.state === "unknown"
-      ? "Срок по датам не указан"
-      : term.state === "ended"
-        ? "Срок истёк"
-        : tariffDaysLeftLabel(term.daysLeft, term.endsToday);
-
-  return (
-    <div className="flex min-w-0 flex-col justify-between gap-4 rounded-2xl border border-black/10 bg-auditoria-surface p-4">
-      <div>
-        <span className="inline-flex size-10 items-center justify-center rounded-xl bg-pastel-beige/80">
-          <Calendar className="size-4" />
-        </span>
-        <p className="mt-3 text-sm text-muted-foreground">{caption}</p>
-        <p className="mt-1 font-display text-3xl font-semibold tracking-tight">
-          {value}
-        </p>
-        {term.state === "unknown" ? null : (
-          <div
-            className="mt-4 h-2 overflow-hidden rounded-full bg-black/10"
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(term.progress * 100)}
-            aria-label="Срок действия тарифа"
-          >
-            <div
-              className={cn("h-full rounded-full", fill)}
-              style={{ width: `${Math.round(term.progress * 100)}%` }}
-            />
-          </div>
-        )}
-      </div>
-      <RenewLink pending={pending} label="Продлить тариф →" />
-    </div>
-  );
-}
-
-function HistoryRow({ item }: { item: TariffHistoryItem }) {
-  const dates = item.endsAt
-    ? `${formatDate(item.startsAt)} — ${formatDate(item.endsAt)}`
-    : formatDate(item.startsAt);
   return (
     <li
       className={cn(
-        "min-w-0 rounded-2xl border border-black/10 border-l-[3px] bg-auditoria-surface px-3 py-3",
-        rowStripe[item.displayStatus]
+        "min-w-0 rounded-2xl border border-black/10 px-3 py-3",
+        tone
       )}
     >
-      <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.3fr)_auto_auto_auto] lg:items-center lg:gap-4">
-        <p className="font-medium break-words">{item.title}</p>
-        <p className="text-sm break-words text-muted-foreground">{dates}</p>
-        <p className="text-sm text-muted-foreground">
-          {item.lessonsLimit != null ? lessonsLabel(item.lessonsLimit) : "—"}
-        </p>
-        <span
-          className={cn(
-            "inline-flex w-fit rounded-full px-2.5 py-1 text-xs",
-            rowTone[item.displayStatus]
-          )}
-        >
-          {rowLabel[item.displayStatus]}
-          {item.expiring ? " · истекает" : ""}
-        </span>
-        <p className="text-sm font-medium tabular-nums lg:text-right">
-          {money(item.price)}
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-medium break-words">{order.tariffNameSnapshot}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {formatDateTime(order.createdAt ?? payment?.createdAt ?? "")} ·{" "}
+            {order.lessonsCount} зан. ·{" "}
+            {lessonOrderStatusLabel(order.status)}
+            {payment
+              ? ` · платёж: ${paymentRecordStatusLabel(payment.status)}`
+              : null}
+          </p>
+          {payment?.failureReason ? (
+            <p className="mt-1 text-xs text-destructive/90">
+              {payment.failureReason}
+            </p>
+          ) : null}
+        </div>
+        <p className="text-sm font-medium tabular-nums">
+          {money(order.totalAmount)}
         </p>
       </div>
     </li>

@@ -44,13 +44,7 @@ import {
   personStatusLabel,
   studentArchiveReasonLabel,
 } from "@/lib/format";
-import {
-  currentAssignmentForStudent,
-  packageStatusLabel,
-  studentTariffLabel,
-} from "@/lib/tariff-package";
 import { averageFinishedAttempt2 } from "@/lib/tests/attempts";
-import { apiPlatform } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { STUDENT_GRADES, gradeLabel } from "@/lib/student-contacts";
 import type {
@@ -61,6 +55,29 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+function minDirectionBalance(student: Student): number | null {
+  const balances = student.directionBalances ?? [];
+  if (!balances.length) return null;
+  return Math.min(...balances.map((b) => b.balance));
+}
+
+function directionBalancesLabel(student: Student): string {
+  const balances = student.directionBalances ?? [];
+  if (!balances.length) return "—";
+  return balances
+    .map((b) => `${b.directionName ?? b.directionSlug ?? "…"}: ${b.balance}`)
+    .join(" · ");
+}
+
+function packageStatusFromBalance(
+  balance: number | null
+): "active" | "exhausted" | "debt" | "none" {
+  if (balance == null) return "none";
+  if (balance <= -1) return "debt";
+  if (balance <= 0) return "exhausted";
+  return "active";
+}
+
 type FormState = {
   id?: string;
   fullName: string;
@@ -69,7 +86,6 @@ type FormState = {
   phone: string;
   status: PersonStatus;
   teacherId: string;
-  tariffId: string;
   parentContacts: string;
   notes: string;
 };
@@ -81,7 +97,6 @@ const emptyForm = (teacherId: string): FormState => ({
   phone: "",
   status: "active",
   teacherId,
-  tariffId: "",
   parentContacts: "",
   notes: "",
 });
@@ -108,11 +123,6 @@ export function StudentsByTeacher({
   const [statusFilter, setStatusFilter] = useState<"all" | PersonStatus>("all");
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm(data.teachers[0]?.id ?? ""));
-  const [initialTariffId, setInitialTariffId] = useState("");
-  const [assignFor, setAssignFor] = useState<Student | null>(null);
-  const [assignTariffId, setAssignTariffId] = useState("");
-  const [assignReason, setAssignReason] = useState("");
-  const [assignBusy, setAssignBusy] = useState(false);
   const [listSection, setListSection] = useState<"work" | "archive">("work");
   const [archiveFor, setArchiveFor] = useState<Student | null>(null);
   const [archiveReason, setArchiveReason] =
@@ -174,7 +184,6 @@ export function StudentsByTeacher({
   const editable = mode === "direkciya" || mode === "kafedra";
 
   function openCreate() {
-    setInitialTariffId("");
     setForm(
       emptyForm(
         mode === "kafedra"
@@ -188,14 +197,6 @@ export function StudentsByTeacher({
   }
 
   function openEdit(student: Student) {
-    const currentTariff = data.tariffAssignments
-      .filter((a) => a.studentId === student.id)
-      .sort(
-        (a, b) =>
-          new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime()
-      )[0];
-    const tariffId = student.purchaseTariffId ?? currentTariff?.tariffId ?? "";
-    setInitialTariffId(tariffId);
     setForm({
       id: student.id,
       fullName: student.fullName,
@@ -204,7 +205,6 @@ export function StudentsByTeacher({
       phone: student.phone ?? "",
       status: student.status,
       teacherId: student.teacherId,
-      tariffId,
       parentContacts: student.parentContacts ?? "",
       notes: student.notes ?? "",
     });
@@ -228,27 +228,6 @@ export function StudentsByTeacher({
       notes: form.notes.trim() || undefined,
     });
     if (!saved.ok) return;
-    if (
-      mode === "direkciya" &&
-      form.tariffId &&
-      form.tariffId !== initialTariffId
-    ) {
-      try {
-        await apiPlatform("setStudentPurchaseTariff", {
-          studentId: id,
-          tariffId: form.tariffId,
-          reason: !form.id
-            ? "Назначение при создании ученика"
-            : "Тариф для будущей оплаты",
-        });
-        toast.success(
-          "Тариф назначен. Оплата создаётся, когда ученик перейдёт к оплате в Аудитории."
-        );
-        await reload();
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Не удалось назначить тариф");
-      }
-    }
     // Default list filter is «Без преподавателя»; after create with a teacher
     // switch the filter so the new student is visible in the table.
     const nextFilter = nextTeacherFilterAfterStudentSave({
@@ -262,28 +241,6 @@ export function StudentsByTeacher({
       toast.success("Ученик сохранён");
     }
     setOpen(false);
-  }
-
-  async function saveAssign() {
-    if (!assignFor || !assignTariffId) return;
-    setAssignBusy(true);
-    try {
-      await apiPlatform("setStudentPurchaseTariff", {
-        studentId: assignFor.id,
-        tariffId: assignTariffId,
-        reason: assignReason.trim() || undefined,
-      });
-      toast.success(
-        "Тариф назначен. Оплата создаётся, когда ученик перейдёт к оплате в Аудитории."
-      );
-      setAssignFor(null);
-      setAssignReason("");
-      await reload();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Не удалось назначить тариф");
-    } finally {
-      setAssignBusy(false);
-    }
   }
 
   const teacherName = (id: string) =>
@@ -527,11 +484,7 @@ export function StudentsByTeacher({
               <TableHead>Статус</TableHead>
               {mode === "direkciya" ? (
                 <>
-                  <TableHead>Тариф</TableHead>
-                  <TableHead>Остаток</TableHead>
-                  <TableHead>Использовано</TableHead>
-                  <TableHead>Прогноз</TableHead>
-                  <TableHead>Оплата</TableHead>
+                  <TableHead>Баланс занятий</TableHead>
                   <TableHead>Аккаунт</TableHead>
                 </>
               ) : null}
@@ -552,14 +505,11 @@ export function StudentsByTeacher({
                     <div className="text-xs text-muted-foreground">{s.contacts}</div>
                   ) : null}
                   {(() => {
-                    const asg = currentAssignmentForStudent(
-                      data.tariffAssignments,
-                      s.id
-                    );
+                    const remaining = minDirectionBalance(s);
                     return (
                       <TariffBalanceNotice
-                        remaining={asg?.lessonsRemaining}
-                        packageStatus={asg?.packageStatus}
+                        remaining={remaining}
+                        packageStatus={packageStatusFromBalance(remaining)}
                         compact
                         className="mt-1"
                       />
@@ -610,10 +560,6 @@ export function StudentsByTeacher({
                             a.sourceKind !== "intensive"
                         )
                       );
-                      const asg = currentAssignmentForStudent(
-                        data.tariffAssignments,
-                        s.id
-                      );
                       return (
                         <>
                           <TableCell className="tabular-nums whitespace-nowrap">
@@ -622,32 +568,8 @@ export function StudentsByTeacher({
                           <TableCell className="text-muted-foreground">
                             —
                           </TableCell>
-                          <TableCell className="min-w-[8.5rem]">
-                            {(() => {
-                              const labeled = studentTariffLabel({
-                                assignments: data.tariffAssignments,
-                                studentId: s.id,
-                                tariffs: data.tariffs,
-                                purchaseTariffId: s.purchaseTariffId,
-                              });
-                              if (!labeled) {
-                                return (
-                                  <span className="text-muted-foreground">—</span>
-                                );
-                              }
-                              return (
-                                <div>
-                                  <div className="font-medium leading-tight">
-                                    {labeled.name}
-                                  </div>
-                                  <div className="text-[0.7rem] text-muted-foreground">
-                                    {asg
-                                      ? packageStatusLabel[asg.packageStatus ?? "none"]
-                                      : packageStatusLabel.unpaid}
-                                  </div>
-                                </div>
-                              );
-                            })()}
+                          <TableCell className="min-w-[8.5rem] text-sm">
+                            {directionBalancesLabel(s)}
                           </TableCell>
                         </>
                       );
@@ -656,50 +578,11 @@ export function StudentsByTeacher({
                 <TableCell>
                   <PersonStatusBadge status={s.status} />
                 </TableCell>
-                {mode === "direkciya"
-                  ? (() => {
-                      const asg = currentAssignmentForStudent(
-                        data.tariffAssignments,
-                        s.id
-                      );
-                      const labeled = studentTariffLabel({
-                        assignments: data.tariffAssignments,
-                        studentId: s.id,
-                        tariffs: data.tariffs,
-                        purchaseTariffId: s.purchaseTariffId,
-                      });
-                      const pkg = asg?.packageStatus ?? "none";
-                      return (
-                        <>
-                          <TableCell>
-                            {labeled ? (
-                              labeled.name
-                            ) : (
-                              <span className="text-muted-foreground">Нет тарифа</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="tabular-nums">
-                            {asg?.lessonsRemaining == null
-                              ? "—"
-                              : asg.lessonsRemaining}
-                          </TableCell>
-                          <TableCell className="tabular-nums">
-                            {asg?.lessonsUsed ?? "—"}
-                          </TableCell>
-                          <TableCell className="tabular-nums text-sm">
-                            {asg ? formatDate(asg.endsAt) : "—"}
-                          </TableCell>
-                          <TableCell className="text-sm">
-                            {asg
-                              ? packageStatusLabel[pkg]
-                              : labeled
-                                ? packageStatusLabel.unpaid
-                                : packageStatusLabel.none}
-                          </TableCell>
-                        </>
-                      );
-                    })()
-                  : null}
+                {mode === "direkciya" ? (
+                  <TableCell className="max-w-[14rem] text-sm">
+                    {directionBalancesLabel(s)}
+                  </TableCell>
+                ) : null}
                 {mode === "direkciya" ? (
                   <TableCell className="text-xs text-muted-foreground">
                     {s.accountEmail ? (
@@ -728,23 +611,6 @@ export function StudentsByTeacher({
                     </Link>
                     {mode === "direkciya" && !archivedView ? (
                       <>
-                        <button
-                          type="button"
-                          className="text-sm font-medium underline-offset-2 hover:underline"
-                          onClick={() => {
-                            const current = currentAssignmentForStudent(
-                              data.tariffAssignments,
-                              s.id
-                            );
-                            setAssignTariffId(
-                              s.purchaseTariffId ?? current?.tariffId ?? ""
-                            );
-                            setAssignReason("");
-                            setAssignFor(s);
-                          }}
-                        >
-                          Тариф
-                        </button>
                         <button
                           type="button"
                           className="text-sm text-muted-foreground underline-offset-2 hover:underline"
@@ -902,45 +768,6 @@ export function StudentsByTeacher({
                 </SelectContent>
               </Select>
             </div>
-            {mode === "direkciya" ? (
-              <div className="space-y-1.5">
-                <Label>Тариф</Label>
-                <Select
-                  value={form.tariffId || "__none__"}
-                  onValueChange={(v) =>
-                    v &&
-                    setForm({
-                      ...form,
-                      tariffId: v === "__none__" ? "" : v,
-                    })
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue>
-                      {(v) =>
-                        !v || v === "__none__"
-                          ? "Не назначен"
-                          : (data.tariffs.find((t) => t.id === v)?.name ?? "—")
-                      }
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Не назначен</SelectItem>
-                    {data.tariffs
-                      .filter((t) => t.status === "active")
-                      .map((t) => (
-                        <SelectItem key={t.id} value={t.id}>
-                          {t.name} · {t.price.toLocaleString("ru-RU")} ₽
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  При сохранении меняется только тариф для будущей оплаты.
-                  История назначений и списаний не пересчитывается.
-                </p>
-              </div>
-            ) : null}
             <div className="space-y-1.5">
               <Label>Контакты родителей</Label>
               <Textarea
@@ -1001,79 +828,6 @@ export function StudentsByTeacher({
                 Сохранить
               </Button>
             </div>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={!!assignFor}
-        onOpenChange={(o) => {
-          if (!o) setAssignFor(null);
-        }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              Тариф{assignFor ? ` · ${assignFor.fullName}` : ""}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-1.5">
-            <Label>Назначить тариф</Label>
-            <Select
-              value={assignTariffId || "__none__"}
-              onValueChange={(v) =>
-                v && setAssignTariffId(v === "__none__" ? "" : v)
-              }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue>
-                  {(v) =>
-                    !v || v === "__none__"
-                      ? "Не выбран"
-                      : (data.tariffs.find((t) => t.id === v)?.name ?? "—")
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">Не выбран</SelectItem>
-                {data.tariffs
-                  .filter((t) => t.status === "active")
-                  .map((t) => (
-                    <SelectItem key={t.id} value={t.id}>
-                      {t.name} · {t.lessonsLimit ?? "—"} зан. ·{" "}
-                      {t.price.toLocaleString("ru-RU")} ₽
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Тариф назначается сразу. Заявка на оплату не создаётся — ученик
-              оплачивает его в Аудитории. Действующий пакет не меняется, пока
-              оплата не подтверждена.
-            </p>
-            <Label>Причина (необязательно)</Label>
-            <Textarea
-              value={assignReason}
-              onChange={(e) => setAssignReason(e.target.value)}
-              placeholder="Согласовано с куратором…"
-              rows={2}
-            />
-          </div>
-          <DialogFooter className="flex-col gap-2 sm:flex-col">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setAssignFor(null)}
-            >
-              Отмена
-            </Button>
-            <Button
-              type="button"
-              disabled={!assignTariffId || assignBusy}
-              onClick={() => void saveAssign()}
-            >
-              Назначить тариф
-            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
