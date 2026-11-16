@@ -84,14 +84,14 @@
 
 1. Создать Postgres → сохранить `DATABASE_URL`.
 2. Создать приложение, задать env (включая длинный `BOOTSTRAP_ADMIN_TOKEN`).
-3. Миграции: `npm start` в контейнере сначала выполняет `node scripts/db-migrate.mjs`, затем `next start`
-   (ошибка migrate не блокирует старт приложения). One-off / SSH по желанию:
+3. One-off / SSH / release command в каталоге `/app`:
    ```bash
    npm run db:migrate
    ```
    Скрипт — `node scripts/db-migrate.mjs` (без `tsx`; `tsx` в production не ставится).
    Обычный `npm run db:seed` / `db:seed:school` на Timeweb **не** запускать.
    Повторный `db:migrate` безопасен (журнал Drizzle).
+   Миграции не запускаются автоматически при `npm start` — применяйте вручную после деплоя.
 
 ## Тестовое наполнение школы на БД Timeweb
 

@@ -9,7 +9,7 @@
     "start:local": "tsx scripts/start-local.ts",
     "start:local:keep": "tsx scripts/start-local.ts --keep",
     "build": "next build --webpack",
-    "start": "node scripts/db-migrate.mjs; next start",
+    "start": "next start",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/db-migrate.mjs",
