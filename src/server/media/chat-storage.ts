@@ -22,7 +22,7 @@ function assertSafeChatKey(key: string): string {
     !normalized ||
     normalized.includes("..") ||
     normalized.startsWith("/") ||
-    !/^(chats|chat-pending|theory|theory-pending|intensive|intensive-pending|teachers|questions)\//.test(
+    !/^(chats|chat-pending|theory|theory-pending|intensive|intensive-pending|teachers|questions|settlements)\//.test(
       normalized
     ) ||
     !/^[a-zA-Z0-9/._-]+$/.test(normalized)

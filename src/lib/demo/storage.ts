@@ -286,6 +286,9 @@ export function migrateToV5(raw: unknown): DemoData | null {
     payments: Array.isArray((blob as DemoData).payments)
       ? (blob as DemoData).payments
       : [],
+    settlementDocuments: Array.isArray((blob as DemoData).settlementDocuments)
+      ? (blob as DemoData).settlementDocuments
+      : [],
     products: Array.isArray((blob as DemoData).products)
       ? (blob as DemoData).products
       : [],

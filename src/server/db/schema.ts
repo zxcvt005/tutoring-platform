@@ -2928,6 +2928,95 @@ export const legalConsents = pgTable(
 );
 
 /**
+ * Сквозная нумерация расчётных документов (без ежегодного сброса).
+ */
+export const settlementDocumentCounters = pgTable("settlement_document_counters", {
+  organizationId: text("organization_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  lastNumber: integer("last_number").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * PDF-документы, подтверждающие расчёт (54-ФЗ п. 2.1 ст. 2, без ККТ).
+ * Записи неизменяемы после создания; идемпотентность — (payment_id, kind).
+ */
+export const settlementDocuments = pgTable(
+  "settlement_documents",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    sequentialNumber: integer("sequential_number").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+    paymentId: text("payment_id")
+      .notNull()
+      .references(() => payments.id, { onDelete: "restrict" }),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => lessonOrders.id, { onDelete: "restrict" }),
+    originalDocumentId: text("original_document_id").references(
+      (): AnyPgColumn => settlementDocuments.id,
+      { onDelete: "restrict" }
+    ),
+    amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+    currency: text("currency").notNull().default("RUB"),
+    vatNote: text("vat_note").notNull(),
+    paymentForm: text("payment_form").notNull(),
+    settlementSign: text("settlement_sign").notNull(),
+    serviceNameSnapshot: text("service_name_snapshot").notNull(),
+    siteUrlSnapshot: text("site_url_snapshot").notNull(),
+    operatorLegalNameSnapshot: text("operator_legal_name_snapshot").notNull(),
+    operatorFioSnapshot: text("operator_fio_snapshot").notNull(),
+    innSnapshot: text("inn_snapshot").notNull(),
+    ogrnipSnapshot: text("ogrnip_snapshot").notNull(),
+    taxSystemSnapshot: text("tax_system_snapshot").notNull(),
+    settlerPositionSnapshot: text("settler_position_snapshot").notNull(),
+    settlerSurnameSnapshot: text("settler_surname_snapshot").notNull(),
+    pdfStorageKey: text("pdf_storage_key").notNull(),
+    pdfSha256: text("pdf_sha256").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("settlement_documents_org_number_uidx").on(
+      t.organizationId,
+      t.sequentialNumber
+    ),
+    uniqueIndex("settlement_documents_payment_kind_uidx").on(
+      t.paymentId,
+      t.kind
+    ),
+    index("settlement_documents_org_issued_idx").on(
+      t.organizationId,
+      t.issuedAt
+    ),
+    index("settlement_documents_order_idx").on(t.orderId),
+    check(
+      "settlement_documents_kind_check",
+      sql`${t.kind} in ('income', 'income_return')`
+    ),
+    check(
+      "settlement_documents_settlement_sign_check",
+      sql`${t.settlementSign} in ('приход', 'возврат прихода')`
+    ),
+    check(
+      "settlement_documents_return_link_check",
+      sql`(
+        (${t.kind} = 'income' AND ${t.originalDocumentId} IS NULL)
+        OR (${t.kind} = 'income_return' AND ${t.originalDocumentId} IS NOT NULL)
+      )`
+    ),
+  ]
+);
+
+/**
  * Ручные «Пробные уроки» (Дирекция).
  * Изолировано от Press trial_lessons, base_leads, учеников и расписания.
  */
@@ -3233,6 +3322,8 @@ export const schema = {
   baseLeads,
   siteLeads,
   legalConsents,
+  settlementDocumentCounters,
+  settlementDocuments,
   manualTrialLessons,
   directorExpenses,
   quickAccessLinks,

@@ -345,6 +345,7 @@ const EMPTY_DATA: DemoData = {
   studentDirectionBalances: [],
   tariffAssignments: [],
   payments: [],
+  settlementDocuments: [],
   products: [],
   availableProductSlugs: [],
   currentTeacherId: "",

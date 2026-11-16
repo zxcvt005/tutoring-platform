@@ -88,6 +88,7 @@ const TOUR_BOOTSTRAP_DATA: DemoData = {
   studentDirectionBalances: [],
   tariffAssignments: [],
   payments: [],
+  settlementDocuments: [],
   products: [],
   availableProductSlugs: [],
   currentTeacherId: STUDENT_TOUR_TEACHER_ID,

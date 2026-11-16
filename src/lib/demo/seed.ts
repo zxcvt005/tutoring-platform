@@ -972,6 +972,7 @@ export function createSeedData(): DemoData {
       ...p,
       orderId: p.assignmentId,
     })),
+    settlementDocuments: [],
     products: [],
     availableProductSlugs: [],
     currentTeacherId: "t1",

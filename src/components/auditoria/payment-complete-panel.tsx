@@ -9,6 +9,7 @@ import {
   CheckoutStepper,
   PaymentStatusCard,
 } from "@/components/auditoria/payment-flow-view";
+import { SettlementDownloadLinks } from "@/components/settlements/settlement-download-links";
 import {
   CHECKOUT_PAYMENT_SESSION_KEY,
   paymentFlowFromRecord,
@@ -73,6 +74,13 @@ export function PaymentCompletePanel() {
   const displayStatus: PaymentFlowStatus =
     flowStatus === "paid" ? "paid" : "pending";
 
+  const settlementDocs = useMemo(() => {
+    if (!payment) return [];
+    return (data.settlementDocuments ?? []).filter(
+      (d) => d.paymentId === payment.id
+    );
+  }, [data.settlementDocuments, payment]);
+
   useEffect(() => {
     if (started.current || !targetPaymentId) return;
     started.current = true;
@@ -124,6 +132,17 @@ export function PaymentCompletePanel() {
                 .join(" ") || RETURN_NOT_PAID_HINT
         }
       />
+
+      {displayStatus === "paid" && settlementDocs.length > 0 ? (
+        <div className="rounded-2xl border border-black/10 bg-auditoria-surface px-4 py-3">
+          <p className="text-sm font-medium">Документ расчёта</p>
+          <SettlementDownloadLinks
+            documents={settlementDocs}
+            className="mt-2"
+            linkClassName="text-sm"
+          />
+        </div>
+      ) : null}
 
       {targetPaymentId ? (
         <button

@@ -52,6 +52,7 @@ import type {
   LessonOrder,
   PaymentRecord,
   Product,
+  SettlementDocumentSummary,
   Student,
   StudentAnswer,
   StudentDirectionBalance,
@@ -618,8 +619,19 @@ export async function buildBootstrap(
     .where(eq(payments.organizationId, orgId));
 
   if (ctx.role === "student" && ctx.studentId) {
-    orderRows = orderRows.filter((o) => o.studentId === ctx.studentId);
-    paymentRows = paymentRows.filter((p) => p.studentId === ctx.studentId);
+    const visibleOrderIds = new Set(
+      orderRows
+        .filter(
+          (o) =>
+            o.studentId === ctx.studentId || o.payerUserId === ctx.userId
+        )
+        .map((o) => o.id)
+    );
+    orderRows = orderRows.filter((o) => visibleOrderIds.has(o.id));
+    paymentRows = paymentRows.filter(
+      (p) =>
+        p.studentId === ctx.studentId || visibleOrderIds.has(p.orderId)
+    );
     tariffRows = tariffRows.filter((t) => t.status === "active");
   }
 
@@ -774,6 +786,27 @@ export async function buildBootstrap(
     createdAt: p.createdAt.toISOString(),
     failureReason: p.failureReason ?? null,
   }));
+
+  let mappedSettlementDocuments: SettlementDocumentSummary[] = [];
+  if (ctx.role !== "teacher" && ctx.role !== "press" && mappedPayments.length > 0) {
+    try {
+      const {
+        listSettlementDocumentsForPayments,
+        toSettlementDocumentSummary,
+      } = await import("@/server/services/settlement-documents-service");
+      const rows = await listSettlementDocumentsForPayments(
+        db,
+        orgId,
+        mappedPayments.map((p) => p.id)
+      );
+      mappedSettlementDocuments = rows.map(toSettlementDocumentSummary);
+    } catch (err) {
+      console.error("bootstrap settlement documents failed", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+      mappedSettlementDocuments = [];
+    }
+  }
 
   const relevantStudentIds = studentRows.map((s) => s.id);
   let studentDirectionBalances: StudentDirectionBalanceRow[] = [];
@@ -930,6 +963,7 @@ export async function buildBootstrap(
     tariffAssignments: [],
     studentDirectionBalances,
     payments: mappedPayments,
+    settlementDocuments: mappedSettlementDocuments,
     products: productsCatalog,
     availableProductSlugs,
     currentTeacherId,
@@ -955,6 +989,7 @@ export async function buildBootstrap(
       tariffAssignments: [],
       studentDirectionBalances: [],
       payments: [],
+      settlementDocuments: [],
       products: [],
       availableProductSlugs: [],
       currentTeacherId: "",

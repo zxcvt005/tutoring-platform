@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
   // чтобы гидратация Context/useEffect работала стабильно.
   // 192.168.1.116 — только hostname HTTPS sidecar лаборатории (порт 43128).
   allowedDevOrigins: ["127.0.0.1", "localhost", DEV_LAN_HTTPS_HOST],
-  serverExternalPackages: ["livekit-server-sdk"],
+  serverExternalPackages: ["livekit-server-sdk", "pdfkit"],
   transpilePackages: ["@livekit/track-processors", "@mediapipe/tasks-vision"],
   turbopack: {
     rules: {

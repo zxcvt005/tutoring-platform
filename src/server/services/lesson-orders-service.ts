@@ -344,7 +344,12 @@ export async function confirmPaidFromBank(
     }
     if (!pay) throw notFound("Платёж не найден");
     if (pay.status === "paid") {
-      return { ok: true as const, alreadyPaid: true as const, paymentId: pay.id };
+      return {
+        ok: true as const,
+        alreadyPaid: true as const,
+        paymentId: pay.id,
+        organizationId: pay.organizationId,
+      };
     }
     if (pay.status === "refunded") {
       throw badRequest("Платёж уже возвращён");
@@ -432,7 +437,17 @@ export async function confirmPaidFromBank(
       paymentId: pay.id,
       orderId: order.id,
       ledgerEntryId: ledgerId,
+      organizationId: pay.organizationId,
     };
+  }).then(async (result) => {
+    const { safeEnsureIncomeSettlementDocument } = await import(
+      "@/server/services/settlement-documents-service"
+    );
+    await safeEnsureIncomeSettlementDocument(db, {
+      paymentId: result.paymentId,
+      organizationId: result.organizationId,
+    });
+    return result;
   });
 }
 
@@ -590,6 +605,15 @@ export async function adminRefundPayment(
       },
     });
 
+    return { ok: true as const, paymentId: pay.id };
+  }).then(async (result) => {
+    const { safeEnsureIncomeReturnSettlementDocument } = await import(
+      "@/server/services/settlement-documents-service"
+    );
+    await safeEnsureIncomeReturnSettlementDocument(db, {
+      paymentId: result.paymentId,
+      organizationId: ctx.organizationId,
+    });
     return { ok: true as const };
   });
 }

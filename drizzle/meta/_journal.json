@@ -344,6 +344,13 @@
       "when": 1797100000000,
       "tag": "0048_legal_consents",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1797200000000,
+      "tag": "0049_settlement_documents",
+      "breakpoints": true
     }
   ]
 }

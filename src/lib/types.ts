@@ -441,6 +441,21 @@ export type PaymentRecord = {
   failureReason?: string | null;
 };
 
+/** Краткое описание PDF расчётного документа для UI. */
+export type SettlementDocumentKind = "income" | "income_return";
+
+export type SettlementDocumentSummary = {
+  id: string;
+  paymentId: string;
+  orderId: string;
+  kind: SettlementDocumentKind;
+  sequentialNumber: number;
+  issuedAt: string;
+  amount: number;
+  serviceName: string;
+  settlementSign: string;
+};
+
 export type Teacher = {
   id: string;
   fullName: string;
@@ -750,6 +765,8 @@ export type DemoData = {
   tariffAssignments: StudentTariffAssignment[];
   studentDirectionBalances: StudentDirectionBalanceRow[];
   payments: PaymentRecord[];
+  /** PDF расчётные документы (приход / возврат прихода), доступные роли. */
+  settlementDocuments: SettlementDocumentSummary[];
   products: Product[];
   /** Реализованные продукты, доступные текущему ученику по тарифу */
   availableProductSlugs: string[];

@@ -14,7 +14,12 @@ import { lessonsCountLabel } from "@/lib/ru-plural";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { useStudentCabinetHref } from "@/lib/student-tour/paths";
 import { TariffBalanceNotice } from "@/components/tariff-balance-notice";
-import type { LessonOrder, PaymentRecord } from "@/lib/types";
+import { SettlementDownloadLinks } from "@/components/settlements/settlement-download-links";
+import type {
+  LessonOrder,
+  PaymentRecord,
+  SettlementDocumentSummary,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const rowTone: Record<string, string> = {
@@ -45,6 +50,17 @@ export function PaymentHistoryPanel() {
 
   const orders = data.lessonOrders ?? [];
   const payments = data.payments ?? [];
+  const settlementDocuments = data.settlementDocuments ?? [];
+
+  const docsByPayment = useMemo(() => {
+    const map = new Map<string, SettlementDocumentSummary[]>();
+    for (const doc of settlementDocuments) {
+      const list = map.get(doc.paymentId) ?? [];
+      list.push(doc);
+      map.set(doc.paymentId, list);
+    }
+    return map;
+  }, [settlementDocuments]);
 
   const paymentByOrder = useMemo(() => {
     const map = new Map<string, PaymentRecord>();
@@ -147,13 +163,19 @@ export function PaymentHistoryPanel() {
           </div>
         ) : (
           <ul className="mt-4 space-y-2">
-            {history.map((order) => (
-              <OrderRow
-                key={order.id}
-                order={order}
-                payment={paymentByOrder.get(order.id) ?? null}
-              />
-            ))}
+            {history.map((order) => {
+              const payment = paymentByOrder.get(order.id) ?? null;
+              return (
+                <OrderRow
+                  key={order.id}
+                  order={order}
+                  payment={payment}
+                  documents={
+                    payment ? (docsByPayment.get(payment.id) ?? []) : []
+                  }
+                />
+              );
+            })}
           </ul>
         )}
       </section>
@@ -164,9 +186,11 @@ export function PaymentHistoryPanel() {
 function OrderRow({
   order,
   payment,
+  documents,
 }: {
   order: LessonOrder;
   payment: PaymentRecord | null;
+  documents: SettlementDocumentSummary[];
 }) {
   const statusKey = payment?.status ?? order.status;
   const tone =
@@ -195,6 +219,7 @@ function OrderRow({
               {payment.failureReason}
             </p>
           ) : null}
+          <SettlementDownloadLinks documents={documents} className="mt-2" />
         </div>
         <p className="text-sm font-medium tabular-nums">
           {money(order.totalAmount)}

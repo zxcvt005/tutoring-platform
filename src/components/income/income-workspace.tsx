@@ -8,6 +8,7 @@ import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
+import { SettlementDownloadLinks } from "@/components/settlements/settlement-download-links";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -28,6 +29,7 @@ import type {
   LessonOrder,
   PaymentRecord,
   PaymentRecordStatus,
+  SettlementDocumentSummary,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -125,10 +127,21 @@ export function IncomeWorkspace() {
 
   const orders = data.lessonOrders ?? [];
   const payments = data.payments ?? [];
+  const settlementDocuments = data.settlementDocuments ?? [];
   const students = data.students ?? [];
   const directions = (data.learningDirections ?? []).filter(
     (d) => d.status === "active"
   );
+
+  const docsByPayment = useMemo(() => {
+    const map = new Map<string, SettlementDocumentSummary[]>();
+    for (const doc of settlementDocuments) {
+      const list = map.get(doc.paymentId) ?? [];
+      list.push(doc);
+      map.set(doc.paymentId, list);
+    }
+    return map;
+  }, [settlementDocuments]);
 
   const studentName = useMemo(() => {
     const map = new Map(students.map((s) => [s.id, s.fullName]));
@@ -209,7 +222,9 @@ export function IncomeWorkspace() {
       return (
         row.studentName.toLowerCase().includes(q) ||
         row.payerName.toLowerCase().includes(q) ||
-        (row.order?.tariffNameSnapshot ?? "").toLowerCase().includes(q)
+        (row.order?.tariffNameSnapshot ?? "").toLowerCase().includes(q) ||
+        (row.payment.externalId ?? "").toLowerCase().includes(q) ||
+        row.payment.id.toLowerCase().includes(q)
       );
     });
   }, [
@@ -247,7 +262,9 @@ export function IncomeWorkspace() {
         const hit =
           row.studentName.toLowerCase().includes(q) ||
           row.payerName.toLowerCase().includes(q) ||
-          (row.order?.tariffNameSnapshot ?? "").toLowerCase().includes(q);
+          (row.order?.tariffNameSnapshot ?? "").toLowerCase().includes(q) ||
+          (row.payment.externalId ?? "").toLowerCase().includes(q) ||
+          row.payment.id.toLowerCase().includes(q);
         if (!hit) continue;
       }
 
@@ -514,6 +531,10 @@ export function IncomeWorkspace() {
                     >
                       Все покупки этого ученика
                     </button>
+                    <SettlementDownloadLinks
+                      documents={docsByPayment.get(payment.id) ?? []}
+                      className="mt-1"
+                    />
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
                     <span

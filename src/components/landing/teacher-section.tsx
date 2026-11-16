@@ -17,7 +17,7 @@ export function TeacherSection() {
       title={landingTeacherSection.title}
       description={landingTeacherSection.lead}
     >
-      <ul className="grid gap-4 lg:grid-cols-3">
+      <ul className="grid gap-4 sm:grid-cols-2 lg:mx-auto lg:max-w-4xl">
         {landingTeachers.map((teacher) => (
           <li
             key={teacher.id}
@@ -32,7 +32,7 @@ export function TeacherSection() {
                 alt={teacher.photoAlt}
                 fill
                 className="object-cover object-top"
-                sizes="(max-width: 1024px) 100vw, 33vw"
+                sizes="(max-width: 640px) 100vw, 50vw"
               />
             </div>
             <div className="flex flex-1 flex-col gap-3 px-5 py-5">

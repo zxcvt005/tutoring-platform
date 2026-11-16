@@ -798,6 +798,7 @@ export function createStudentTourSeed(): DemoData {
         createdAt: atDay(-50, 11),
       },
     ],
+    settlementDocuments: [],
     products: [
       {
         id: "tour_prd_trainer",
