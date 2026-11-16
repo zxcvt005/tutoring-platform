@@ -56,7 +56,7 @@ describe("isolated background FPS backlog gate", () => {
 });
 
 describe("skipped / missing-mask output policy", () => {
-  it("never emits the original camera frame while an effect is active", () => {
+  it("reuses composite when ready, otherwise raw passthrough while effect warms up", () => {
     expect(
       resolveSkippedBackgroundFrameOutput({
         mode: "background-blur",
@@ -74,7 +74,7 @@ describe("skipped / missing-mask output policy", () => {
         mode: "background-blur",
         hasLastProcessedFrame: false,
       })
-    ).toBe("drop");
+    ).toBe("passthrough_original");
   });
 
   it("allows raw passthrough only when the effect is disabled", () => {
@@ -98,7 +98,7 @@ describe("skipped / missing-mask output policy", () => {
     ).toBe("repeat_last_processed");
     expect(
       resolveMissingMaskFrameOutput({ hasLastProcessedFrame: false })
-    ).toBe("drop");
+    ).toBe("passthrough_original");
   });
 });
 
@@ -196,7 +196,7 @@ describe("isolated background transform skip path", () => {
     await processor.destroy();
   });
 
-  it("drops skipped frames before the first composite instead of flashing the camera", async () => {
+  it("passthroughs skipped frames before the first composite (no black uplink)", async () => {
     const processor = new IsolatedBackgroundProcessor({
       mode: "virtual-background",
       maxFps: 12,
@@ -225,8 +225,9 @@ describe("isolated background transform skip path", () => {
     await h.transform(input, controller);
 
     expect(h.segmenter.segmentForVideo).not.toHaveBeenCalled();
-    expect(enqueued).toHaveLength(0);
-    expect(input.close).toHaveBeenCalledTimes(1);
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0]).toBe(input);
+    expect(input.close).not.toHaveBeenCalled();
 
     await processor.destroy();
   });

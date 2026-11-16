@@ -90,7 +90,9 @@ export function TopicDetail({ topicId }: { topicId: string }) {
   if (ready && !topic) notFound();
   if (!topic) return <p className="text-sm text-muted-foreground">Загрузка…</p>;
 
-  if (topic.teacherId !== data.currentTeacherId) {
+  const isSchoolTopic = topic.libraryScope === "school";
+  const isOwnTopic = topic.teacherId === data.currentTeacherId;
+  if (!isSchoolTopic && !isOwnTopic) {
     return (
       <p className="text-sm text-muted-foreground">
         Тема принадлежит другому преподавателю.{" "}
@@ -103,6 +105,7 @@ export function TopicDetail({ topicId }: { topicId: string }) {
 
   const students = studentsForTeacher(data.currentTeacherId);
   const visibleTests = homeworks;
+  const canManageTopic = isOwnTopic && !isSchoolTopic;
 
   function openEditor(h?: Homework) {
     setEditingHw(h ?? null);
@@ -136,7 +139,7 @@ export function TopicDetail({ topicId }: { topicId: string }) {
     <div className="space-y-6">
       <PageHeader
         title={topic.title}
-        description={`${topic.subject}${topic.programNote ? ` · ${topic.programNote}` : ""}`}
+        description={`${topic.subject}${topic.programNote ? ` · ${topic.programNote}` : ""}${isSchoolTopic ? " · Общая база" : ""}`}
         actions={
           <div className="flex flex-wrap gap-2">
             <TopicStatusBadge status={topic.status} />
@@ -150,6 +153,13 @@ export function TopicDetail({ topicId }: { topicId: string }) {
         }
       />
 
+      {isSchoolTopic ? (
+        <p className="text-sm text-muted-foreground">
+          Материал общей базы знаний. Просмотр доступен всем преподавателям;
+          изменение — только в Дирекции.
+        </p>
+      ) : null}
+
       {topic.description ? (
         <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
           {topic.description}
@@ -161,35 +171,37 @@ export function TopicDetail({ topicId }: { topicId: string }) {
           <h2 className="font-display text-xl font-semibold tracking-tight">
             Тесты
           </h2>
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="rounded-full"
-              onClick={() => {
-                const published = visibleTests.filter(
-                  (h) => h.status === "published"
-                );
-                setAssignForm({
-                  homeworkId: published[0]?.id ?? "",
-                  studentId: students[0]?.id ?? "",
-                  dueAt: "",
-                });
-                setAssignOpen(true);
-              }}
-            >
-              Назначить ученику
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              className="rounded-full"
-              onClick={() => openEditor()}
-            >
-              Создать тест
-            </Button>
-          </div>
+          {canManageTopic ? (
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="rounded-full"
+                onClick={() => {
+                  const published = visibleTests.filter(
+                    (h) => h.status === "published"
+                  );
+                  setAssignForm({
+                    homeworkId: published[0]?.id ?? "",
+                    studentId: students[0]?.id ?? "",
+                    dueAt: "",
+                  });
+                  setAssignOpen(true);
+                }}
+              >
+                Назначить ученику
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="rounded-full"
+                onClick={() => openEditor()}
+              >
+                Создать тест
+              </Button>
+            </div>
+          ) : null}
         </div>
         {visibleTests.length === 0 ? (
           <p className="text-sm text-muted-foreground">
@@ -237,40 +249,46 @@ export function TopicDetail({ topicId }: { topicId: string }) {
                     <TableCell className="tabular-nums">{qCount}</TableCell>
                     <TableCell className="tabular-nums">{max ?? "—"}</TableCell>
                     <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => openEditor(h)}
-                        >
-                          Изменить
-                        </Button>
-                        {h.status === "draft" ? (
+                      {canManageTopic ? (
+                        <div className="flex flex-wrap gap-1">
                           <Button
                             type="button"
                             size="sm"
                             variant="ghost"
-                            onClick={() => publishHomework(h.id)}
+                            onClick={() => openEditor(h)}
                           >
-                            Опубликовать
+                            Изменить
                           </Button>
-                        ) : null}
-                        <TestArchiveButton
-                          status={h.status}
-                          size="sm"
-                          busy={archiveBusyId === h.id}
-                          onToggle={() => {
-                            if (archiveBusyId) return;
-                            setArchiveBusyId(h.id);
-                            const action =
-                              h.status === "archived"
-                                ? restoreHomework(h.id)
-                                : deleteHomework(h.id);
-                            void action.finally(() => setArchiveBusyId(null));
-                          }}
-                        />
-                      </div>
+                          {h.status === "draft" ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => publishHomework(h.id)}
+                            >
+                              Опубликовать
+                            </Button>
+                          ) : null}
+                          <TestArchiveButton
+                            status={h.status}
+                            size="sm"
+                            busy={archiveBusyId === h.id}
+                            onToggle={() => {
+                              if (archiveBusyId) return;
+                              setArchiveBusyId(h.id);
+                              const action =
+                                h.status === "archived"
+                                  ? restoreHomework(h.id)
+                                  : deleteHomework(h.id);
+                              void action.finally(() => setArchiveBusyId(null));
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          Только просмотр
+                        </span>
+                      )}
                     </TableCell>
                   </TableRow>
                 );

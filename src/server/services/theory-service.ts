@@ -523,7 +523,9 @@ export async function assignTheory(
   requireRoles(ctx, ["teacher"]);
   const teacherId = await requireTeacherProfile(ctx);
   const material = await loadMaterialInOrg(db, ctx, input.materialId);
-  if (material.libraryScope !== "teacher" || material.teacherId !== teacherId) {
+  if (material.libraryScope === "teacher") {
+    if (material.teacherId !== teacherId) throw forbidden();
+  } else if (material.libraryScope !== "school") {
     throw forbidden();
   }
   if (material.status !== "published" || !material.currentVersionId) {
@@ -912,7 +914,7 @@ export async function listTheoryMaterialsForBootstrap(
     .select()
     .from(theoryMaterials)
     .where(eq(theoryMaterials.organizationId, ctx.organizationId));
-  if (!canManageSchoolKnowledgeBase(ctx.role)) {
+  if (!canManageSchoolKnowledgeBase(ctx.role) && ctx.role !== "teacher") {
     materialRows = materialRows.filter((m) => m.libraryScope !== "school");
   }
 
@@ -922,7 +924,9 @@ export async function listTheoryMaterialsForBootstrap(
     .where(eq(theoryAssignments.organizationId, ctx.organizationId));
 
   if (ctx.role === "teacher" && ctx.teacherId) {
-    materialRows = materialRows.filter((m) => m.teacherId === ctx.teacherId);
+    materialRows = materialRows.filter(
+      (m) => m.teacherId === ctx.teacherId || m.libraryScope === "school"
+    );
     assignmentRows = assignmentRows.filter((a) => a.teacherId === ctx.teacherId);
   }
   if (ctx.role === "student" && ctx.studentId) {

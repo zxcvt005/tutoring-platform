@@ -14,6 +14,7 @@ import {
   completeLesson,
   setLessonTopics,
   upsertLesson,
+  upsertTopic,
 } from "@/server/services/platform-mutations";
 import { physicsDirectionId, seedPaidLessons } from "../helpers/commerce";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
@@ -137,5 +138,38 @@ describe("multiple lesson topics and homework", () => {
       .from(lessonDebitState)
       .where(eq(lessonDebitState.lessonId, created.id));
     expect(states).toHaveLength(1);
+  });
+
+  it("allows school catalog topics on a teacher lesson", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await asRole(t.db, "director@demo.local");
+    const anna = await asRole(t.db, "anna@example.com");
+    const schoolTopic = await upsertTopic(t.db, director, {
+      teacherId: "",
+      libraryScope: "school",
+      title: "Школьная тема",
+      subject: "Физика",
+      description: "Из общей базы",
+      status: "active",
+    });
+    const directionId = await physicsDirectionId(t.db, director.organizationId);
+    const startsAt = new Date(Date.now() + 2 * 86_400_000);
+    startsAt.setHours(16, 0, 0, 0);
+    const endsAt = new Date(startsAt.getTime() + 60 * 60_000);
+    const created = await upsertLesson(t.db, anna, {
+      teacherId: "t1",
+      studentIds: ["s1"],
+      directionId,
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      status: "planned",
+    });
+    const written = await setLessonTopics(t.db, anna, {
+      lessonId: created.id,
+      topics: [{ topicId: schoolTopic.id }],
+    });
+    expect(written.ok).toBe(true);
+    expect(written.topics?.[0]?.topicId).toBe(schoolTopic.id);
   });
 });

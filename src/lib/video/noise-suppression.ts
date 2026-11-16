@@ -3,6 +3,13 @@
  * Без платных SDK (Krisp и т.п.) — бесплатно, коммерчески допустимо.
  */
 
+import {
+  LocalAudioTrack,
+  Track,
+  type AudioCaptureOptions,
+  type Room,
+} from "livekit-client";
+
 export type NoiseSuppressionConstraints = {
   noiseSuppression: boolean;
   echoCancellation: boolean;
@@ -32,6 +39,18 @@ export function noiseSuppressionSupported(): boolean {
  * Собирает constraints только из реально поддерживаемых ключей.
  * Иначе один неподдерживаемый ключ валит весь applyConstraints.
  */
+/** Defaults для RoomOptions.audioCaptureDefaults (LiveKit capture time). */
+export function buildAudioCaptureDefaults(
+  noiseSuppressionEnabled: boolean
+): AudioCaptureOptions {
+  const constraints = buildAudioProcessingConstraints(noiseSuppressionEnabled);
+  return {
+    noiseSuppression: constraints.noiseSuppression,
+    echoCancellation: constraints.echoCancellation,
+    autoGainControl: constraints.autoGainControl,
+  };
+}
+
 export function buildAudioProcessingConstraints(
   noiseSuppressionEnabled: boolean
 ): MediaTrackConstraints {
@@ -55,6 +74,42 @@ export type ApplyNoiseResult = {
   appliedNoiseSuppression: boolean | null;
   reason?: "no_track" | "unsupported" | "apply_failed";
 };
+
+/**
+ * Переключает NS при публикации: сначала restartTrack (надёжнее applyConstraints),
+ * иначе — post-hoc applyConstraints к MediaStreamTrack.
+ */
+export async function applyNoiseSuppressionInRoom(
+  room: Room,
+  enabled: boolean
+): Promise<ApplyNoiseResult> {
+  const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+  const published = pub?.track;
+  if (published instanceof LocalAudioTrack && room.localParticipant.isMicrophoneEnabled) {
+    try {
+      await published.restartTrack(buildAudioCaptureDefaults(enabled));
+      const settings = published.mediaStreamTrack.getSettings?.() ?? {};
+      const applied =
+        typeof settings.noiseSuppression === "boolean"
+          ? settings.noiseSuppression
+          : enabled;
+      if (
+        typeof settings.noiseSuppression === "boolean" &&
+        settings.noiseSuppression !== enabled
+      ) {
+        return {
+          ok: false,
+          appliedNoiseSuppression: settings.noiseSuppression,
+          reason: "apply_failed",
+        };
+      }
+      return { ok: true, appliedNoiseSuppression: applied };
+    } catch {
+      /* fall through */
+    }
+  }
+  return applyNoiseSuppressionToTrack(published?.mediaStreamTrack, enabled);
+}
 
 /** Применяет constraints к уже опубликованному аудио-треку. */
 export async function applyNoiseSuppressionToTrack(

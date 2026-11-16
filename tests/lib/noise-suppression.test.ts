@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   applyNoiseSuppressionToTrack,
+  buildAudioCaptureDefaults,
   buildAudioProcessingConstraints,
   noiseSuppressionSupported,
 } from "@/lib/video/noise-suppression";
@@ -23,6 +24,26 @@ describe("noise suppression helpers", () => {
     });
     expect(noiseSuppressionSupported()).toBe(false);
     expect(buildAudioProcessingConstraints(true)).toEqual({});
+  });
+
+  it("maps capture defaults for RoomOptions", () => {
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: {
+        mediaDevices: {
+          getSupportedConstraints: () => ({
+            noiseSuppression: true,
+            echoCancellation: true,
+            autoGainControl: true,
+          }),
+        },
+      },
+    });
+    expect(buildAudioCaptureDefaults(false)).toEqual({
+      noiseSuppression: false,
+      echoCancellation: true,
+      autoGainControl: true,
+    });
   });
 
   it("builds only supported constraint keys", () => {

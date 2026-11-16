@@ -5,10 +5,7 @@ import { resolveAuthContext } from "@/server/authz/context";
 import { loginWithPassword } from "@/server/services/auth-service";
 import { createOrgUser } from "@/server/services/admin-users-service";
 import { buildBootstrap } from "@/server/services/bootstrap-service";
-import {
-  listKnowledgeBase,
-  transferKnowledge,
-} from "@/server/services/knowledge-service";
+import { listKnowledgeBase } from "@/server/services/knowledge-service";
 import { upsertTeacher } from "@/server/services/platform-mutations";
 import { upsertTheory } from "@/server/services/theory-service";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
@@ -65,14 +62,8 @@ describe("assistant cabinet", () => {
     expect(assistantBoot.payments).toEqual([]);
     expect(assistantBoot.products).toEqual([]);
 
-    await expect(listKnowledgeBase(t.db, assistant)).resolves.toBeTruthy();
-    await expect(
-      transferKnowledge(t.db, assistant, {
-        phase: "plan",
-        items: [{ kind: "theory", id: created.id }],
-        teacherIds: ["t1"],
-      })
-    ).resolves.toMatchObject({ phase: "plan" });
+    const kbase = await listKnowledgeBase(t.db, assistant);
+    expect(kbase.school.theories.some((row) => row.id === created.id)).toBe(true);
   });
 
   it("blocks assistant from director admin mutations", async () => {

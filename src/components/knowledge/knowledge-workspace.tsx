@@ -24,10 +24,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { canManageSchoolKnowledgeBase } from "@/lib/auth/school-knowledge";
-import {
-  countIntensivesInFolderSubtree,
-  folderTransferIntensiveWarning,
-} from "@/lib/folders/folder-transfer-intensives";
 import { formatDate } from "@/lib/format";
 import { isCatalogHomeworkPurpose } from "@/lib/homework/source-kind";
 import { apiPlatform } from "@/lib/store/api-client";
@@ -45,21 +41,6 @@ import type {
 type Kind = "theory" | "test" | "topic" | "intensive";
 type Block = "school" | "teachers";
 type SortKey = "title" | "updated";
-
-type TransferResult = {
-  phase: "plan" | "commit";
-  planned: number;
-  created: number;
-  skipped: number;
-  duplicates: {
-    kind: Kind;
-    id: string;
-    title: string;
-    teacherId: string;
-    teacherName: string;
-  }[];
-  failed: { kind: string; id: string; teacherId: string; message: string }[];
-};
 
 const KIND_LABEL: Record<Kind, string> = {
   theory: "Теория",
@@ -107,11 +88,7 @@ export function KnowledgeWorkspace({
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("updated");
   const [showArchived, setShowArchived] = useState(false);
-  const [selected, setSelected] = useState<string[]>([]);
   const [openTeachers, setOpenTeachers] = useState<string[]>([]);
-  const [transferOpen, setTransferOpen] = useState(false);
-  const [folderTransferId, setFolderTransferId] = useState<string | null>(null);
-  const [folderTransferTitle, setFolderTransferTitle] = useState("");
   const [removing, setRemoving] = useState<{
     kind: Kind;
     id: string;
@@ -166,32 +143,11 @@ export function KnowledgeWorkspace({
         : kind === "test"
           ? schoolTests
           : schoolTopics;
-  const visibleSchool = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const rows = schoolItems.filter((item) => {
-      if (!showArchived && (item.status === "archived")) return false;
-      if (!q) return true;
-      return item.title.toLowerCase().includes(q);
-    });
-    return rows.slice().sort((a, b) => {
-      if (sort === "title") return a.title.localeCompare(b.title, "ru");
-      const au = "updatedAt" in a ? a.updatedAt ?? "" : "";
-      const bu = "updatedAt" in b ? b.updatedAt ?? "" : "";
-      return bu.localeCompare(au) || a.title.localeCompare(b.title, "ru");
-    });
-  }, [schoolItems, query, showArchived, sort]);
-
   if (auth && !canManageSchoolKnowledgeBase(auth.role)) {
     return (
       <p className="text-sm text-muted-foreground">
         База знаний доступна только дирекции и ассистентам.
       </p>
-    );
-  }
-
-  function toggleSelected(id: string) {
-    setSelected((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     );
   }
 
@@ -321,24 +277,17 @@ export function KnowledgeWorkspace({
     if (result.ok) setTopicOpen(false);
   }
 
-  const selectedItems = selected
-    .map((id) => visibleSchool.find((item) => item.id === id) ?? schoolItems.find((item) => item.id === id))
-    .filter((item): item is (typeof schoolItems)[number] => Boolean(item));
-
   return (
     <div className="space-y-4">
       <PageHeader
         title="База знаний"
-        description="Оригиналы школы и рабочие материалы преподавателей. Передача создаёт независимую копию."
+        description="Оригиналы школы и рабочие материалы преподавателей."
       />
       <div className="flex flex-wrap gap-2">
         <Button
           type="button"
           variant={block === "school" ? "default" : "outline"}
-          onClick={() => {
-            setBlock("school");
-            setSelected([]);
-          }}
+          onClick={() => setBlock("school")}
         >
           Собственная разработка
         </Button>
@@ -373,15 +322,6 @@ export function KnowledgeWorkspace({
             </Button>
             <Button type="button" variant="outline" onClick={openNewTopic}>
               Новая тема
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={selected.length === 0}
-              onClick={() => setTransferOpen(true)}
-            >
-              Передать выбранные
-              {selected.length ? ` (${selected.length})` : ""}
             </Button>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -428,43 +368,8 @@ export function KnowledgeWorkspace({
               }
             }}
             renderMaterialActions={(item) => {
-              if (item.kind === "folder") {
-                return (
-                  <Button
-                    type="button"
-                    size="xs"
-                    variant="ghost"
-                    onClick={() => {
-                      setFolderTransferId(item.id);
-                      setFolderTransferTitle(item.title);
-                    }}
-                  >
-                    Передать папку
-                  </Button>
-                );
-              }
-              const transferKind =
-                item.kind === "topic" ||
-                item.kind === "test" ||
-                item.kind === "theory"
-                  ? (item.kind as Kind)
-                  : null;
               return (
                 <div className="flex gap-1">
-                  {transferKind && transferKind !== "intensive" ? (
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="ghost"
-                      onClick={() => {
-                        setKind(transferKind);
-                        setSelected([item.id]);
-                        setTransferOpen(true);
-                      }}
-                    >
-                      Передать
-                    </Button>
-                  ) : null}
                   <Button
                     type="button"
                     size="xs"
@@ -510,49 +415,6 @@ export function KnowledgeWorkspace({
           onDelete={(item) => setRemoving(item)}
         />
       )}
-
-      <TransferDialog
-        open={transferOpen}
-        materials={selectedItems.map((item) => ({
-          kind,
-          id: item.id,
-          title: item.title,
-        }))}
-        teachers={data.teachers.filter((teacher) => teacher.status !== "archived")}
-        onOpenChange={setTransferOpen}
-        onDone={async () => {
-          setSelected([]);
-          setTransferOpen(false);
-          await reload();
-        }}
-      />
-
-      <FolderTransferDialog
-        open={Boolean(folderTransferId)}
-        folderId={folderTransferId}
-        folderTitle={folderTransferTitle}
-        intensiveCount={
-          folderTransferId
-            ? countIntensivesInFolderSubtree(
-                data.materialFolders,
-                schoolIntensives,
-                folderTransferId
-              )
-            : 0
-        }
-        teachers={data.teachers.filter((teacher) => teacher.status !== "archived")}
-        onOpenChange={(open) => {
-          if (!open) {
-            setFolderTransferId(null);
-            setFolderTransferTitle("");
-          }
-        }}
-        onDone={async () => {
-          setFolderTransferId(null);
-          setFolderTransferTitle("");
-          await reload();
-        }}
-      />
 
       <TestEditorDialog
         teacherId={testOwner.teacherId}
@@ -668,7 +530,6 @@ export function KnowledgeWorkspace({
           void Promise.resolve(action).finally(() => {
             setBusy(false);
             setRemoving(null);
-            setSelected((prev) => prev.filter((id) => id !== removing.id));
           });
         }}
       />
@@ -984,302 +845,5 @@ function Group({
         })}
       </ul>
     </div>
-  );
-}
-
-function TransferDialog({
-  open,
-  materials,
-  teachers,
-  onOpenChange,
-  onDone,
-}: {
-  open: boolean;
-  materials: { kind: Kind; id: string; title: string }[];
-  teachers: { id: string; fullName: string }[];
-  onOpenChange: (open: boolean) => void;
-  onDone: () => Promise<void>;
-}) {
-  const [picked, setPicked] = useState<string[]>([]);
-  const [duplicates, setDuplicates] = useState<TransferResult["duplicates"]>([]);
-  const [planned, setPlanned] = useState<number | null>(null);
-  const [failures, setFailures] = useState<TransferResult["failed"]>([]);
-  const [busy, setBusy] = useState(false);
-  const lock = useRef(false);
-
-  function reset() {
-    setPicked([]);
-    setDuplicates([]);
-    setPlanned(null);
-    setFailures([]);
-    lock.current = false;
-  }
-
-  async function run(phase: "plan" | "commit", policy: "skip" | "create") {
-    const idempotencyKey = phase === "commit" ? crypto.randomUUID() : undefined;
-    return apiPlatform<TransferResult>(
-      "transferKnowledge",
-      {
-        phase,
-        duplicatePolicy: policy,
-        teacherIds: picked,
-        items: materials.map((item) => ({ kind: item.kind, id: item.id })),
-      },
-      idempotencyKey
-    );
-  }
-
-  async function confirm(policy: "skip" | "create" | "review") {
-    if (lock.current || picked.length === 0) return;
-    lock.current = true;
-    setBusy(true);
-    try {
-      if (policy === "review") {
-        const plan = await run("plan", "skip");
-        setFailures(plan.failed);
-        if (plan.duplicates.length) {
-          setDuplicates(plan.duplicates);
-          setPlanned(plan.planned);
-          return;
-        }
-        const committed = await run("commit", "skip");
-        report(committed);
-        await onDone();
-        reset();
-        return;
-      }
-      const committed = await run("commit", policy);
-      report(committed);
-      await onDone();
-      reset();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Не удалось передать материалы");
-    } finally {
-      lock.current = false;
-      setBusy(false);
-    }
-  }
-
-  const copies = materials.length * picked.length;
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next && !busy) {
-          reset();
-          onOpenChange(false);
-        }
-      }}
-    >
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Передать преподавателям</DialogTitle>
-        </DialogHeader>
-        <p className="text-sm text-muted-foreground">
-          Выбрано материалов: {materials.length}. Преподавателей: {picked.length}.
-          Будет создано копий: {planned ?? copies}. Повторная передача по умолчанию
-          не создаёт дубликат.
-        </p>
-        <ul className="max-h-64 space-y-1 overflow-y-auto">
-          {teachers.map((teacher) => (
-            <li key={teacher.id}>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={picked.includes(teacher.id)}
-                  onCheckedChange={() => {
-                    setDuplicates([]);
-                    setPlanned(null);
-                    setPicked((prev) =>
-                      prev.includes(teacher.id)
-                        ? prev.filter((id) => id !== teacher.id)
-                        : [...prev, teacher.id]
-                    );
-                  }}
-                />
-                {teacher.fullName}
-              </label>
-            </li>
-          ))}
-        </ul>
-        {duplicates.length > 0 ? (
-          <div className="space-y-1 rounded-lg border border-border bg-muted/40 p-3 text-sm">
-            <p className="font-medium">Уже есть копии: {duplicates.length}</p>
-            <ul className="max-h-32 space-y-1 overflow-y-auto text-xs text-muted-foreground">
-              {duplicates.map((item) => (
-                <li key={`${item.id}:${item.teacherId}`}>
-                  «{item.title}» → {item.teacherName}
-                </li>
-              ))}
-            </ul>
-            <p>Пропустить их или явно создать ещё одну копию.</p>
-          </div>
-        ) : null}
-        {failures.length > 0 ? (
-          <ul className="max-h-28 space-y-1 overflow-y-auto text-xs text-destructive">
-            {failures.map((item, index) => (
-              <li key={`${item.id}:${item.teacherId}:${index}`}>{item.message}</li>
-            ))}
-          </ul>
-        ) : null}
-        <DialogFooter>
-          {duplicates.length > 0 ? (
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={busy}
-                onClick={() => void confirm("skip")}
-              >
-                Пропустить существующие
-              </Button>
-              <Button type="button" disabled={busy} onClick={() => void confirm("create")}>
-                Создать ещё копии
-              </Button>
-            </>
-          ) : (
-            <Button
-              type="button"
-              disabled={busy || picked.length === 0}
-              onClick={() => void confirm("review")}
-            >
-              Передать
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function FolderTransferDialog({
-  open,
-  folderId,
-  folderTitle,
-  intensiveCount,
-  teachers,
-  onOpenChange,
-  onDone,
-}: {
-  open: boolean;
-  folderId: string | null;
-  folderTitle: string;
-  intensiveCount: number;
-  teachers: { id: string; fullName: string }[];
-  onOpenChange: (open: boolean) => void;
-  onDone: () => Promise<void>;
-}) {
-  const [picked, setPicked] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const lock = useRef(false);
-  const intensiveWarning = folderTransferIntensiveWarning(intensiveCount);
-
-  async function confirm() {
-    if (!folderId || lock.current || picked.length === 0) return;
-    lock.current = true;
-    setBusy(true);
-    try {
-      const result = await apiPlatform<
-        TransferResult & {
-          foldersCreated?: number;
-          intensivesNotTransferred?: number;
-        }
-      >(
-        "transferFolderToTeachers",
-        {
-          phase: "commit",
-          duplicatePolicy: "skip",
-          sourceFolderId: folderId,
-          teacherIds: picked,
-        },
-        crypto.randomUUID()
-      );
-      const left =
-        result.intensivesNotTransferred ?? intensiveCount;
-      toast.success(
-        `Папка «${folderTitle}»: папок ${result.foldersCreated ?? 0}, материалов ${result.created}, пропущено ${result.skipped}.${
-          left > 0 ? ` Интенсивы не копировались (${left}).` : ""
-        }`
-      );
-      setPicked([]);
-      await onDone();
-      onOpenChange(false);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Не удалось передать папку");
-    } finally {
-      lock.current = false;
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next && !busy) {
-          setPicked([]);
-          onOpenChange(false);
-        }
-      }}
-    >
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Передать папку преподавателям</DialogTitle>
-        </DialogHeader>
-        <p className="text-sm text-muted-foreground">
-          Будет скопирована папка «{folderTitle}» со всеми вложенными папками,
-          темами, тестами и теорией.
-        </p>
-        {intensiveWarning ? (
-          <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
-            {intensiveWarning}
-          </p>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Интенсивы в этой папке не найдены.
-          </p>
-        )}
-        <ul className="max-h-64 space-y-1 overflow-y-auto">
-          {teachers.map((teacher) => (
-            <li key={teacher.id}>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={picked.includes(teacher.id)}
-                  onCheckedChange={() => {
-                    setPicked((prev) =>
-                      prev.includes(teacher.id)
-                        ? prev.filter((id) => id !== teacher.id)
-                        : [...prev, teacher.id]
-                    );
-                  }}
-                />
-                {teacher.fullName}
-              </label>
-            </li>
-          ))}
-        </ul>
-        <DialogFooter>
-          <Button
-            type="button"
-            disabled={busy || picked.length === 0}
-            onClick={() => void confirm()}
-          >
-            Передать папку
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function report(result: TransferResult) {
-  const failed = result.failed.length;
-  if (failed) {
-    toast.error(
-      `Создано копий: ${result.created}. Пропущено: ${result.skipped}. Ошибок: ${failed}.`
-    );
-    return;
-  }
-  toast.success(
-    `Создано копий: ${result.created}. Пропущено: ${result.skipped}.`
   );
 }

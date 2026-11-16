@@ -27,17 +27,12 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  countIntensivesInFolderSubtree,
-  folderTransferIntensiveWarning,
-} from "@/lib/folders/folder-transfer-intensives";
-import {
   isSubsectionFolder,
   type MaterialFolderKind,
   type MaterialsSection,
 } from "@/lib/folders/material-folders";
 import { topicStatusLabel } from "@/lib/format";
 import { isCatalogHomeworkPurpose } from "@/lib/homework/source-kind";
-import { apiPlatform } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { Homework, Topic, TopicStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -48,6 +43,8 @@ type RemovingTarget = {
   id: string;
   title: string;
 };
+
+type LibraryTab = "school" | "own";
 
 const SECTION_META: Record<
   MaterialsSection,
@@ -112,6 +109,7 @@ export function MaterialsSectionWorkspace({
   const teacherId = teacherIdProp ?? data.currentTeacherId;
   const teacher = data.teachers.find((t) => t.id === teacherId);
 
+  const [libraryTab, setLibraryTab] = useState<LibraryTab>("own");
   const [showArchived, setShowArchived] = useState(false);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [topicOpen, setTopicOpen] = useState(false);
@@ -132,9 +130,6 @@ export function MaterialsSectionWorkspace({
   const [testOpen, setTestOpen] = useState(false);
   const [editingTest, setEditingTest] = useState<Homework | null>(null);
   const [testFolderId, setTestFolderId] = useState<string | null>(null);
-  const [folderToSchoolBusy, setFolderToSchoolBusy] = useState<string | null>(
-    null
-  );
   const [removing, setRemoving] = useState<RemovingTarget | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
 
@@ -147,17 +142,23 @@ export function MaterialsSectionWorkspace({
       isCatalogHomeworkPurpose(h.purpose)
   );
 
+  const ownerScope = libraryTab === "school" ? "school" : "teacher";
+  const canEditPanel = libraryTab === "own" && !showArchived;
+
   const folders = useMemo(
     () =>
       (data.materialFolders ?? []).filter(
         (f) =>
-          f.ownerScope === "teacher" &&
-          f.teacherId === teacherId
+          f.ownerScope === ownerScope &&
+          (ownerScope === "school"
+            ? f.teacherId == null
+            : f.teacherId === teacherId)
       ),
-    [data.materialFolders, teacherId]
+    [data.materialFolders, ownerScope, teacherId]
   );
 
-  const canCreateEntity = isSubsectionFolder(folders, currentFolderId);
+  const canCreateEntity =
+    libraryTab === "own" && isSubsectionFolder(folders, currentFolderId);
 
   function openCreateTopic(folderId: string | null) {
     if (!isSubsectionFolder(folders, folderId)) {
@@ -258,28 +259,63 @@ export function MaterialsSectionWorkspace({
         title={meta.title}
         description={meta.description}
         actions={
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-full"
-              disabled={!canCreateEntity || showArchived}
-              onClick={createEntity}
-            >
-              {meta.createLabel}
-            </Button>
-          </div>
+          libraryTab === "own" ? (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-full"
+                disabled={!canCreateEntity || showArchived}
+                onClick={createEntity}
+              >
+                {meta.createLabel}
+              </Button>
+            </div>
+          ) : null
         }
       />
 
-      {!canCreateEntity && !showArchived ? (
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={libraryTab === "school" ? "default" : "outline"}
+          onClick={() => {
+            setLibraryTab("school");
+            setShowArchived(false);
+            setCurrentFolderId(null);
+          }}
+        >
+          Общая
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={libraryTab === "own" ? "default" : "outline"}
+          onClick={() => {
+            setLibraryTab("own");
+            setCurrentFolderId(null);
+          }}
+        >
+          Собственная
+        </Button>
+      </div>
+
+      {libraryTab === "school" ? (
+        <p className="text-sm text-muted-foreground">
+          Материалы дирекции: просмотр и использование на занятиях. Редактирование
+          — в разделе «Дирекция».
+        </p>
+      ) : null}
+
+      {!canCreateEntity && !showArchived && libraryTab === "own" ? (
         <p className="text-sm text-muted-foreground">
           Откройте или создайте подраздел внутри раздела — только там можно
           добавлять {meta.title.toLowerCase()}.
         </p>
       ) : null}
 
-      {section === "test" ? (
+      {section === "test" && libraryTab === "own" ? (
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -308,8 +344,9 @@ export function MaterialsSectionWorkspace({
       <MaterialsFolderPanel
         kinds={meta.kinds}
         contentKind={section}
+        ownerScope={ownerScope}
         teacherId={teacherId}
-        canEdit={!showArchived}
+        canEdit={canEditPanel}
         showArchived={showArchived}
         onCurrentFolderChange={setCurrentFolderId}
         onOpenMaterial={(kind, id) => {
@@ -327,82 +364,52 @@ export function MaterialsSectionWorkspace({
             return;
           }
           if (kind === "test") {
-            const hw = tests.find((t) => t.id === id) ?? null;
+            if (libraryTab === "school") {
+              toast.message(
+                "Общие тесты доступны для назначения на занятии. Редактирование — в Дирекции."
+              );
+              return;
+            }
+            const hw =
+              tests.find((t) => t.id === id) ??
+              data.homeworks.find((t) => t.id === id) ??
+              null;
             setEditingTest(hw);
             setTestFolderId(hw?.folderId ?? hw?.sectionId ?? null);
             setTestOpen(true);
           }
         }}
         renderMaterialActions={(item) => {
-          if (item.kind === "folder" && !showArchived) {
-            return (
-              <Button
-                type="button"
-                size="xs"
-                variant="ghost"
-                disabled={folderToSchoolBusy === item.id}
-                onClick={() => {
-                  void (async () => {
-                    const intensiveCount = countIntensivesInFolderSubtree(
-                      data.materialFolders,
-                      data.intensives.filter(
-                        (row) =>
-                          row.libraryScope === "teacher" &&
-                          row.teacherId === teacherId
-                      ),
-                      item.id
-                    );
-                    const intensiveNote =
-                      folderTransferIntensiveWarning(intensiveCount);
-                    const ok = window.confirm(
-                      [
-                        `Передать папку «${item.title}» в Дирекцию со всем содержимым?`,
-                        "Будет создана копия материалов (включая вложенные папки).",
-                        intensiveNote ?? "Интенсивы в этой папке не найдены.",
-                      ].join("\n\n")
-                    );
-                    if (!ok) return;
-                    setFolderToSchoolBusy(item.id);
-                    try {
-                      const result = await apiPlatform<{
-                        created: number;
-                        skipped: number;
-                        foldersCreated: number;
-                        intensivesNotTransferred?: number;
-                      }>(
-                        "transferFolderToSchool",
-                        {
-                          sourceFolderId: item.id,
-                          phase: "commit",
-                          duplicatePolicy: "skip",
-                        },
-                        crypto.randomUUID()
-                      );
-                      const left =
-                        result.intensivesNotTransferred ?? intensiveCount;
-                      toast.success(
-                        `В школьную базу: папок ${result.foldersCreated}, материалов ${result.created}, пропущено ${result.skipped}.${
-                          left > 0
-                            ? ` Интенсивы не копировались (${left}).`
-                            : ""
-                        }`
-                      );
-                      await reload();
-                    } catch (err) {
-                      toast.error(
-                        err instanceof Error
-                          ? err.message
-                          : "Не удалось передать папку"
-                      );
-                    } finally {
-                      setFolderToSchoolBusy(null);
-                    }
-                  })();
-                }}
-              >
-                В Дирекцию
-              </Button>
-            );
+          if (libraryTab === "school") {
+            if (item.kind === "theory" || item.kind === "intensive") {
+              const href =
+                item.kind === "theory"
+                  ? `/kafedra/theory/${item.id}`
+                  : `/kafedra/intensivy/${item.id}`;
+              return (
+                <Link
+                  href={href}
+                  className={cn(
+                    buttonVariants({ variant: "ghost", size: "xs" })
+                  )}
+                >
+                  Открыть
+                </Link>
+              );
+            }
+            if (item.kind === "topic") {
+              return (
+                <Link
+                  href={`/kafedra/topics/${item.id}`}
+                  className={cn(
+                    buttonVariants({ variant: "ghost", size: "xs" })
+                  )}
+                >
+                  Открыть
+                </Link>
+              );
+            }
+            return null;
           }
           if (item.kind === "test") {
             if (showArchived) {

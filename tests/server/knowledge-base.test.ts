@@ -3,42 +3,26 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import type { AuthContext } from "@/server/authz/context";
 import {
   assignmentSnapshots,
-  lessonTopics,
-  lessons,
-  materialOrigins,
   organizations,
-  teachers,
-  testAnswerKeys,
   testAssignments,
   tests,
-  theoryAssignments,
-  theoryFiles,
-  theoryMaterials,
   topics,
 } from "@/server/db/schema";
 import { loginWithPassword } from "@/server/services/auth-service";
 import { buildBootstrap } from "@/server/services/bootstrap-service";
-import { withIdempotency } from "@/server/idempotency";
-import {
-  listKnowledgeBase,
-  transferKnowledge,
-} from "@/server/services/knowledge-service";
-import { getTheoryObject } from "@/server/media/theory-storage";
+import { listKnowledgeBase } from "@/server/services/knowledge-service";
 import {
   assignHomework,
-  deleteTopic,
   upsertHomework,
   upsertTopic,
 } from "@/server/services/platform-mutations";
 import {
   assignTheory,
-  deleteTheory,
-  uploadTheoryFile,
   upsertTheory,
 } from "@/server/services/theory-service";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
@@ -155,297 +139,117 @@ describe("knowledge base copies", () => {
     expect(updated?.title).toContain("правка");
 
     const teacherBoot = await buildBootstrap(db, anna);
-    expect(teacherBoot.theories.map((item) => item.id)).not.toContain(theory.id);
-    expect(teacherBoot.homeworks.map((item) => item.id)).not.toContain(test.id);
-    expect(teacherBoot.topics.map((item) => item.id)).not.toContain(topic.id);
+    expect(teacherBoot.theories.map((item) => item.id)).toContain(theory.id);
+    expect(teacherBoot.homeworks.map((item) => item.id)).toContain(test.id);
+    expect(teacherBoot.topics.map((item) => item.id)).toContain(topic.id);
   });
 
-  it("copies one and many materials without sharing editable rows", async () => {
+  it("lets teachers see school materials but not edit school rows", async () => {
     const db = await openDb();
     const director = await login(db, "director@demo.local");
     const anna = await login(db, "anna@example.com");
-    const test = await schoolTest(db, director, "Закон Кулона");
     const theory = await upsertTheory(db, director, {
       teacherId: "",
       libraryScope: "school",
-      title: "Электрическое поле",
+      title: "Школьная теория",
       videoUrl: "https://vk.com/video-1_2",
-      testId: test.id,
-      publish: true,
-    });
-    await uploadTheoryFile(db, director, theory.id, {
-      bytes: Buffer.from("%PDF-1.4 notes"),
-      filename: "notes.pdf",
-    });
-    await upsertTheory(db, director, {
-      id: theory.id,
-      teacherId: "",
-      libraryScope: "school",
-      title: "Электрическое поле",
-      videoUrl: "https://vk.com/video-1_2",
-      testId: test.id,
       publish: true,
     });
     const topic = await upsertTopic(db, director, {
       teacherId: "",
       libraryScope: "school",
-      title: "Поле",
+      title: "Школьная тема",
       subject: "Физика",
-      description: "Описание темы",
+      description: "Только чтение",
       status: "active",
     });
 
-    const one = await transferKnowledge(db, director, {
-      items: [{ kind: "theory", id: theory.id }],
-      teacherIds: ["t1"],
-    });
-    expect(one.created).toBe(1);
-    expect(one.failed).toEqual([]);
+    const boot = await buildBootstrap(db, anna);
+    expect(boot.theories.some((row) => row.id === theory.id)).toBe(true);
+    expect(boot.topics.some((row) => row.id === topic.id)).toBe(true);
 
-    const many = await transferKnowledge(db, director, {
-      items: [
-        { kind: "theory", id: theory.id },
-        { kind: "test", id: test.id },
-        { kind: "topic", id: topic.id },
-      ],
-      teacherIds: ["t1", "t2"],
-      duplicatePolicy: "skip",
-    });
-    expect(many.created).toBe(5);
-    expect(many.skipped).toBe(1);
+    await expect(
+      upsertTheory(db, anna, {
+        id: theory.id,
+        teacherId: "t1",
+        title: "Правка",
+        videoUrl: "https://vk.com/video-9_9",
+        publish: true,
+      })
+    ).rejects.toMatchObject({ status: 403 });
 
-    const [originalTheory] = await db
-      .select()
-      .from(theoryMaterials)
-      .where(eq(theoryMaterials.id, theory.id));
-    const copies = await db
-      .select()
-      .from(theoryMaterials)
-      .where(eq(theoryMaterials.title, "Электрическое поле"));
-    const teacherCopies = copies.filter((row) => row.libraryScope === "teacher");
-    expect(teacherCopies).toHaveLength(2);
-    expect(new Set(teacherCopies.map((row) => row.testId)).size).toBe(2);
-    expect(teacherCopies.every((row) => row.testId !== originalTheory!.testId)).toBe(
-      true
-    );
+    await expect(
+      upsertTopic(db, anna, {
+        id: topic.id,
+        teacherId: "t1",
+        title: "Правка",
+        subject: "Физика",
+        description: "Нет",
+        status: "active",
+      })
+    ).rejects.toMatchObject({ status: 403 });
+  });
 
-    const annaCopy = teacherCopies.find((row) => row.teacherId === "t1")!;
-    const igorCopy = teacherCopies.find((row) => row.teacherId === "t2")!;
-    const annaFiles = await db
-      .select()
-      .from(theoryFiles)
-      .where(and(eq(theoryFiles.materialId, annaCopy.id), isNull(theoryFiles.versionId)));
-    const originalFiles = await db
-      .select()
-      .from(theoryFiles)
-      .where(eq(theoryFiles.materialId, theory.id));
-    expect(annaFiles[0]?.objectKey).toBeTruthy();
-    expect(annaFiles[0]?.objectKey).not.toBe(originalFiles[0]?.objectKey);
-    const annaBytes = await getTheoryObject(annaFiles[0]!.objectKey);
-    expect(annaBytes.toString()).toContain("%PDF");
-
-    await upsertTheory(db, anna, {
-      id: annaCopy.id,
-      teacherId: "t1",
-      title: "Копия Анны",
-      videoUrl: "https://vk.com/video-9_9",
-      testId: annaCopy.testId,
+  it("assigns school published theory but not school homework originals", async () => {
+    const db = await openDb();
+    const director = await login(db, "director@demo.local");
+    const anna = await login(db, "anna@example.com");
+    const theory = await upsertTheory(db, director, {
+      teacherId: "",
+      libraryScope: "school",
+      title: "Назначаемая теория",
+      videoUrl: "https://vk.com/video-1_2",
       publish: true,
     });
-    const [annaTest] = await db
-      .select()
-      .from(tests)
-      .where(eq(tests.id, annaCopy.testId!));
-    const questions = structuredClone(annaTest!.questionsPublic) as {
-      id: string;
-      prompt: string;
-    }[];
-    questions[0]!.prompt = "3+3";
-    await upsertHomework(db, anna, {
-      id: annaTest!.id,
+    const schoolHw = await schoolTest(db, director, "Школьный тест");
+    const teacherHw = await upsertHomework(db, anna, {
       teacherId: "t1",
-      title: annaTest!.title,
+      title: "Своё ДЗ",
       status: "published",
-      purpose: "theory",
+      purpose: "homework",
       questions: [
         {
           id: "q1",
           type: "single_choice",
-          prompt: "3+3",
+          prompt: "1+1",
           maxScore: 1,
           options: [
-            { id: "oa", text: "6" },
-            { id: "ob", text: "5" },
+            { id: "oa", text: "2" },
+            { id: "ob", text: "3" },
           ],
-          correctOptionIds: ["ob"],
+          correctOptionIds: ["oa"],
         },
       ],
     });
 
-    const [originalAfter] = await db
-      .select()
-      .from(theoryMaterials)
-      .where(eq(theoryMaterials.id, theory.id));
-    const [igorAfter] = await db
-      .select()
-      .from(theoryMaterials)
-      .where(eq(theoryMaterials.id, igorCopy.id));
-    expect(originalAfter!.title).toBe("Электрическое поле");
-    expect(igorAfter!.title).toBe("Электрическое поле");
-    expect(igorAfter!.videoUrl).toBe(originalTheory!.videoUrl);
-    const [originalTest] = await db
-      .select()
-      .from(tests)
-      .where(eq(tests.id, originalTheory!.testId!));
-    const [originalKey] = await db
-      .select()
-      .from(testAnswerKeys)
-      .where(eq(testAnswerKeys.testId, originalTheory!.testId!));
-    expect((originalTest!.questionsPublic as { prompt: string }[])[0]?.prompt).toBe(
-      "2+2"
-    );
-    expect(originalKey!.payload).toMatchObject({ correctOptionIds: ["oa"] });
-    const [annaKey] = await db
-      .select()
-      .from(testAnswerKeys)
-      .where(eq(testAnswerKeys.testId, annaCopy.testId!));
-    expect(annaKey!.payload).toMatchObject({ correctOptionIds: ["ob"] });
-
-    await upsertTheory(db, director, {
-      id: theory.id,
-      teacherId: "",
-      libraryScope: "school",
-      title: "Оригинал изменён",
-      videoUrl: "https://vk.com/video-1_2",
-      testId: test.id,
-      publish: true,
-    });
-    const [annaAfterEdit] = await db
-      .select()
-      .from(theoryMaterials)
-      .where(eq(theoryMaterials.id, annaCopy.id));
-    expect(annaAfterEdit!.title).toBe("Копия Анны");
-
-    const assigned = await assignTheory(db, anna, {
-      materialId: annaCopy.id,
+    const theoryAssigned = await assignTheory(db, anna, {
+      materialId: theory.id,
       studentIds: ["s1"],
     });
-    expect(assigned.created).toBe(1);
-    await deleteTheory(db, director, theory.id);
-    const [surviving] = await db
-      .select()
-      .from(theoryMaterials)
-      .where(eq(theoryMaterials.id, annaCopy.id));
-    expect(surviving?.title).toBe("Копия Анны");
-    const [origin] = await db
-      .select()
-      .from(materialOrigins)
-      .where(eq(materialOrigins.materialId, annaCopy.id));
-    expect(origin?.sourceId).toBe(theory.id);
-    expect(origin?.sourceTitle).toBe("Электрическое поле");
-    const [stillAssigned] = await db
-      .select()
-      .from(theoryAssignments)
-      .where(eq(theoryAssignments.materialId, annaCopy.id));
-    expect(stillAssigned?.studentId).toBe("s1");
-    await expect(getTheoryObject(annaFiles[0]!.objectKey)).resolves.toBeTruthy();
-  });
+    expect(theoryAssigned.created).toBe(1);
 
-  it("keeps topic copies independent from lessons and repeated transfers", async () => {
-    const db = await openDb();
-    const director = await login(db, "director@demo.local");
-    const anna = await login(db, "anna@example.com");
-    const topic = await upsertTopic(db, director, {
-      teacherId: "",
-      libraryScope: "school",
-      title: "Кинематика",
-      subject: "Физика",
-      description: "Движение",
-      status: "active",
+    await expect(
+      assignHomework(db, anna, {
+        homeworkId: schoolHw.id,
+        teacherId: "t1",
+        studentIds: ["s1"],
+      })
+    ).rejects.toMatchObject({
+      message: "Оригинал базы знаний нельзя назначить напрямую",
     });
-    const [lesson] = await db
-      .select()
-      .from(lessons)
-      .where(eq(lessons.teacherId, "t1"))
-      .limit(1);
-    await db.insert(lessonTopics).values({
-      id: "lt_knowledge",
-      organizationId: "org_demo",
-      lessonId: lesson!.id,
-      topicId: topic.id,
-      title: "Кинематика",
-      sortOrder: 0,
-    });
-    const first = await transferKnowledge(db, director, {
-      items: [{ kind: "topic", id: topic.id }],
-      teacherIds: ["t1"],
-    });
-    expect(first.created).toBe(1);
-    const repeat = await transferKnowledge(db, director, {
-      items: [{ kind: "topic", id: topic.id }],
-      teacherIds: ["t1"],
-    });
-    expect(repeat.created).toBe(0);
-    expect(repeat.skipped).toBe(1);
-    const again = await transferKnowledge(db, director, {
-      items: [{ kind: "topic", id: topic.id }],
-      teacherIds: ["t1"],
-      duplicatePolicy: "create",
-    });
-    expect(again.created).toBe(1);
 
-    const copies = await db
-      .select()
-      .from(topics)
-      .where(and(eq(topics.teacherId, "t1"), eq(topics.title, "Кинематика")));
-    expect(copies).toHaveLength(2);
-    await upsertTopic(db, anna, {
-      id: copies[0]!.id,
+    const hwAssigned = await assignHomework(db, anna, {
+      homeworkId: teacherHw.id,
       teacherId: "t1",
-      sectionId: null,
-      title: "Кинематика Анны",
-      subject: "Физика",
-      description: "Своя версия",
-      status: "active",
+      studentIds: ["s1"],
     });
-    const [original] = await db.select().from(topics).where(eq(topics.id, topic.id));
-    expect(original?.title).toBe("Кинематика");
-    const [link] = await db
-      .select()
-      .from(lessonTopics)
-      .where(eq(lessonTopics.id, "lt_knowledge"));
-    expect(link?.topicId).toBe(topic.id);
-    await deleteTopic(db, director, topic.id);
-    const [linkAfter] = await db
-      .select()
-      .from(lessonTopics)
-      .where(eq(lessonTopics.id, "lt_knowledge"));
-    expect(linkAfter?.topicId).toBe(topic.id);
-    expect(linkAfter?.title).toBe("Кинематика");
-    const [copyAfter] = await db
-      .select()
-      .from(topics)
-      .where(eq(topics.id, copies[0]!.id));
-    expect(copyAfter?.status).toBe("active");
-    expect(copyAfter?.title).toBe("Кинематика Анны");
+    expect(hwAssigned.created).toBe(1);
   });
 
-  it("rejects other organizations and reports partial transfer errors", async () => {
+  it("isolates listKnowledgeBase by organization", async () => {
     const db = await openDb();
     const director = await login(db, "director@demo.local");
-    const anna = await login(db, "anna@example.com");
-    await db.insert(organizations).values({
-      id: "org_other",
-      name: "Другая школа",
-      slug: "other-school",
-    });
-    await db.insert(teachers).values({
-      id: "t_other",
-      organizationId: "org_other",
-      fullName: "Чужой преподаватель",
-      subjects: [],
-    });
-    const topic = await upsertTopic(db, director, {
+    await upsertTopic(db, director, {
       teacherId: "",
       libraryScope: "school",
       title: "Оптика",
@@ -453,23 +257,11 @@ describe("knowledge base copies", () => {
       description: "Свет",
       status: "active",
     });
-    await expect(
-      transferKnowledge(db, anna, {
-        items: [{ kind: "topic", id: topic.id }],
-        teacherIds: ["t1"],
-      })
-    ).rejects.toMatchObject({ status: 403 });
-    await expect(
-      upsertTopic(db, anna, {
-        id: topic.id,
-        teacherId: "t1",
-        title: "Чужая",
-        subject: "Физика",
-        description: "Нет",
-        status: "active",
-      })
-    ).rejects.toMatchObject({ status: 403 });
-
+    await db.insert(organizations).values({
+      id: "org_other",
+      name: "Другая школа",
+      slug: "other-school",
+    });
     const other: AuthContext = {
       ...director,
       organizationId: "org_other",
@@ -478,72 +270,53 @@ describe("knowledge base copies", () => {
     const foreign = await listKnowledgeBase(db, other);
     expect(foreign.school.topics).toEqual([]);
     expect(foreign.teachers.map((item) => item.id)).not.toContain("t1");
-
-    const result = await transferKnowledge(db, director, {
-      items: [
-        { kind: "topic", id: topic.id },
-        { kind: "topic", id: "missing_topic" },
-      ],
-      teacherIds: ["t2", "t_other"],
-    });
-    expect(result.created).toBe(1);
-    expect(result.failed.length).toBe(3);
-    const [copy] = await db
-      .select()
-      .from(topics)
-      .where(and(eq(topics.teacherId, "t2"), eq(topics.title, "Оптика")));
-    expect(copy?.organizationId).toBe("org_demo");
   });
 
-  it("keeps test assignment history and ignores a repeated idempotent transfer", async () => {
+  it("keeps assignment snapshot when the source test is archived", async () => {
     const db = await openDb();
-    const director = await login(db, "director@demo.local");
     const anna = await login(db, "anna@example.com");
-    const test = await schoolTest(db, director, "Контрольная");
-    const payload = {
-      items: [{ kind: "test" as const, id: test.id }],
-      teacherIds: ["t1"],
-    };
-    const first = await withIdempotency(
-      db,
-      director,
-      "POST:/api/platform:transferKnowledge",
-      "transfer-once",
-      async () => ({ status: 200, body: await transferKnowledge(db, director, payload) })
-    );
-    const replay = await withIdempotency(
-      db,
-      director,
-      "POST:/api/platform:transferKnowledge",
-      "transfer-once",
-      async () => ({ status: 200, body: await transferKnowledge(db, director, payload) })
-    );
-    expect(first.body.created).toBe(1);
-    expect(replay.replayed).toBe(true);
-    const copies = await db
-      .select()
-      .from(tests)
-      .where(and(eq(tests.teacherId, "t1"), eq(tests.title, "Контрольная")));
-    expect(copies).toHaveLength(1);
+    const test = await upsertHomework(db, anna, {
+      teacherId: "t1",
+      title: "Контрольная",
+      status: "published",
+      purpose: "homework",
+      questions: [
+        {
+          id: "q1",
+          type: "single_choice",
+          prompt: "2+2",
+          maxScore: 1,
+          options: [
+            { id: "oa", text: "4" },
+            { id: "ob", text: "5" },
+          ],
+          correctOptionIds: ["oa"],
+        },
+      ],
+    });
+
     const assigned = await assignHomework(db, anna, {
-      homeworkId: copies[0]!.id,
+      homeworkId: test.id,
       teacherId: "t1",
       studentIds: ["s1"],
     });
     expect(assigned.created).toBe(1);
+
     const [assignment] = await db
       .select()
       .from(testAssignments)
-      .where(eq(testAssignments.testId, copies[0]!.id));
+      .where(and(eq(testAssignments.testId, test.id), eq(testAssignments.studentId, "s1")));
     const [snapshot] = await db
       .select()
       .from(assignmentSnapshots)
       .where(eq(assignmentSnapshots.assignmentId, assignment!.id));
     expect(snapshot).toBeTruthy();
+
     await db
       .update(tests)
       .set({ status: "archived" })
       .where(eq(tests.id, test.id));
+
     const [assignmentAfter] = await db
       .select()
       .from(testAssignments)

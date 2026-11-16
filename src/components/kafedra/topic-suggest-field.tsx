@@ -147,7 +147,10 @@ export function TopicSuggestField({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => pick(t)}
               >
-                {t.title}
+                <span className="min-w-0 truncate">{t.title}</span>
+                <span className="ml-auto shrink-0 text-[0.65rem] text-muted-foreground">
+                  {t.libraryScope === "school" ? "Общая" : "Собственная"}
+                </span>
               </button>
             </li>
           ))}

@@ -308,7 +308,7 @@ export function KafedraDayHome() {
       ) : (
         <div className="grid items-start gap-4 lg:grid-cols-2">
           <TodayColumn
-            title="Не отмеченные"
+            title="Не отмечено"
             empty="Все занятия на сегодня уже отмечены."
             lessons={unmarkedToday}
             attendances={data.attendances}
@@ -331,7 +331,7 @@ export function KafedraDayHome() {
             }}
           />
           <TodayColumn
-            title="Отмеченные"
+            title="Отмечено"
             empty="Пока нет сохранённых отметок."
             lessons={markedToday}
             attendances={data.attendances}

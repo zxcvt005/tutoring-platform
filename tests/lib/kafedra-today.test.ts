@@ -155,4 +155,17 @@ describe("kafedra today attendance queue", () => {
     expect(splitTodayAttendanceColumns([done], excused).marked).toHaveLength(1);
     expect(splitTodayAttendanceColumns([done], []).unmarked).toHaveLength(1);
   });
+
+  it("marks a lesson with empty studentIds when all attendance rows are final", () => {
+    const orphan = lesson("orphan", fromAppWall(2026, 10, 22, 11, 0, 0), {
+      studentIds: [],
+    });
+    expect(lessonIsAttendanceMarked(orphan, [])).toBe(false);
+    const complete: Attendance[] = [
+      { lessonId: "orphan", studentId: "s1", status: "present" },
+      { lessonId: "orphan", studentId: "s2", status: "absent_excused" },
+    ];
+    expect(lessonIsAttendanceMarked(orphan, complete)).toBe(true);
+    expect(splitTodayAttendanceColumns([orphan], complete).marked).toHaveLength(1);
+  });
 });

@@ -36,6 +36,7 @@ export function TheoryEditor({
 }) {
   const {
     data,
+    auth,
     upsertTheory,
     uploadTheoryFile,
     removeTheoryFile,
@@ -48,6 +49,9 @@ export function TheoryEditor({
   const teacherId =
     scope === "school" ? "" : existing?.teacherId || data.currentTeacherId;
   const folderId = existing?.folderId ?? initialFolderId ?? null;
+  const canEditSchool =
+    auth?.role === "director" || auth?.role === "assistant";
+  const readOnly = scope === "school" && !canEditSchool;
 
   const [title, setTitle] = useState(existing?.title ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
@@ -65,6 +69,10 @@ export function TheoryEditor({
   const files = existing?.files ?? [];
 
   async function save(publish: boolean) {
+    if (readOnly) {
+      toast.error("Общую теорию можно менять только в Дирекции");
+      return;
+    }
     if (!title.trim()) {
       toast.error("Укажите название теории");
       return;
@@ -114,6 +122,10 @@ export function TheoryEditor({
   }
 
   async function onFile(file: File | undefined) {
+    if (readOnly) {
+      toast.error("Общую теорию можно менять только в Дирекции");
+      return;
+    }
     if (!file) return;
     let currentId = id;
     if (!currentId) {
@@ -144,7 +156,11 @@ export function TheoryEditor({
     <div className="space-y-4">
       <PageHeader
         title={existing ? existing.title : "Новая теория"}
-        description="Видео, конспект и тест независимы: нужен хотя бы один. Черновик не виден ученикам. После публикации изменения сохраняются новой версией."
+        description={
+          readOnly
+            ? "Общая база знаний: только просмотр. Редактирование — в Дирекции."
+            : "Видео, конспект и тест независимы: нужен хотя бы один. Черновик не виден ученикам. После публикации изменения сохраняются новой версией."
+        }
         actions={
           <Link href={listHref} className={buttonVariants({ variant: "outline" })}>
             К списку
@@ -160,6 +176,7 @@ export function TheoryEditor({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Например: Электрическое поле"
+              disabled={readOnly}
             />
           </div>
           <div className="space-y-1.5">
@@ -169,6 +186,7 @@ export function TheoryEditor({
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               placeholder="Кратко, о чём материал"
+              disabled={readOnly}
             />
           </div>
           <div className="space-y-1.5">
@@ -177,6 +195,7 @@ export function TheoryEditor({
               value={videoUrl}
               onChange={(e) => setVideoUrl(e.target.value)}
               placeholder="https://vk.com/video-123_456, vkvideo.ru или код «Экспортировать»"
+              disabled={readOnly}
             />
             {parsed && !parsed.ok ? (
               <p className="text-xs text-destructive">{parsed.error}</p>
@@ -205,28 +224,32 @@ export function TheoryEditor({
             ) : (
               <p className="text-xs text-muted-foreground">Тест ещё не создан.</p>
             )}
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setTestOpen(true)}
-            >
-              {attachedTest ? "Редактировать тест" : "Создать тест"}
-            </Button>
+            {!readOnly ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setTestOpen(true)}
+              >
+                {attachedTest ? "Редактировать тест" : "Создать тест"}
+              </Button>
+            ) : null}
           </section>
 
           <section className="panel space-y-2 p-3">
             <p className="text-sm font-medium">Конспекты (необязательно)</p>
             <p className="text-xs text-muted-foreground">PDF, DOC, DOCX</p>
-            <input
-              type="file"
-              accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                e.currentTarget.value = "";
-                void onFile(file);
-              }}
-            />
+            {!readOnly ? (
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.currentTarget.value = "";
+                  void onFile(file);
+                }}
+              />
+            ) : null}
             <ul className="space-y-1">
               {files.map((file) => (
                 <li
@@ -239,7 +262,7 @@ export function TheoryEditor({
                       {theoryFileKindLabel(file.mimeType)}
                     </span>
                   </span>
-                  {id ? (
+                  {id && !readOnly ? (
                     <Button
                       type="button"
                       size="xs"
@@ -256,21 +279,23 @@ export function TheoryEditor({
         </aside>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          disabled={busy}
-          onClick={() => void save(false)}
-        >
-          Сохранить черновик
-        </Button>
-        <Button type="button" disabled={busy} onClick={() => void save(true)}>
-          {existing?.status === "published"
-            ? "Сохранить и опубликовать изменения"
-            : "Опубликовать"}
-        </Button>
-      </div>
+      {!readOnly ? (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={() => void save(false)}
+          >
+            Сохранить черновик
+          </Button>
+          <Button type="button" disabled={busy} onClick={() => void save(true)}>
+            {existing?.status === "published"
+              ? "Сохранить и опубликовать изменения"
+              : "Опубликовать"}
+          </Button>
+        </div>
+      ) : null}
 
       <TestEditorDialog
         teacherId={teacherId}

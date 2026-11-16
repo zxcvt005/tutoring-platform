@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ConnectionState,
   LocalVideoTrack,
   Room,
   RoomEvent,
   Track,
-  type RemoteTrack,
 } from "livekit-client";
 import { supportsBackgroundProcessors } from "@livekit/track-processors";
 import {
@@ -49,10 +49,10 @@ import {
 import {
   attachLocalCamera,
   attachRemoteMedia,
-  playAttachedMedia,
   publishedCameraTrack,
 } from "@/lib/video/media-attach";
 import {
+  applyNoiseSuppressionInRoom,
   applyNoiseSuppressionToTrack,
   noiseSuppressionSupported,
 } from "@/lib/video/noise-suppression";
@@ -209,24 +209,17 @@ export function StudentCallSession({
       const token = tokens.tokens[0];
       if (!token) throw new Error("Нет доступа к комнате");
       const room = createVideoRoom();
-      room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
+      room.on(RoomEvent.TrackSubscribed, () => {
         if (shouldPlayRemote(callRef.current)) {
-          if (track.kind === "video") {
-            for (const el of remoteEls()) {
-              if (!el) continue;
-              track.attach(el);
-              el.muted = true;
-              el.playsInline = true;
-            }
-          }
-          if (track.kind === "audio") {
-            for (const el of audioEls()) {
-              if (!el) continue;
-              track.attach(el);
-              el.muted = false;
-            }
-          }
-          void playAttachedMedia([...remoteEls(), ...audioEls()]);
+          attachRemoteMedia(room, remoteEls(), audioEls());
+        }
+      });
+      room.on(RoomEvent.ConnectionStateChanged, (state) => {
+        if (
+          state === ConnectionState.Connected &&
+          shouldPlayRemote(callRef.current)
+        ) {
+          attachRemoteMedia(room, remoteEls(), audioEls());
         }
       });
       room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach());
@@ -359,7 +352,9 @@ export function StudentCallSession({
     const track = room?.localParticipant.getTrackPublication(
       Track.Source.Microphone
     )?.track?.mediaStreamTrack;
-    const result = await applyNoiseSuppressionToTrack(track, next);
+    const result = room
+      ? await applyNoiseSuppressionInRoom(room, next)
+      : await applyNoiseSuppressionToTrack(track, next);
     if (result.ok) {
       setNoiseOn(next);
     } else {

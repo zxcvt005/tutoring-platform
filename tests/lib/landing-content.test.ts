@@ -62,11 +62,10 @@ describe("landing content", () => {
   it("publishes teachers and verified score years", () => {
     expect(landingTeachers.map((item) => item.id)).toEqual([
       "anatoly",
-      "georgy",
       "anya",
     ]);
     expect(landingTeachers[0]?.points).toEqual([
-      "Личный результат ЕГЭ — 100 баллов",
+      "Личный результат ЕГЭ — 97 баллов",
       "Готовит к экзаменам больше 5 лет, из них последние 3 года — только старшие школьники",
       "100+ подготовленных учеников",
       "Умеет выстраивать приятную атмосферу на занятиях",

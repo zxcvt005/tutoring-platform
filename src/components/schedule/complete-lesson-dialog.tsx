@@ -73,15 +73,13 @@ function CompleteForm({
 }) {
   const {
     data,
-    topicsForTeacher,
+    topicsForLessonCatalog,
     completeLesson,
     upsertTopic,
     sectionsForTeacher,
-    publishedHomeworksForTeacher,
+    publishedHomeworksForLessonCatalog,
   } = useDemoStore();
-  const topics = topicsForTeacher(lesson.teacherId).filter(
-    (t) => t.status === "active"
-  );
+  const topics = topicsForLessonCatalog(lesson.teacherId);
   const participantIds = uniqueStudentIds(lesson.studentIds);
   const [attendanceByStudent, setAttendanceByStudent] = useState<
     Record<string, AttendanceStatus>
@@ -140,7 +138,7 @@ function CompleteForm({
   const nameOf = (id: string) =>
     data.students.find((s) => s.id === id)?.fullName ?? "Ученик";
   const sections = sectionsForTeacher(lesson.teacherId);
-  const publishedTests = publishedHomeworksForTeacher(lesson.teacherId);
+  const publishedTests = publishedHomeworksForLessonCatalog(lesson.teacherId);
 
   const presentIds = participantIds.filter(
     (id) => attendanceByStudent[id] === "present"
@@ -321,7 +319,12 @@ function CompleteForm({
                     const sec = sections.find((s) => s.id === t.sectionId);
                     return (
                       <SelectItem key={t.id} value={t.id}>
-                        {sec ? `${sec.title}: ${t.title}` : t.title}
+                        <span className="flex flex-wrap items-center gap-x-2">
+                          <span>{sec ? `${sec.title}: ${t.title}` : t.title}</span>
+                          <span className="text-[0.65rem] text-muted-foreground">
+                            {t.libraryScope === "school" ? "Общая" : "Собственная"}
+                          </span>
+                        </span>
                       </SelectItem>
                     );
                   })}
@@ -422,8 +425,15 @@ function CompleteForm({
               <SelectContent>
                 {publishedTests.map((h) => (
                   <SelectItem key={h.id} value={h.id}>
-                    {h.title}
-                    {h.maxScore != null ? ` · ${h.maxScore} б.` : ""}
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span>
+                        {h.title}
+                        {h.maxScore != null ? ` · ${h.maxScore} б.` : ""}
+                      </span>
+                      <span className="text-[0.65rem] text-muted-foreground">
+                        {h.libraryScope === "school" ? "Общая" : "Собственная"}
+                      </span>
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>

@@ -437,16 +437,15 @@ export class IsolatedBackgroundProcessor
     const epoch = this.epoch;
     try {
       if (this.destroyed || !this.canvas || !this.ctx || !this.segmenter) {
-        if (
-          resolveSkippedBackgroundFrameOutput({
-            mode: this.mode,
-            hasLastProcessedFrame: this.hasLastProcessedOutput,
-          }) === "repeat_last_processed"
-        ) {
+        const policy = resolveSkippedBackgroundFrameOutput({
+          mode: this.mode,
+          hasLastProcessedFrame: this.hasLastProcessedOutput,
+        });
+        if (policy === "repeat_last_processed") {
           this.enqueueLastProcessed(frame, controller);
           return;
         }
-        if (this.mode === "disabled") {
+        if (policy === "passthrough_original") {
           controller.enqueue(frame);
           passedThrough = true;
         }
@@ -487,6 +486,11 @@ export class IsolatedBackgroundProcessor
           } else {
             this.enqueueLastProcessed(frame, controller);
           }
+          return;
+        }
+        if (policy === "passthrough_original") {
+          controller.enqueue(frame);
+          passedThrough = true;
         }
         return;
       }
@@ -536,13 +540,17 @@ export class IsolatedBackgroundProcessor
           segmented = true;
           this.nextSegmentDue = performance.now() + this.minSegmentIntervalMs;
         } else if (!this.lastMask) {
-          // No mask yet — drop rather than flash camera.
+          // Маска ещё не готова — пропускаем сырое видео, не чёрный кадр.
+          controller.enqueue(frame);
+          passedThrough = true;
           this.nextFrameDue = performance.now() + this.minFrameIntervalMs;
           return;
         }
       }
 
       if (!this.lastMask) {
+        controller.enqueue(frame);
+        passedThrough = true;
         this.nextFrameDue = performance.now() + this.minFrameIntervalMs;
         return;
       }
@@ -585,14 +593,13 @@ export class IsolatedBackgroundProcessor
       });
       if (!passedThrough) {
         try {
-          if (
-            resolveSkippedBackgroundFrameOutput({
-              mode: this.mode,
-              hasLastProcessedFrame: this.hasLastProcessedOutput,
-            }) === "repeat_last_processed"
-          ) {
+          const policy = resolveSkippedBackgroundFrameOutput({
+            mode: this.mode,
+            hasLastProcessedFrame: this.hasLastProcessedOutput,
+          });
+          if (policy === "repeat_last_processed") {
             this.enqueueLastProcessed(frame, controller);
-          } else if (this.mode === "disabled") {
+          } else if (policy === "passthrough_original") {
             controller.enqueue(frame);
             passedThrough = true;
           }
@@ -754,13 +761,15 @@ export function resolveSkippedBackgroundFrameOutput(input: {
 }): SkippedBackgroundFrameOutput {
   if (input.mode === "disabled") return "passthrough_original";
   if (input.hasLastProcessedFrame) return "repeat_last_processed";
-  return "drop";
+  return "passthrough_original";
 }
 
 export function resolveMissingMaskFrameOutput(input: {
   hasLastProcessedFrame: boolean;
-}): Exclude<SkippedBackgroundFrameOutput, "passthrough_original"> {
-  return input.hasLastProcessedFrame ? "repeat_last_processed" : "drop";
+}): SkippedBackgroundFrameOutput {
+  return input.hasLastProcessedFrame
+    ? "repeat_last_processed"
+    : "passthrough_original";
 }
 
 export function createIsolatedBackgroundProcessor(

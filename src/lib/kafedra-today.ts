@@ -111,7 +111,11 @@ export function lessonIsAttendanceMarked(
   attendances: Pick<Attendance, "lessonId" | "studentId" | "status">[]
 ): boolean {
   if (lesson.status === "cancelled") return true;
-  if (lesson.studentIds.length === 0) return false;
+  if (lesson.studentIds.length === 0) {
+    const rows = attendances.filter((a) => a.lessonId === lesson.id);
+    if (rows.length === 0) return false;
+    return rows.every((a) => isFinalAttendanceStatus(a.status));
+  }
   return lesson.studentIds.every((studentId) =>
     isFinalAttendanceStatus(
       attendanceForStudent(attendances, lesson.id, studentId)?.status

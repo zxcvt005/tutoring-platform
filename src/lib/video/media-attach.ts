@@ -1,4 +1,9 @@
-import { LocalVideoTrack, Room, Track } from "livekit-client";
+import {
+  LocalVideoTrack,
+  RemoteParticipant,
+  Room,
+  Track,
+} from "livekit-client";
 
 export function publishedCameraTrack(
   room: Room | null | undefined
@@ -63,6 +68,51 @@ export async function playAttachedMedia(
   return blocked ? "blocked" : "ok";
 }
 
+function ensureRemoteTrackSubscribed(participant: RemoteParticipant) {
+  for (const pub of participant.trackPublications.values()) {
+    if (pub.isSubscribed === false && "setSubscribed" in pub) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (pub as any).setSubscribed?.(true);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+/** Выбирает камеру/микрофон удалённого участника (как remote-grid), с запасным по kind. */
+export function pickRemoteCameraAndMicTracks(room: Room): {
+  videoTrack?: Track;
+  audioTrack?: Track;
+} {
+  let videoTrack: Track | undefined;
+  let audioTrack: Track | undefined;
+  for (const participant of room.remoteParticipants.values()) {
+    ensureRemoteTrackSubscribed(participant);
+    const cameraPub = participant.getTrackPublication(Track.Source.Camera);
+    const micPub = participant.getTrackPublication(Track.Source.Microphone);
+    if (!videoTrack && cameraPub?.track) videoTrack = cameraPub.track;
+    if (!audioTrack && micPub?.track) audioTrack = micPub.track;
+    if (videoTrack && audioTrack) break;
+    for (const pub of participant.trackPublications.values()) {
+      if (!pub.track) continue;
+      if (
+        !videoTrack &&
+        pub.kind === Track.Kind.Video &&
+        pub.source !== Track.Source.ScreenShare
+      ) {
+        videoTrack = pub.track;
+      }
+      if (!audioTrack && pub.kind === Track.Kind.Audio) {
+        audioTrack = pub.track;
+      }
+    }
+    if (videoTrack && audioTrack) break;
+  }
+  return { videoTrack, audioTrack };
+}
+
 export function attachRemoteMedia(
   room: Room | undefined,
   videos: Array<HTMLVideoElement | null>,
@@ -73,24 +123,7 @@ export function attachRemoteMedia(
     for (const el of audios) if (el) el.srcObject = null;
     return;
   }
-  let videoTrack: Track | undefined;
-  let audioTrack: Track | undefined;
-  for (const participant of room.remoteParticipants.values()) {
-    for (const pub of participant.trackPublications.values()) {
-      // Подписываемся явно, если LiveKit ещё не сделал этого.
-      if (pub.isSubscribed === false && "setSubscribed" in pub) {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (pub as any).setSubscribed?.(true);
-        } catch {
-          /* ignore */
-        }
-      }
-      if (!pub.track) continue;
-      if (pub.kind === "video" && !videoTrack) videoTrack = pub.track;
-      if (pub.kind === "audio" && !audioTrack) audioTrack = pub.track;
-    }
-  }
+  const { videoTrack, audioTrack } = pickRemoteCameraAndMicTracks(room);
   for (const el of videos) {
     if (!el) continue;
     if (videoTrack) {

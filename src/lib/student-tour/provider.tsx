@@ -116,13 +116,16 @@ function selectors(data: DemoData): Pick<
   | "lessonsForStudent"
   | "sectionsForTeacher"
   | "topicsForTeacher"
+  | "topicsForLessonCatalog"
   | "homeworksForTopic"
   | "homeworksForTeacher"
   | "publishedHomeworksForTopic"
   | "publishedHomeworksForTeacher"
+  | "publishedHomeworksForLessonCatalog"
   | "assignmentsForTeacher"
   | "assignmentsForStudent"
   | "theoriesForTeacher"
+  | "publishedTheoriesForTeacher"
   | "theoryAssignmentsForTeacher"
   | "theoryAssignmentsForStudent"
   | "intensivesForTeacher"
@@ -143,6 +146,12 @@ function selectors(data: DemoData): Pick<
       data.topicSections.filter((s) => s.teacherId === teacherId),
     topicsForTeacher: (teacherId) =>
       data.topics.filter((t) => t.teacherId === teacherId),
+    topicsForLessonCatalog: (teacherId) =>
+      data.topics.filter(
+        (t) =>
+          t.status === "active" &&
+          (t.teacherId === teacherId || t.libraryScope === "school")
+      ),
     homeworksForTopic: (topicId) =>
       data.homeworks.filter((h) => h.topicId === topicId),
     homeworksForTeacher: (teacherId) =>
@@ -155,6 +164,12 @@ function selectors(data: DemoData): Pick<
       data.homeworks.filter(
         (h) => h.teacherId === teacherId && h.status === "published"
       ),
+    publishedHomeworksForLessonCatalog: (teacherId) =>
+      data.homeworks.filter(
+        (h) =>
+          h.status === "published" &&
+          (h.teacherId === teacherId || h.libraryScope === "school")
+      ),
     assignmentsForTeacher: (teacherId) =>
       data.homeworkAssignments.filter((a) => a.teacherId === teacherId),
     assignmentsForStudent: (studentId) =>
@@ -164,6 +179,12 @@ function selectors(data: DemoData): Pick<
       ),
     theoriesForTeacher: (teacherId) =>
       data.theories.filter((t) => t.teacherId === teacherId),
+    publishedTheoriesForTeacher: (teacherId) =>
+      data.theories.filter(
+        (t) =>
+          t.status === "published" &&
+          (t.teacherId === teacherId || t.libraryScope === "school")
+      ),
     theoryAssignmentsForTeacher: (teacherId) =>
       data.theoryAssignments.filter((a) => a.teacherId === teacherId),
     theoryAssignmentsForStudent: (studentId) =>

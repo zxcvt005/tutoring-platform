@@ -125,7 +125,7 @@ export async function buildBootstrap(
     .from(tests)
     .where(eq(tests.organizationId, orgId));
 
-  if (!canManageSchoolKnowledgeBase(ctx.role)) {
+  if (!canManageSchoolKnowledgeBase(ctx.role) && ctx.role !== "teacher") {
     topicRows = topicRows.filter((row) => row.libraryScope !== "school");
     testRows = testRows.filter((row) => row.libraryScope !== "school");
   }
@@ -156,8 +156,12 @@ export async function buildBootstrap(
           f.ownerScope === "school" ||
           (f.ownerScope === "teacher" && f.teacherId === tid)
       );
-      topicRows = topicRows.filter((t) => t.teacherId === tid);
-      testRows = testRows.filter((t) => t.teacherId === tid);
+      topicRows = topicRows.filter(
+        (t) => t.teacherId === tid || t.libraryScope === "school"
+      );
+      testRows = testRows.filter(
+        (t) => t.teacherId === tid || t.libraryScope === "school"
+      );
       assignmentRows = assignmentRows.filter((a) => a.teacherId === tid);
     }
   }

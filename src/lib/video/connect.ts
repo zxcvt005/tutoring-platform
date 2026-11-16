@@ -6,14 +6,22 @@ import {
   type RoomOptions,
 } from "livekit-client";
 
+import {
+  DEFAULT_CALL_AUDIO_CONSTRAINTS,
+  buildAudioCaptureDefaults,
+} from "@/lib/video/noise-suppression";
+
 /**
  * Не задаём iceServers сами: SDK подставит TURN/TLS текущего сервера.
  */
-export function videoRoomOptions(): RoomOptions {
+export function videoRoomOptions(
+  noiseSuppressionEnabled: boolean = DEFAULT_CALL_AUDIO_CONSTRAINTS.noiseSuppression
+): RoomOptions {
   return {
     adaptiveStream: true,
     dynacast: true,
     disconnectOnPageLeave: true,
+    audioCaptureDefaults: buildAudioCaptureDefaults(noiseSuppressionEnabled),
   };
 }
 

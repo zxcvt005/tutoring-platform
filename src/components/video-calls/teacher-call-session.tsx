@@ -9,7 +9,6 @@ import {
   Track,
   createLocalVideoTrack,
   LocalVideoTrack,
-  type RemoteTrack,
 } from "livekit-client";
 import { supportsBackgroundProcessors } from "@livekit/track-processors";
 import {
@@ -73,11 +72,11 @@ import {
   attachPreviewTrack,
   attachRemoteMedia,
   cameraIsPublished,
-  playAttachedMedia,
   publishedCameraTrack,
   waitUntilCameraUnpublished,
 } from "@/lib/video/media-attach";
 import {
+  applyNoiseSuppressionInRoom,
   applyNoiseSuppressionToTrack,
   noiseSuppressionSupported,
 } from "@/lib/video/noise-suppression";
@@ -329,27 +328,14 @@ export function TeacherCallSession({
 
   const bindRoom = useCallback(
     (id: string, room: Room) => {
-      const onRemote = (track: RemoteTrack) => {
+      const reattachRemoteIfActive = () => {
         const view = callRef.current;
-        const active = view?.activeParticipantId;
-        if (view?.mode === "group" || active === id) {
-          if (track.kind === "video") {
-            for (const el of remoteEls()) {
-              if (!el) continue;
-              track.attach(el);
-              el.muted = true;
-              el.playsInline = true;
-            }
-          }
-          if (track.kind === "audio") {
-            for (const el of audioEls()) {
-              if (!el) continue;
-              track.attach(el);
-              el.muted = false;
-            }
-          }
-          void playAttachedMedia([...remoteEls(), ...audioEls()]);
+        if (view?.mode === "group" || view?.activeParticipantId === id) {
+          attachRemoteMedia(room, remoteEls(), audioEls());
         }
+      };
+      const onRemote = () => {
+        reattachRemoteIfActive();
         refreshOnline();
       };
       room.on(RoomEvent.TrackSubscribed, onRemote);
@@ -366,7 +352,12 @@ export function TeacherCallSession({
       };
       room.on(RoomEvent.ParticipantConnected, onPresence);
       room.on(RoomEvent.ParticipantDisconnected, onPresence);
-      room.on(RoomEvent.ConnectionStateChanged, refreshOnline);
+      room.on(RoomEvent.ConnectionStateChanged, (state) => {
+        refreshOnline();
+        if (state === ConnectionState.Connected) {
+          reattachRemoteIfActive();
+        }
+      });
       room.on(RoomEvent.LocalTrackPublished, () => {
         const view = callRef.current;
         if (view?.mode === "group" || view?.activeParticipantId === id) {
@@ -620,13 +611,7 @@ export function TeacherCallSession({
     const next = !noiseOn;
     let applied = false;
     for (const room of roomsRef.current.values()) {
-      const pub = room.localParticipant.getTrackPublication(
-        Track.Source.Microphone
-      );
-      const result = await applyNoiseSuppressionToTrack(
-        pub?.track?.mediaStreamTrack,
-        next
-      );
+      const result = await applyNoiseSuppressionInRoom(room, next);
       if (result.ok) applied = true;
     }
     if (applied) {

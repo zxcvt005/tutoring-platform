@@ -713,4 +713,29 @@ describe("theory materials", () => {
     const versions = await t.db.select().from(theoryMaterialVersions);
     expect(versions.length).toBeGreaterThanOrEqual(3);
   });
+
+  it("allows teacher to assign published school theory", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await login(t.db, "director@demo.local");
+    const anna = await login(t.db, "anna@example.com");
+    const created = await upsertTheory(t.db, director, {
+      teacherId: "",
+      libraryScope: "school",
+      title: "Школьная теория",
+      videoUrl: "https://vk.com/video-1_2",
+      publish: true,
+    });
+    const result = await assignTheory(t.db, anna, {
+      materialId: created.id,
+      studentIds: ["s1"],
+    });
+    expect(result.created).toBe(1);
+    const [row] = await t.db
+      .select()
+      .from(theoryAssignments)
+      .where(eq(theoryAssignments.materialId, created.id));
+    expect(row.teacherId).toBe("t1");
+    expect(row.studentId).toBe("s1");
+  });
 });

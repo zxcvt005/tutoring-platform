@@ -36,14 +36,14 @@ export function LessonContentEditor({
 }) {
   const {
     data,
-    topicsForTeacher,
-    publishedHomeworksForTeacher,
+    topicsForLessonCatalog,
+    publishedHomeworksForLessonCatalog,
     setLessonTopics,
     assignHomework,
     deleteHomeworkAssignment,
   } = useDemoStore();
-  const catalog = topicsForTeacher(lesson.teacherId);
-  const tests = publishedHomeworksForTeacher(lesson.teacherId);
+  const catalog = topicsForLessonCatalog(lesson.teacherId);
+  const tests = publishedHomeworksForLessonCatalog(lesson.teacherId);
   const savedTopics = useMemo(
     () =>
       topicsForLesson(lesson, catalog).map((t) => ({
@@ -345,7 +345,12 @@ function HomeworkDraftList({
             <SelectContent>
               {tests.map((item) => (
                 <SelectItem key={item.id} value={item.id}>
-                  {homeworkTitle(item.id)}
+                  <span className="flex items-center gap-2">
+                    <span className="truncate">{homeworkTitle(item.id)}</span>
+                    <span className="text-[0.65rem] text-muted-foreground">
+                      {item.libraryScope === "school" ? "Общая" : "Собственная"}
+                    </span>
+                  </span>
                 </SelectItem>
               ))}
             </SelectContent>

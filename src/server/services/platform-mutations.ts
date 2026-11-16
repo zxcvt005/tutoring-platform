@@ -202,6 +202,23 @@ async function writeLessonTopics(
   return { saved, changed: prevKey !== nextKey };
 }
 
+function topicUsableForLesson(
+  topic:
+    | {
+        organizationId: string;
+        teacherId: string | null;
+        libraryScope: string;
+      }
+    | null
+    | undefined,
+  organizationId: string,
+  lessonTeacherId: string
+): boolean {
+  if (!topic || topic.organizationId !== organizationId) return false;
+  if (topic.libraryScope === "school") return true;
+  return topic.teacherId === lessonTeacherId;
+}
+
 async function resolveLessonTopicItems(
   db: AppDb,
   organizationId: string,
@@ -218,14 +235,10 @@ async function resolveLessonTopicItems(
         .from(topics)
         .where(eq(topics.id, requestedId))
         .limit(1);
-      if (
-        !topic ||
-        topic.organizationId !== organizationId ||
-        topic.teacherId !== teacherId
-      ) {
+      if (!topicUsableForLesson(topic, organizationId, teacherId)) {
         throw badRequest("Тема не принадлежит этому преподавателю");
       }
-      out.push({ topicId: topic.id, title: topic.title });
+      out.push({ topicId: topic!.id, title: topic!.title });
     } else if (title) {
       const [match] = await db
         .select()
@@ -233,9 +246,12 @@ async function resolveLessonTopicItems(
         .where(
           and(
             eq(topics.organizationId, organizationId),
-            eq(topics.teacherId, teacherId),
             eq(topics.status, "active"),
-            sql`lower(${topics.title}) = ${title.toLowerCase()}`
+            sql`lower(${topics.title}) = ${title.toLowerCase()}`,
+            or(
+              eq(topics.teacherId, teacherId),
+              eq(topics.libraryScope, "school")
+            )
           )
         )
         .limit(1);
@@ -931,7 +947,7 @@ export async function completeLesson(
       .from(topics)
       .where(eq(topics.id, topicId))
       .limit(1);
-    if (!topic || topic.teacherId !== lesson.teacherId) {
+    if (!topicUsableForLesson(topic, ctx.organizationId, lesson.teacherId)) {
       throw badRequest("Тема не принадлежит этому преподавателю");
     }
   }
@@ -1211,15 +1227,11 @@ export async function setLessonTopic(
       .from(topics)
       .where(eq(topics.id, requestedId))
       .limit(1);
-    if (
-      !topic ||
-      topic.organizationId !== ctx.organizationId ||
-      topic.teacherId !== lesson.teacherId
-    ) {
+    if (!topicUsableForLesson(topic, ctx.organizationId, lesson.teacherId)) {
       throw badRequest("Тема не принадлежит этому преподавателю");
     }
-    topicId = topic.id;
-    subject = topic.title;
+    topicId = topic!.id;
+    subject = topic!.title;
   } else if (title) {
     const [match] = await db
       .select()
@@ -1227,9 +1239,12 @@ export async function setLessonTopic(
       .where(
         and(
           eq(topics.organizationId, ctx.organizationId),
-          eq(topics.teacherId, lesson.teacherId),
           eq(topics.status, "active"),
-          sql`lower(${topics.title}) = ${title.toLowerCase()}`
+          sql`lower(${topics.title}) = ${title.toLowerCase()}`,
+          or(
+            eq(topics.teacherId, lesson.teacherId),
+            eq(topics.libraryScope, "school")
+          )
         )
       )
       .limit(1);
@@ -1918,12 +1933,10 @@ export async function assignHomework(
     .where(eq(tests.id, input.homeworkId))
     .limit(1);
   if (!hw || hw.organizationId !== ctx.organizationId) throw notFound("Тест не найден");
-  if (hw.libraryScope === "school") {
-    throw badRequest(
-      "Оригинал базы знаний ученикам не назначается. Сначала передайте тест преподавателю."
-    );
-  }
   if (hw.status !== "published") throw badRequest("Назначить можно только опубликованный тест");
+  if (hw.libraryScope === "teacher" && hw.teacherId !== input.teacherId) {
+    throw forbidden();
+  }
 
   const studentIds = [...new Set(input.studentIds.filter(Boolean))];
   if (!studentIds.length) throw badRequest("Выберите учеников");
@@ -2997,62 +3010,6 @@ export async function saveToSchoolLibraryAction(
   });
 }
 
-export async function transferKnowledgeAction(
-  db: AppDb,
-  ctx: AuthContext,
-  payload: Record<string, unknown>
-) {
-  const { transferKnowledge } = await import(
-    "@/server/services/knowledge-service"
-  );
-  const items = Array.isArray(payload.items) ? payload.items : [];
-  const teacherIds = Array.isArray(payload.teacherIds) ? payload.teacherIds : [];
-  return transferKnowledge(db, ctx, {
-    items: items.map((item) => {
-      const row = item as { kind?: unknown; id?: unknown };
-      return {
-        kind: row.kind as "theory" | "test" | "topic",
-        id: String(row.id ?? ""),
-      };
-    }),
-    teacherIds: teacherIds.map((id) => String(id)),
-    duplicatePolicy: payload.duplicatePolicy === "create" ? "create" : "skip",
-    phase: payload.phase === "plan" ? "plan" : "commit",
-  });
-}
-
-export async function transferFolderToTeachersAction(
-  db: AppDb,
-  ctx: AuthContext,
-  payload: Record<string, unknown>
-) {
-  const { transferFolderToTeachers } = await import(
-    "@/server/services/knowledge-service"
-  );
-  const teacherIds = Array.isArray(payload.teacherIds) ? payload.teacherIds : [];
-  return transferFolderToTeachers(db, ctx, {
-    sourceFolderId: String(payload.sourceFolderId ?? ""),
-    teacherIds: teacherIds.map((id) => String(id)),
-    duplicatePolicy: payload.duplicatePolicy === "create" ? "create" : "skip",
-    phase: payload.phase === "plan" ? "plan" : "commit",
-  });
-}
-
-export async function transferFolderToSchoolAction(
-  db: AppDb,
-  ctx: AuthContext,
-  payload: Record<string, unknown>
-) {
-  const { transferFolderToSchool } = await import(
-    "@/server/services/knowledge-service"
-  );
-  return transferFolderToSchool(db, ctx, {
-    sourceFolderId: String(payload.sourceFolderId ?? ""),
-    duplicatePolicy: payload.duplicatePolicy === "create" ? "create" : "skip",
-    phase: payload.phase === "plan" ? "plan" : "commit",
-  });
-}
-
 export async function deleteTheoryAction(
   db: AppDb,
   ctx: AuthContext,
@@ -3257,9 +3214,6 @@ export const platformActions = {
   deleteIntensive: deleteIntensiveAction,
   assignIntensive: assignIntensiveAction,
   removeIntensiveFile: removeIntensiveFileAction,
-  transferKnowledge: transferKnowledgeAction,
-  transferFolderToTeachers: transferFolderToTeachersAction,
-  transferFolderToSchool: transferFolderToSchoolAction,
   saveToSchoolLibrary: saveToSchoolLibraryAction,
   getTestGradesStats: getTestGradesStatsAction,
   reportCameraBackgroundDiag: reportCameraBackgroundDiagAction,

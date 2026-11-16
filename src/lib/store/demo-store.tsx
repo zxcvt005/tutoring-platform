@@ -307,13 +307,18 @@ export type DemoStoreValue = {
   lessonsForStudent: (studentId: string) => Lesson[];
   sectionsForTeacher: (teacherId: string) => TopicSection[];
   topicsForTeacher: (teacherId: string) => Topic[];
+  /** Каталог тем для урока: собственные + общая база. */
+  topicsForLessonCatalog: (teacherId: string) => Topic[];
   homeworksForTopic: (topicId: string) => Homework[];
   homeworksForTeacher: (teacherId: string) => Homework[];
   publishedHomeworksForTopic: (topicId: string) => Homework[];
   publishedHomeworksForTeacher: (teacherId: string) => Homework[];
+  /** Опубликованные тесты для назначения на уроке (свои + общая база). */
+  publishedHomeworksForLessonCatalog: (teacherId: string) => Homework[];
   assignmentsForTeacher: (teacherId: string) => HomeworkAssignment[];
   assignmentsForStudent: (studentId: string) => HomeworkAssignment[];
   theoriesForTeacher: (teacherId: string) => TheoryMaterial[];
+  publishedTheoriesForTeacher: (teacherId: string) => TheoryMaterial[];
   theoryAssignmentsForTeacher: (teacherId: string) => TheoryAssignment[];
   theoryAssignmentsForStudent: (studentId: string) => TheoryAssignment[];
   intensivesForTeacher: (teacherId: string) => Intensive[];
@@ -358,6 +363,32 @@ const EMPTY_DATA: DemoData = {
 
 function newClientId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function upsertAttendanceRow(
+  attendances: Attendance[],
+  lessonId: string,
+  studentId: string,
+  status: AttendanceStatus
+): Attendance[] {
+  const rest = attendances.filter(
+    (row) => row.lessonId !== lessonId || row.studentId !== studentId
+  );
+  return [...rest, { lessonId, studentId, status }];
+}
+
+function patchLessonInData(
+  lessons: Lesson[],
+  lesson: Omit<Lesson, "id"> & { id?: string }
+): Lesson[] {
+  const id = lesson.id;
+  if (!id) return lessons;
+  const idx = lessons.findIndex((l) => l.id === id);
+  const merged = { ...lessons[idx], ...lesson, id } as Lesson;
+  if (idx === -1) return [...lessons, merged];
+  const next = lessons.slice();
+  next[idx] = merged;
+  return next;
 }
 
 export function DemoStoreProvider({ children }: { children: ReactNode }) {
@@ -461,7 +492,12 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
   }, [bootKey, enqueueBoot, reload, router]);
 
   const run = useCallback(
-    async (action: string, payload?: unknown, idem?: string): Promise<OkResult> => {
+    async (
+      action: string,
+      payload?: unknown,
+      idem?: string,
+      patch?: (prev: DemoData) => DemoData
+    ): Promise<OkResult> => {
       try {
         const result = await apiPlatform<{
           created?: number;
@@ -471,7 +507,17 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
           testAssignmentId?: string | null;
           status?: string;
         }>(action, payload, idem);
-        await reload();
+        if (patch) {
+          setData((prev) => patch(prev));
+        }
+        try {
+          await reload();
+        } catch (reloadErr) {
+          console.error(reloadErr);
+          toast.warning(
+            "Изменения сохранены, но не удалось обновить данные с сервера. Обновите страницу при необходимости."
+          );
+        }
         return {
           ok: true,
           created: result.created,
@@ -537,7 +583,11 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       deleteStudent: (input) => run("deleteStudent", input),
       archiveStudent: (input) => run("archiveStudent", input),
       restoreStudent: (id) => run("restoreStudent", { id }),
-      upsertLesson: (lesson) => run("upsertLesson", lesson),
+      upsertLesson: (lesson) =>
+        run("upsertLesson", lesson, undefined, (d) => ({
+          ...d,
+          lessons: patchLessonInData(d.lessons, lesson),
+        })),
       createRecurringSchedule: async (input) => {
         const r = await run("createRecurringSchedule", input);
         if (r.ok) {
@@ -558,7 +608,20 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         return r;
       },
       setAttendance: (lessonId, studentId, status) =>
-        run("setAttendance", { lessonId, studentId, status }),
+        run(
+          "setAttendance",
+          { lessonId, studentId, status },
+          undefined,
+          (d) => ({
+            ...d,
+            attendances: upsertAttendanceRow(
+              d.attendances,
+              lessonId,
+              studentId,
+              status
+            ),
+          })
+        ),
       resetLessonConduct: (lessonId) =>
         run("resetLessonConduct", { lessonId }),
       setLessonTopic: (lessonId, title, topicId) =>
@@ -810,6 +873,17 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
             (a, b) =>
               a.sortOrder - b.sortOrder || a.title.localeCompare(b.title, "ru")
           ),
+      topicsForLessonCatalog: (teacherId) =>
+        data.topics
+          .filter(
+            (t) =>
+              t.status === "active" &&
+              (t.teacherId === teacherId || t.libraryScope === "school")
+          )
+          .sort(
+            (a, b) =>
+              a.sortOrder - b.sortOrder || a.title.localeCompare(b.title, "ru")
+          ),
       homeworksForTopic: (topicId) =>
         data.homeworks.filter(
           (h) =>
@@ -838,6 +912,13 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
             h.status === "published" &&
             isCatalogHomeworkPurpose(h.purpose)
         ),
+      publishedHomeworksForLessonCatalog: (teacherId) =>
+        data.homeworks.filter(
+          (h) =>
+            h.status === "published" &&
+            isCatalogHomeworkPurpose(h.purpose) &&
+            (h.teacherId === teacherId || h.libraryScope === "school")
+        ),
       assignmentsForTeacher: (teacherId) =>
         data.homeworkAssignments.filter(
           (a) => a.teacherId === teacherId && a.sourceKind !== "theory" && a.sourceKind !== "intensive"
@@ -852,6 +933,12 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         ),
       theoriesForTeacher: (teacherId) =>
         data.theories.filter((t) => t.teacherId === teacherId),
+      publishedTheoriesForTeacher: (teacherId) =>
+        data.theories.filter(
+          (t) =>
+            t.status === "published" &&
+            (t.teacherId === teacherId || t.libraryScope === "school")
+        ),
       theoryAssignmentsForTeacher: (teacherId) =>
         data.theoryAssignments.filter((a) => a.teacherId === teacherId),
       theoryAssignmentsForStudent: (studentId) =>
