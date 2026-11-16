@@ -2614,20 +2614,15 @@ export async function createLessonCheckoutAction(
   payload: Record<string, unknown>
 ) {
   const { validationError } = await import("@/server/errors");
-  const {
-    isPublicOfferPublished,
-    PUBLIC_OFFER_PENDING_NOTICE,
-  } = await import("@/lib/legal/documents");
+  const { isPublicOfferPublished } = await import("@/lib/legal/documents");
 
-  if (!isPublicOfferPublished()) {
-    throw validationError(PUBLIC_OFFER_PENDING_NOTICE);
-  }
   if (payload.personalDataConsent !== true) {
     throw validationError(
       "Необходимо согласие на обработку персональных данных"
     );
   }
-  if (payload.publicOfferConsent !== true) {
+  const offerPublished = isPublicOfferPublished();
+  if (offerPublished && payload.publicOfferConsent !== true) {
     throw validationError("Необходимо согласие с условиями оферты");
   }
 
@@ -2646,7 +2641,7 @@ export async function createLessonCheckoutAction(
     source: "checkout",
     privacyAck: true,
     personalData: true,
-    publicOffer: true,
+    publicOffer: offerPublished && payload.publicOfferConsent === true,
     marketing:
       payload.marketingConsent === true
         ? true

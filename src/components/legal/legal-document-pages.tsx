@@ -1,6 +1,9 @@
 import { LegalDocumentShell } from "@/components/legal/legal-document-shell";
 import { MarketingWithdrawControl } from "@/components/legal/marketing-withdraw";
-import { LEGAL_DOCUMENTS } from "@/lib/legal/documents";
+import {
+  LEGAL_DOCUMENTS,
+  PUBLIC_OFFER_PENDING_NOTICE,
+} from "@/lib/legal/documents";
 import { marketingConsentParagraphs } from "@/lib/legal/marketing-consent-content";
 import { personalDataConsentParagraphs } from "@/lib/legal/personal-data-consent-content";
 import { privacyPolicySections } from "@/lib/legal/privacy-policy-content";
@@ -96,9 +99,7 @@ export function PublicOfferPlaceholderPage() {
           Документ готовится
         </p>
         <p className="mt-3 text-[0.95rem] leading-relaxed text-foreground/90">
-          Публичная оферта находится в стадии подготовки. Документ будет
-          опубликован дополнительно. До публикации оферты оформление платных
-          заказов через сайт временно недоступно.
+          {PUBLIC_OFFER_PENDING_NOTICE}
         </p>
         <p className="mt-3 text-sm text-muted-foreground">
           На этой странице нет условий договора — заглушка не является

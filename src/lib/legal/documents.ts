@@ -61,13 +61,14 @@ export const LEGAL_DOCUMENTS: Record<LegalDocumentSlug, LegalDocumentMeta> = {
 /** Email Оператора из утверждённых юридических документов. */
 export const LEGAL_OPERATOR_EMAIL = "zxcvt005@gmail.com" as const;
 
-/** Пока false — платный checkout и чекбокс оферты отключены. */
+/** true только после публикации реального текста оферты (не заглушки). */
 export function isPublicOfferPublished(): boolean {
   return LEGAL_DOCUMENTS["public-offer"].available;
 }
 
+/** Текст для страницы-заглушки оферты. Не блокирует оплату. */
 export const PUBLIC_OFFER_PENDING_NOTICE =
-  "Публичная оферта находится в стадии подготовки. Документ будет опубликован дополнительно. До публикации оферты оформление платных заказов через сайт временно недоступно." as const;
+  "Публичная оферта находится в стадии подготовки. Документ будет опубликован дополнительно." as const;
 
 export const LEGAL_DOCUMENT_LIST = Object.values(LEGAL_DOCUMENTS);
 

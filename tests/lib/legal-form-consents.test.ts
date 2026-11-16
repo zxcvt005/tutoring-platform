@@ -27,5 +27,12 @@ describe("form consents", () => {
     expect(LEGAL_DOCUMENTS["public-offer"].available).toBe(false);
     expect(LEGAL_DOCUMENTS["public-offer"].path).toBe("/legal/offer");
   });
+
+  it("does not require offer consent while offer is unpublished", () => {
+    const withPd = { ...emptyFormConsentState(), personalData: true };
+    expect(
+      validateRequiredFormConsents(withPd, { requireOffer: false })
+    ).toEqual({});
+  });
 });
 
