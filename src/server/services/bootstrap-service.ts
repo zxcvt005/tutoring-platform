@@ -710,28 +710,55 @@ export async function buildBootstrap(
     };
   });
 
-  const mappedLessonOrders: LessonOrder[] = orderRows.map((o) => ({
-    id: o.id,
-    studentId: o.studentId,
-    payerUserId: o.payerUserId,
-    tariffId: o.tariffId,
-    optionId: o.optionId,
-    directionId: o.directionId,
-    tariffNameSnapshot: o.tariffNameSnapshot,
-    lessonsCount: o.lessonsCount,
-    totalAmount: Number(o.totalAmount),
-    unitPrice: Number(o.unitPrice),
-    currency: "RUB",
-    featuresSnapshot: (o.featuresSnapshot as TariffFeatureKey[]) ?? [],
-    productIdsSnapshot: (o.productIdsSnapshot as string[]) ?? [],
-    status: o.status as LessonOrder["status"],
-    paidAt: o.paidAt?.toISOString() ?? null,
-    creditedAt: o.creditedAt?.toISOString() ?? null,
-    creditLedgerEntryId: o.creditLedgerEntryId,
-    accessRevoked: o.accessRevoked,
-    createdAt: o.createdAt.toISOString(),
-    updatedAt: o.updatedAt.toISOString(),
-  }));
+  const payerUserIds = [
+    ...new Set(orderRows.map((o) => o.payerUserId).filter(Boolean)),
+  ];
+  const payerNameByUserId = new Map<string, string>();
+  if (payerUserIds.length > 0 && ctx.role === "director") {
+    const payerRows = await db
+      .select({ id: users.id, fullName: users.fullName })
+      .from(users)
+      .where(inArray(users.id, payerUserIds));
+    for (const u of payerRows) payerNameByUserId.set(u.id, u.fullName);
+  } else {
+    for (const s of mappedStudents) {
+      if (s.userId) payerNameByUserId.set(s.userId, s.fullName);
+    }
+  }
+
+  const studentById = new Map(mappedStudents.map((s) => [s.id, s]));
+  const mappedLessonOrders: LessonOrder[] = orderRows.map((o) => {
+    const student = studentById.get(o.studentId);
+    const payerName = payerNameByUserId.get(o.payerUserId) ?? null;
+    const direction = directionById.get(o.directionId);
+    return {
+      id: o.id,
+      studentId: o.studentId,
+      payerUserId: o.payerUserId,
+      payerName:
+        student?.userId && student.userId === o.payerUserId
+          ? student.fullName
+          : payerName,
+      tariffId: o.tariffId,
+      optionId: o.optionId,
+      directionId: o.directionId,
+      directionName: direction?.name ?? null,
+      tariffNameSnapshot: o.tariffNameSnapshot,
+      lessonsCount: o.lessonsCount,
+      totalAmount: Number(o.totalAmount),
+      unitPrice: Number(o.unitPrice),
+      currency: "RUB" as const,
+      featuresSnapshot: (o.featuresSnapshot as TariffFeatureKey[]) ?? [],
+      productIdsSnapshot: (o.productIdsSnapshot as string[]) ?? [],
+      status: o.status as LessonOrder["status"],
+      paidAt: o.paidAt?.toISOString() ?? null,
+      creditedAt: o.creditedAt?.toISOString() ?? null,
+      creditLedgerEntryId: o.creditLedgerEntryId,
+      accessRevoked: o.accessRevoked,
+      createdAt: o.createdAt.toISOString(),
+      updatedAt: o.updatedAt.toISOString(),
+    };
+  });
 
   const mappedPayments: PaymentRecord[] = paymentRows.map((p) => ({
     id: p.id,

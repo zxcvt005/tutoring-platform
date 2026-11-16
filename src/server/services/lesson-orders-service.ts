@@ -1,6 +1,7 @@
-import { and, desc, eq, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 
+import { manualDebitViolatesDebtFloor } from "@/lib/lesson-balance-rules";
 import { STUDENT_CHECKOUT_RETURN_PATH } from "@/lib/payment-checkout";
 import type { TariffFeatureKey } from "@/lib/types";
 import type { AuthContext } from "@/server/authz/context";
@@ -14,6 +15,7 @@ import {
   students,
   tariffPurchaseOptions,
   tariffs,
+  users,
 } from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
 import {
@@ -600,15 +602,22 @@ export async function adminAdjustBalance(
     directionId: string;
     delta: number;
     note: string;
+    /** Явное админ-решение обойти лимит долга (−2). */
+    allowBelowDebtFloor?: boolean;
   }
 ) {
   requireRoles(ctx, ["director"]);
   const note = input.note?.trim();
   if (!note || note.length < 3) {
-    throw validationError("Укажите комментарий к корректировке (не короче 3 символов)");
+    throw validationError(
+      "Укажите причину изменения баланса (не короче 3 символов)"
+    );
   }
-  if (!input.delta || input.delta === 0) {
-    throw validationError("delta должен быть ненулевым");
+  if (!Number.isFinite(input.delta) || input.delta === 0) {
+    throw validationError("Укажите ненулевое изменение баланса");
+  }
+  if (!Number.isInteger(input.delta)) {
+    throw validationError("Количество занятий должно быть целым числом");
   }
 
   const [student] = await db
@@ -634,6 +643,28 @@ export async function adminAdjustBalance(
     )
     .limit(1);
   if (!direction) throw notFound("Направление не найдено");
+
+  const { sumDirectionLedgerDelta } = await import(
+    "@/server/services/lesson-balance"
+  );
+  const remaining = await sumDirectionLedgerDelta(
+    db,
+    ctx.organizationId,
+    student.id,
+    direction.id
+  );
+  const nextRemaining = remaining + input.delta;
+  if (
+    manualDebitViolatesDebtFloor(
+      remaining,
+      input.delta,
+      Boolean(input.allowBelowDebtFloor)
+    )
+  ) {
+    throw validationError(
+      "Списание опустит баланс ниже лимита долга (−2). Отметьте явное разрешение, если это намеренная корректировка."
+    );
+  }
 
   const now = new Date();
   const ledgerId = newId("sll");
@@ -661,10 +692,125 @@ export async function adminAdjustBalance(
       delta: input.delta,
       note,
       ledgerEntryId: ledgerId,
+      previousRemaining: remaining,
+      nextRemaining,
+      allowBelowDebtFloor: Boolean(input.allowBelowDebtFloor),
     },
   });
 
-  return { ok: true as const, ledgerEntryId: ledgerId };
+  return {
+    ok: true as const,
+    ledgerEntryId: ledgerId,
+    previousRemaining: remaining,
+    nextRemaining,
+  };
+}
+
+export type StudentBalanceLedgerEntryDto = {
+  id: string;
+  studentId: string;
+  directionId: string;
+  directionName: string | null;
+  delta: number;
+  reason: string;
+  lessonId: string | null;
+  orderId: string | null;
+  actorUserId: string | null;
+  actorName: string | null;
+  note: string | null;
+  createdAt: string;
+};
+
+/** Журнал изменений баланса занятий ученика (только дирекция). */
+export async function listStudentBalanceLedger(
+  db: AppDb,
+  ctx: AuthContext,
+  input: { studentId: string; directionId?: string | null; limit?: number }
+): Promise<{ entries: StudentBalanceLedgerEntryDto[] }> {
+  requireRoles(ctx, ["director"]);
+  const studentId = input.studentId?.trim();
+  if (!studentId) throw validationError("studentId обязателен");
+
+  const [student] = await db
+    .select({ id: students.id })
+    .from(students)
+    .where(
+      and(
+        eq(students.id, studentId),
+        eq(students.organizationId, ctx.organizationId)
+      )
+    )
+    .limit(1);
+  if (!student) throw notFound("Ученик не найден");
+
+  const limit = Math.min(Math.max(input.limit ?? 100, 1), 300);
+  const conditions = [
+    eq(studentLessonLedger.organizationId, ctx.organizationId),
+    eq(studentLessonLedger.studentId, studentId),
+  ];
+  if (input.directionId?.trim()) {
+    conditions.push(
+      eq(studentLessonLedger.directionId, input.directionId.trim())
+    );
+  }
+
+  const rows = await db
+    .select({
+      id: studentLessonLedger.id,
+      studentId: studentLessonLedger.studentId,
+      directionId: studentLessonLedger.directionId,
+      directionName: learningDirections.name,
+      delta: studentLessonLedger.delta,
+      reason: studentLessonLedger.reason,
+      lessonId: studentLessonLedger.lessonId,
+      orderId: studentLessonLedger.orderId,
+      actorUserId: studentLessonLedger.actorUserId,
+      note: studentLessonLedger.note,
+      createdAt: studentLessonLedger.createdAt,
+    })
+    .from(studentLessonLedger)
+    .leftJoin(
+      learningDirections,
+      eq(learningDirections.id, studentLessonLedger.directionId)
+    )
+    .where(and(...conditions))
+    .orderBy(desc(studentLessonLedger.createdAt))
+    .limit(limit);
+
+  const actorIds = [
+    ...new Set(
+      rows
+        .map((r) => r.actorUserId)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+  const actorNameById = new Map<string, string>();
+  if (actorIds.length > 0) {
+    const actorRows = await db
+      .select({ id: users.id, fullName: users.fullName })
+      .from(users)
+      .where(inArray(users.id, actorIds));
+    for (const a of actorRows) actorNameById.set(a.id, a.fullName);
+  }
+
+  return {
+    entries: rows.map((r) => ({
+      id: r.id,
+      studentId: r.studentId,
+      directionId: r.directionId,
+      directionName: r.directionName ?? null,
+      delta: r.delta,
+      reason: r.reason,
+      lessonId: r.lessonId ?? null,
+      orderId: r.orderId ?? null,
+      actorUserId: r.actorUserId ?? null,
+      actorName: r.actorUserId
+        ? (actorNameById.get(r.actorUserId) ?? null)
+        : null,
+      note: r.note ?? null,
+      createdAt: r.createdAt.toISOString(),
+    })),
+  };
 }
 
 export async function adminRejectPayment(

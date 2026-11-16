@@ -1,7 +1,7 @@
 "use client";
 
 import { CreditCard, MessageCircle, ShieldCheck } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { PaymentStatusCard } from "@/components/auditoria/payment-flow-view";
@@ -16,6 +16,14 @@ import {
   unitPriceLabel,
   type PaymentFlowStatus,
 } from "@/lib/payment-checkout";
+import {
+  loadStudentCheckoutPrefs,
+  resolveCheckoutDirectionId,
+  resolveCheckoutSelection,
+  saveStudentCheckoutPrefs,
+  type StudentCheckoutPrefs,
+} from "@/lib/payment-checkout-prefs";
+import { lessonsCountLabel } from "@/lib/ru-plural";
 import { apiPlatform } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { Tariff, TariffPurchaseOption } from "@/lib/types";
@@ -33,6 +41,7 @@ export function PaymentCheckoutPanel() {
   const { data, ready } = useDemoStore();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hydrated, setHydrated] = useState(false);
   const inflight = useRef(false);
 
   const studentId = data.currentStudentId;
@@ -47,6 +56,8 @@ export function PaymentCheckoutPanel() {
   const [directionId, setDirectionId] = useState("");
   const [tariffId, setTariffId] = useState("");
   const [optionId, setOptionId] = useState("");
+  const selectionRef = useRef({ tariffId: "", optionId: "" });
+  selectionRef.current = { tariffId, optionId };
 
   const activeDirections = useMemo(
     () => directions.filter((d) => d.status === "active"),
@@ -54,20 +65,22 @@ export function PaymentCheckoutPanel() {
   );
 
   const tariffsInDirection = useMemo(() => {
-    const dir = directionId || activeDirections[0]?.id || "";
     return data.tariffs
       .filter(
         (t) =>
           t.status === "active" &&
-          t.directionId === dir &&
+          t.directionId === directionId &&
           (t.purchaseOptions ?? []).some((o) => o.isActive)
       )
       .sort((a, b) => a.name.localeCompare(b.name, "ru"));
-  }, [data.tariffs, directionId, activeDirections]);
+  }, [data.tariffs, directionId]);
 
   const selectedTariff = useMemo(
-    () => data.tariffs.find((t) => t.id === tariffId) ?? null,
-    [data.tariffs, tariffId]
+    () =>
+      tariffsInDirection.find((t) => t.id === tariffId) ??
+      tariffsInDirection[0] ??
+      null,
+    [tariffsInDirection, tariffId]
   );
 
   const options = useMemo(() => {
@@ -78,14 +91,83 @@ export function PaymentCheckoutPanel() {
   }, [selectedTariff]);
 
   const selectedOption = useMemo(
-    () => options.find((o) => o.id === optionId) ?? null,
+    () =>
+      options.find((o) => o.id === optionId) ?? options[0] ?? null,
     [options, optionId]
   );
 
-  const effectiveDirectionId =
-    directionId || activeDirections[0]?.id || "";
-  const effectiveTariffId = tariffId || tariffsInDirection[0]?.id || "";
-  const effectiveOptionId = optionId || options[0]?.id || "";
+  useEffect(() => {
+    if (!ready || !studentId || hydrated) return;
+
+    const prefs = loadStudentCheckoutPrefs(studentId);
+    const dirId = resolveCheckoutDirectionId(
+      activeDirections.map((d) => d.id),
+      prefs.lastDirectionId
+    );
+    setDirectionId(dirId);
+
+    const tariffs = data.tariffs.filter(
+      (t) =>
+        t.status === "active" &&
+        t.directionId === dirId &&
+        (t.purchaseOptions ?? []).some((o) => o.isActive)
+    );
+    const resolved = resolveCheckoutSelection({
+      tariffs,
+      preferred: dirId ? prefs.byDirection[dirId] ?? null : null,
+    });
+    setTariffId(resolved?.tariffId ?? "");
+    setOptionId(resolved?.optionId ?? "");
+    setHydrated(true);
+  }, [
+    ready,
+    studentId,
+    hydrated,
+    activeDirections,
+    data.tariffs,
+  ]);
+
+  // Если каталог обновился и текущий выбор недоступен — подставить актуальный.
+  useEffect(() => {
+    if (!hydrated || !directionId) return;
+    const current = selectionRef.current;
+    const resolved = resolveCheckoutSelection({
+      tariffs: tariffsInDirection,
+      preferred:
+        current.tariffId && current.optionId
+          ? { tariffId: current.tariffId, optionId: current.optionId }
+          : null,
+    });
+    if (!resolved) {
+      if (current.tariffId || current.optionId) {
+        setTariffId("");
+        setOptionId("");
+      }
+      return;
+    }
+    if (
+      resolved.tariffId !== current.tariffId ||
+      resolved.optionId !== current.optionId
+    ) {
+      setTariffId(resolved.tariffId);
+      setOptionId(resolved.optionId);
+    }
+  }, [hydrated, directionId, tariffsInDirection]);
+
+  useEffect(() => {
+    if (!hydrated || !studentId) return;
+    if (!directionId || !tariffId || !optionId) return;
+
+    const prev = loadStudentCheckoutPrefs(studentId);
+    const next: StudentCheckoutPrefs = {
+      lastDirectionId: directionId,
+      byDirection: {
+        ...prev.byDirection,
+        [directionId]: { tariffId, optionId },
+      },
+    };
+    saveStudentCheckoutPrefs(studentId, next);
+  }, [hydrated, studentId, directionId, tariffId, optionId]);
 
   const flowStatus: PaymentFlowStatus = useMemo(
     () => checkoutBannerStatus(payments, orders, studentId),
@@ -104,10 +186,45 @@ export function PaymentCheckoutPanel() {
       )
     : flowStatus;
 
+  function selectDirection(id: string) {
+    setDirectionId(id);
+    const prefs = loadStudentCheckoutPrefs(studentId);
+    const tariffs = data.tariffs.filter(
+      (t) =>
+        t.status === "active" &&
+        t.directionId === id &&
+        (t.purchaseOptions ?? []).some((o) => o.isActive)
+    );
+    const resolved = resolveCheckoutSelection({
+      tariffs,
+      preferred: prefs.byDirection[id] ?? null,
+    });
+    setTariffId(resolved?.tariffId ?? "");
+    setOptionId(resolved?.optionId ?? "");
+  }
+
+  function selectTariff(id: string) {
+    setTariffId(id);
+    const tariff = data.tariffs.find((t) => t.id === id);
+    const activeOptions = [...(tariff?.purchaseOptions ?? [])]
+      .filter((o) => o.isActive)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const prefs = loadStudentCheckoutPrefs(studentId);
+    const preferredOptionId =
+      directionId && prefs.byDirection[directionId]?.tariffId === id
+        ? prefs.byDirection[directionId]?.optionId
+        : undefined;
+    const option =
+      activeOptions.find((o) => o.id === preferredOptionId) ??
+      activeOptions[0] ??
+      null;
+    setOptionId(option?.id ?? "");
+  }
+
   async function goToSchoolPayment() {
     if (inflight.current) return;
-    const tId = tariffId || effectiveTariffId;
-    const oId = optionId || effectiveOptionId;
+    const tId = selectedTariff?.id ?? tariffId;
+    const oId = selectedOption?.id ?? optionId;
     if (!tId || !oId) {
       toast.error("Выберите тариф и вариант покупки");
       return;
@@ -150,9 +267,7 @@ export function PaymentCheckoutPanel() {
 
   if (!ready) return null;
 
-  const canPay = Boolean(
-    (tariffId || effectiveTariffId) && (optionId || effectiveOptionId)
-  );
+  const canPay = Boolean(selectedTariff && selectedOption);
   const charge = selectedOption?.totalPrice ?? 0;
   const lessons = selectedOption?.lessonsCount ?? 0;
 
@@ -177,28 +292,21 @@ export function PaymentCheckoutPanel() {
               <div className="mt-5 space-y-4">
                 <CatalogPick
                   label="Направление"
-                  value={effectiveDirectionId}
+                  value={directionId}
                   options={activeDirections.map((d) => ({
                     id: d.id,
                     label: d.name,
                   }))}
-                  onChange={(id) => {
-                    setDirectionId(id);
-                    setTariffId("");
-                    setOptionId("");
-                  }}
+                  onChange={selectDirection}
                 />
                 <CatalogPick
                   label="Тариф"
-                  value={effectiveTariffId}
+                  value={selectedTariff?.id ?? ""}
                   options={tariffsInDirection.map((t) => ({
                     id: t.id,
                     label: t.name,
                   }))}
-                  onChange={(id) => {
-                    setTariffId(id);
-                    setOptionId("");
-                  }}
+                  onChange={selectTariff}
                   emptyHint={
                     tariffsInDirection.length === 0
                       ? "Нет тарифов в этом направлении"
@@ -207,7 +315,7 @@ export function PaymentCheckoutPanel() {
                 />
                 <OptionGrid
                   options={options}
-                  value={effectiveOptionId}
+                  value={selectedOption?.id ?? ""}
                   onChange={setOptionId}
                   tariff={selectedTariff}
                 />
@@ -222,7 +330,7 @@ export function PaymentCheckoutPanel() {
                   <div>
                     <p className="text-xs text-muted-foreground">Пакет</p>
                     <p className="mt-1 text-sm font-medium">
-                      {lessons > 0 ? `${lessons} занятий` : "—"}
+                      {lessons > 0 ? lessonsCountLabel(lessons) : "—"}
                     </p>
                     {lessons > 0 && charge > 0 ? (
                       <p className="mt-0.5 text-xs text-muted-foreground">
@@ -326,7 +434,7 @@ function DirectionBalances({ studentId }: { studentId: string }) {
               {b.directionName ?? b.directionSlug ?? "Направление"}
             </span>
             <span className="font-display font-semibold tabular-nums">
-              {b.balance}
+              {lessonsCountLabel(b.balance)}
             </span>
           </li>
         ))}
@@ -416,7 +524,7 @@ function OptionGrid({
                 )}
               >
                 <span className="font-medium tabular-nums">
-                  {o.lessonsCount} занятий
+                  {lessonsCountLabel(o.lessonsCount)}
                 </span>
                 <span className="mt-1 font-display text-xl font-semibold tabular-nums">
                   {o.totalPrice.toLocaleString("ru-RU")} ₽

@@ -7,6 +7,7 @@ import { notFound } from "next/navigation";
 import { EnterCabinetButton } from "@/components/admin/enter-cabinet-button";
 import { ProfileAccessPanel } from "@/components/admin/profile-access-panel";
 import { PageHeader } from "@/components/layout/page-header";
+import { StudentBalancePanel } from "@/components/students/student-balance-panel";
 import {
   HomeworkAssignmentStatusBadge,
   LessonStatusBadge,
@@ -131,6 +132,14 @@ export function StudentDetail({
         />
       ) : null}
 
+      {mode === "direkciya" ? (
+        <StudentBalancePanel
+          studentId={student.id}
+          studentName={student.fullName}
+          directionBalances={directionBalances}
+        />
+      ) : null}
+
       <section className="grid gap-4 lg:grid-cols-3">
         <div className="panel space-y-3 p-5 lg:col-span-1">
           <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
@@ -145,28 +154,34 @@ export function StudentDetail({
               <span className="text-muted-foreground">Класс</span>
               <span>{gradeLabel(student.grade)}</span>
             </div>
-            {directionBalances.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Баланс по направлениям появится после покупки занятий.
-              </p>
-            ) : (
-              <div className="space-y-1.5">
-                <p className="text-muted-foreground">Баланс занятий</p>
-                {directionBalances.map((b) => (
-                  <div
-                    key={b.directionId}
-                    className="flex justify-between gap-2 tabular-nums"
-                  >
-                    <span>{b.directionName ?? b.directionSlug ?? "—"}</span>
-                    <span className="font-medium">{b.balance}</span>
+            {mode === "kafedra" ? (
+              <>
+                {directionBalances.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Баланс по направлениям появится после покупки занятий.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    <p className="text-muted-foreground">Баланс занятий</p>
+                    {directionBalances.map((b) => (
+                      <div
+                        key={b.directionId}
+                        className="flex justify-between gap-2 tabular-nums"
+                      >
+                        <span>
+                          {b.directionName ?? b.directionSlug ?? "—"}
+                        </span>
+                        <span className="font-medium">{b.balance}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
-            <TariffBalanceNotice
-              remaining={minBalance}
-              packageStatus={packageStatusFromBalance(minBalance)}
-            />
+                )}
+                <TariffBalanceNotice
+                  remaining={minBalance}
+                  packageStatus={packageStatusFromBalance(minBalance)}
+                />
+              </>
+            ) : null}
             {telegramDisplay(student.telegram) ? (
               <div className="flex justify-between gap-2">
                 <span className="text-muted-foreground">Telegram</span>

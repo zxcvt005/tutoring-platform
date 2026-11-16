@@ -10,6 +10,7 @@ import {
   paymentRecordStatusLabel,
   STUDENT_CHECKOUT_PATH,
 } from "@/lib/payment-checkout";
+import { lessonsCountLabel } from "@/lib/ru-plural";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { useStudentCabinetHref } from "@/lib/student-tour/paths";
 import { TariffBalanceNotice } from "@/components/tariff-balance-notice";
@@ -113,8 +114,8 @@ export function PaymentHistoryPanel() {
                 <p className="text-xs text-muted-foreground">
                   {b.directionName ?? b.directionSlug ?? "Направление"}
                 </p>
-                <p className="mt-1 font-display text-3xl font-semibold tabular-nums">
-                  {b.balance}
+                <p className="mt-1 font-display text-2xl font-semibold tabular-nums sm:text-3xl">
+                  {lessonsCountLabel(b.balance)}
                 </p>
               </li>
             ))}
@@ -183,7 +184,7 @@ function OrderRow({
           <p className="font-medium break-words">{order.tariffNameSnapshot}</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {formatDateTime(order.createdAt ?? payment?.createdAt ?? "")} ·{" "}
-            {order.lessonsCount} зан. ·{" "}
+            {lessonsCountLabel(order.lessonsCount)} ·{" "}
             {lessonOrderStatusLabel(order.status)}
             {payment
               ? ` · платёж: ${paymentRecordStatusLabel(payment.status)}`

@@ -2678,6 +2678,28 @@ export async function adminAdjustLessonBalanceAction(
     directionId: String(payload.directionId ?? ""),
     delta: Number(payload.delta),
     note: String(payload.note ?? ""),
+    allowBelowDebtFloor: Boolean(payload.allowBelowDebtFloor),
+  });
+}
+
+export async function listStudentBalanceLedgerAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { listStudentBalanceLedger } = await import(
+    "@/server/services/lesson-orders-service"
+  );
+  return listStudentBalanceLedger(db, ctx, {
+    studentId: String(payload.studentId ?? ""),
+    directionId:
+      payload.directionId == null || payload.directionId === ""
+        ? null
+        : String(payload.directionId),
+    limit:
+      payload.limit == null || payload.limit === ""
+        ? undefined
+        : Number(payload.limit),
   });
 }
 
@@ -3185,6 +3207,7 @@ export const platformActions = {
   refreshLessonOrderPayment: refreshLessonOrderPaymentAction,
   adminRefundLessonPayment: adminRefundLessonPaymentAction,
   adminAdjustLessonBalance: adminAdjustLessonBalanceAction,
+  listStudentBalanceLedger: listStudentBalanceLedgerAction,
   getCommerceIncomeOverview: getCommerceIncomeOverviewAction,
   getIncomeOverview: getIncomeOverviewAction,
   getTeacherPayRates: getTeacherPayRatesAction,

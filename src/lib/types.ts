@@ -271,9 +271,12 @@ export type LessonOrder = {
   id: string;
   studentId: string;
   payerUserId: string;
+  /** Имя плательщика (если отличается от ученика — видно в журнале оплат) */
+  payerName?: string | null;
   tariffId: string;
   optionId?: string | null;
   directionId: string;
+  directionName?: string | null;
   tariffNameSnapshot: string;
   lessonsCount: number;
   totalAmount: number;
@@ -297,6 +300,22 @@ export type StudentLessonLedgerReason =
   | "reversal"
   | "manual_adjustment"
   | "refund_clawback";
+
+/** Запись журнала баланса занятий (для карточки ученика в Дирекции). */
+export type StudentLessonLedgerEntry = {
+  id: string;
+  studentId: string;
+  directionId: string;
+  directionName?: string | null;
+  delta: number;
+  reason: StudentLessonLedgerReason | string;
+  lessonId?: string | null;
+  orderId?: string | null;
+  actorUserId?: string | null;
+  actorName?: string | null;
+  note?: string | null;
+  createdAt: string;
+};
 
 /** Агрегированный баланс занятий ученика по направлению (вычисляемый). */
 export type StudentDirectionBalance = {

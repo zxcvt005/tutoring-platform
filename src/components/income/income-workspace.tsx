@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { RefreshCw, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -17,12 +18,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatDateTime } from "@/lib/format";
-import {
-  buildMonthSummaries,
-  filterIncomePayments,
-  monthKeyFromInstant,
-  type MonthSummary,
-} from "@/lib/income-analytics";
 import {
   lessonOrderStatusLabel,
   paymentRecordStatusLabel,
@@ -40,11 +35,22 @@ type CommerceRow = {
   payment: PaymentRecord;
   order: LessonOrder | null;
   studentName: string;
+  payerName: string;
+  payerDiffers: boolean;
+  directionName: string;
+  eventAt: string;
 };
 
 function money(n: number): string {
   const abs = Math.abs(n).toLocaleString("ru-RU");
   return n < 0 ? `−${abs} ₽` : `${abs} ₽`;
+}
+
+function providerLabel(provider: string | null | undefined): string {
+  if (!provider) return "—";
+  if (provider === "tochka") return "Точка (СБП)";
+  if (provider === "stub") return "Тестовый";
+  return provider;
 }
 
 function Metric({
@@ -57,11 +63,13 @@ function Metric({
   hint?: string;
 }) {
   return (
-    <div className="min-w-0">
+    <div className="min-w-0 rounded-xl border border-border/60 bg-[color:var(--panel-soft,#fffdf9)] px-4 py-3">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="truncate font-medium tabular-nums tracking-tight">{value}</p>
+      <p className="mt-1 truncate font-display text-xl font-semibold tabular-nums tracking-tight">
+        {value}
+      </p>
       {hint ? (
-        <p className="text-[11px] leading-snug text-muted-foreground/80">
+        <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">
           {hint}
         </p>
       ) : null}
@@ -69,221 +77,69 @@ function Metric({
   );
 }
 
-function MonthBlock({
-  month,
-  defaultOpen,
-  query,
-  statusFilter,
-}: {
-  month: MonthSummary;
-  defaultOpen: boolean;
-  query: string;
-  statusFilter: PaymentRecordStatus | "all";
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const visible = useMemo(
-    () =>
-      filterIncomePayments(month.payments, {
-        query,
-        status: statusFilter,
-      }),
-    [month.payments, query, statusFilter]
-  );
-
-  const revenue = useMemo(
-    () =>
-      visible.reduce((sum, p) => {
-        if (p.status === "paid" && p.paidAt) return sum + p.amount;
-        if (p.status === "refunded") return sum + p.amount;
-        return sum;
-      }, 0),
-    [visible]
-  );
-
-  return (
-    <section className="border-b border-border/70 last:border-0">
-      <button
-        type="button"
-        className="flex w-full items-start gap-2 py-3 text-left"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        {open ? (
-          <ChevronDown className="mt-1 size-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground" />
-        )}
-        <div className="min-w-0 flex-1">
-          <h3 className="font-display text-base font-semibold tracking-tight">
-            {month.label}
-          </h3>
-          <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <Metric
-              label="Операций"
-              value={String(visible.length)}
-            />
-            <Metric label="Поступило" value={money(revenue)} />
-            <Metric
-              label="Купленных пакетов"
-              value={String(month.purchasedTariffs)}
-            />
-          </div>
-        </div>
-      </button>
-
-      {open ? (
-        <div className="pb-4 pl-6">
-          {visible.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Нет операций за этот месяц
-              {query || statusFilter !== "all" ? " по фильтру" : ""}.
-            </p>
-          ) : (
-            <ul className="space-y-1">
-              {visible.map((p) => (
-                <li
-                  key={p.id}
-                  className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 rounded-lg px-2 py-1.5 text-sm hover:bg-muted/40"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">
-                      {p.studentName}
-                      {p.tariffName ? (
-                        <span className="font-normal text-muted-foreground">
-                          {" "}
-                          · {p.tariffName}
-                        </span>
-                      ) : null}
-                    </p>
-                    <p className="text-xs text-muted-foreground tabular-nums">
-                      {formatDateTime(p.at)} ·{" "}
-                      {paymentRecordStatusLabel(p.status)}
-                      {p.lessonsLimit != null ? ` · ${p.lessonsLimit} зан.` : ""}
-                    </p>
-                    {p.failureReason ? (
-                      <p className="text-xs text-destructive/90">
-                        {p.failureReason}
-                      </p>
-                    ) : null}
-                  </div>
-                  <span
-                    className={cn(
-                      "tabular-nums font-medium",
-                      p.status === "refunded" && "text-destructive"
-                    )}
-                  >
-                    {money(p.amount)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ) : null}
-    </section>
-  );
+function dayStartMs(isoDate: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return null;
+  const t = Date.parse(`${isoDate}T00:00:00`);
+  return Number.isFinite(t) ? t : null;
 }
 
-function CommercePaymentLine({
-  row,
-  busy,
-  onRefund,
-  onRefresh,
-}: {
-  row: CommerceRow;
-  busy: boolean;
-  onRefund: () => void;
-  onRefresh: () => void;
-}) {
-  const { payment, order, studentName } = row;
-  return (
-    <li className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border/60 px-3 py-2.5 text-sm hover:bg-muted/30">
-      <div className="min-w-0 flex-1">
-        <p className="font-medium">
-          <Link
-            href={`/direkciya/students/${payment.studentId}`}
-            className="hover:underline"
-          >
-            {studentName}
-          </Link>
-          {order ? (
-            <span className="font-normal text-muted-foreground">
-              {" "}
-              · {order.tariffNameSnapshot}
-            </span>
-          ) : null}
-        </p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          {formatDateTime(payment.paidAt ?? payment.createdAt)} ·{" "}
-          {paymentRecordStatusLabel(payment.status)}
-          {order
-            ? ` · заказ: ${lessonOrderStatusLabel(order.status)}`
-            : null}
-          {order ? ` · ${order.lessonsCount} зан.` : null}
-        </p>
-        {payment.failureReason ? (
-          <p className="mt-1 text-xs text-destructive/90">
-            {payment.failureReason}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
-        <span
-          className={cn(
-            "tabular-nums font-medium",
-            payment.status === "refunded" && "text-destructive"
-          )}
-        >
-          {money(
-            payment.status === "refunded" ? -payment.amount : payment.amount
-          )}
-        </span>
-        {payment.status === "pending" ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 rounded-lg"
-            disabled={busy}
-            onClick={onRefresh}
-          >
-            <RefreshCw className="mr-1 size-3.5" />
-            Обновить
-          </Button>
-        ) : null}
-        {payment.status === "paid" ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 rounded-lg"
-            disabled={busy}
-            onClick={onRefund}
-          >
-            Возврат
-          </Button>
-        ) : null}
-      </div>
-    </li>
-  );
+function dayEndMs(isoDate: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return null;
+  const t = Date.parse(`${isoDate}T23:59:59.999`);
+  return Number.isFinite(t) ? t : null;
 }
 
 export function IncomeWorkspace() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const studentIdFromUrl = searchParams.get("studentId")?.trim() || "";
+
   const { data, ready, reload } = useDemoStore();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
     PaymentRecordStatus | "all"
   >("all");
-  const [serverMonths, setServerMonths] = useState<MonthSummary[] | null>(null);
+  const [directionFilter, setDirectionFilter] = useState<string>("all");
+  const [periodFrom, setPeriodFrom] = useState("");
+  const [periodTo, setPeriodTo] = useState("");
+  const [studentFilter, setStudentFilter] = useState(studentIdFromUrl);
+
+  useEffect(() => {
+    setStudentFilter(studentIdFromUrl);
+  }, [studentIdFromUrl]);
+
+  function clearStudentFilter() {
+    setStudentFilter("");
+    if (studentIdFromUrl) {
+      router.replace("/direkciya/payments");
+    }
+  }
+
+  function focusStudent(studentId: string) {
+    setStudentFilter(studentId);
+    router.replace(
+      `/direkciya/payments?studentId=${encodeURIComponent(studentId)}`
+    );
+  }
 
   const orders = data.lessonOrders ?? [];
   const payments = data.payments ?? [];
   const students = data.students ?? [];
+  const directions = (data.learningDirections ?? []).filter(
+    (d) => d.status === "active"
+  );
 
   const studentName = useMemo(() => {
     const map = new Map(students.map((s) => [s.id, s.fullName]));
     return (id: string) => map.get(id) ?? "Ученик";
+  }, [students]);
+
+  const studentUserId = useMemo(() => {
+    const map = new Map(
+      students.map((s) => [s.id, s.userId ?? null] as const)
+    );
+    return (id: string) => map.get(id) ?? null;
   }, [students]);
 
   const orderById = useMemo(
@@ -295,84 +151,132 @@ export function IncomeWorkspace() {
     return [...payments]
       .sort(
         (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          new Date(b.paidAt ?? b.createdAt).getTime() -
+          new Date(a.paidAt ?? a.createdAt).getTime()
       )
-      .map((payment) => ({
-        payment,
-        order: orderById.get(payment.orderId) ?? null,
-        studentName: studentName(payment.studentId),
-      }));
-  }, [payments, orderById, studentName]);
+      .map((payment) => {
+        const order = orderById.get(payment.orderId) ?? null;
+        const sName = studentName(payment.studentId);
+        const payerName =
+          order?.payerName?.trim() ||
+          (order && studentUserId(payment.studentId) === order.payerUserId
+            ? sName
+            : null) ||
+          sName;
+        const payerDiffers = Boolean(
+          order &&
+            order.payerUserId &&
+            studentUserId(payment.studentId) !== order.payerUserId &&
+            payerName !== sName
+        );
+        return {
+          payment,
+          order,
+          studentName: sName,
+          payerName,
+          payerDiffers,
+          directionName:
+            order?.directionName ??
+            directions.find((d) => d.id === order?.directionId)?.name ??
+            "—",
+          eventAt: payment.paidAt ?? payment.createdAt,
+        };
+      });
+  }, [payments, orderById, studentName, studentUserId, directions]);
 
   const filteredRows = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const fromMs = periodFrom ? dayStartMs(periodFrom) : null;
+    const toMs = periodTo ? dayEndMs(periodTo) : null;
+
     return commerceRows.filter((row) => {
+      if (studentFilter && row.payment.studentId !== studentFilter) {
+        return false;
+      }
       if (statusFilter !== "all" && row.payment.status !== statusFilter) {
         return false;
       }
+      if (
+        directionFilter !== "all" &&
+        row.order?.directionId !== directionFilter
+      ) {
+        return false;
+      }
+      const at = new Date(row.eventAt).getTime();
+      if (fromMs != null && at < fromMs) return false;
+      if (toMs != null && at > toMs) return false;
       if (!q) return true;
       return (
         row.studentName.toLowerCase().includes(q) ||
+        row.payerName.toLowerCase().includes(q) ||
         (row.order?.tariffNameSnapshot ?? "").toLowerCase().includes(q)
       );
     });
-  }, [commerceRows, query, statusFilter]);
+  }, [
+    commerceRows,
+    query,
+    statusFilter,
+    directionFilter,
+    periodFrom,
+    periodTo,
+    studentFilter,
+  ]);
 
-  const localMonths = useMemo(() => {
-    return buildMonthSummaries({
-      payments: payments.map((p) => {
-        const order = orderById.get(p.orderId);
-        const signed =
-          p.status === "refunded" ? -Number(p.amount) : Number(p.amount);
-        return {
-          id: p.id,
-          studentId: p.studentId,
-          assignmentId: p.orderId,
-          amount: signed,
-          status: p.status,
-          paidAt: p.paidAt ?? null,
-          createdAt: p.paidAt ?? p.createdAt,
-          failureReason: p.failureReason ?? null,
-        };
-      }),
-      students: students.map((s) => ({
-        id: s.id,
-        fullName: s.fullName,
-        createdAt: s.createdAt ?? "1970-01-01T00:00:00.000Z",
-      })),
-      assignments: orders
-        .filter((o) => o.status === "paid")
-        .map((o) => ({
-          id: o.id,
-          studentId: o.studentId,
-          tariffName: o.tariffNameSnapshot,
-          lessonsLimitSnapshot: o.lessonsCount,
-          status: "active" as const,
-          paymentStatus: "paid" as const,
-        })),
-    });
-  }, [payments, orderById, students, orders]);
+  /** Финансовые итоги: период / направление / ученик / поиск, без фильтра статуса. */
+  const metrics = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const fromMs = periodFrom ? dayStartMs(periodFrom) : null;
+    const toMs = periodTo ? dayEndMs(periodTo) : null;
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await apiPlatform<{ months: MonthSummary[] }>(
-          "getCommerceIncomeOverview",
-          {}
-        );
-        if (!cancelled) setServerMonths(res.months);
-      } catch {
-        // bootstrap
+    let paidSum = 0;
+    let paidCount = 0;
+    let refundSum = 0;
+
+    for (const row of commerceRows) {
+      if (studentFilter && row.payment.studentId !== studentFilter) continue;
+      if (
+        directionFilter !== "all" &&
+        row.order?.directionId !== directionFilter
+      ) {
+        continue;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [payments.length, orders.length]);
+      const at = new Date(row.eventAt).getTime();
+      if (fromMs != null && at < fromMs) continue;
+      if (toMs != null && at > toMs) continue;
+      if (q) {
+        const hit =
+          row.studentName.toLowerCase().includes(q) ||
+          row.payerName.toLowerCase().includes(q) ||
+          (row.order?.tariffNameSnapshot ?? "").toLowerCase().includes(q);
+        if (!hit) continue;
+      }
 
-  const months = serverMonths ?? localMonths;
-  const currentMonthKey = monthKeyFromInstant(new Date());
+      if (row.payment.status === "paid") {
+        paidSum += row.payment.amount;
+        paidCount += 1;
+      } else if (row.payment.status === "refunded") {
+        refundSum += Math.abs(row.payment.amount);
+      }
+    }
+
+    return {
+      paidSum,
+      paidCount,
+      refundSum,
+      netIncome: paidSum - refundSum,
+    };
+  }, [
+    commerceRows,
+    query,
+    directionFilter,
+    periodFrom,
+    periodTo,
+    studentFilter,
+  ]);
+
+  const filteredStudentName = studentFilter
+    ? studentName(studentFilter)
+    : null;
 
   async function refreshPayment(paymentId: string) {
     setBusyId(paymentId);
@@ -413,16 +317,61 @@ export function IncomeWorkspace() {
     <div>
       <PageHeader
         title="Доходы"
-        description="Заказы на занятия и платежи. Выручка считается только по оплаченным операциям; возвраты отображаются отдельно."
+        description="Журнал покупок и платежей. Ручные начисления занятий сюда не попадают — только финансовые операции."
       />
 
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Metric
+          label="Оплачено"
+          value={money(metrics.paidSum)}
+          hint="Успешные покупки за период"
+        />
+        <Metric
+          label="Успешных покупок"
+          value={String(metrics.paidCount)}
+        />
+        <Metric
+          label="Возвраты"
+          value={money(metrics.refundSum)}
+          hint="Отдельно от суммы покупок"
+        />
+        <Metric
+          label="Итоговый доход"
+          value={money(metrics.netIncome)}
+          hint="Оплачено минус возвраты"
+        />
+      </div>
+
+      <div className="mb-4 flex flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-center">
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Поиск ученика или тарифа…"
+          placeholder="Ученик или плательщик…"
           className="max-w-xs"
         />
+        <Select
+          value={directionFilter}
+          onValueChange={(v) => v && setDirectionFilter(v)}
+        >
+          <SelectTrigger className="w-[200px] rounded-lg">
+            <SelectValue>
+              {() =>
+                directionFilter === "all"
+                  ? "Все направления"
+                  : (directions.find((d) => d.id === directionFilter)?.name ??
+                    "Направление")
+              }
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Все направления</SelectItem>
+            {directions.map((d) => (
+              <SelectItem key={d.id} value={d.id}>
+                {d.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Select
           value={statusFilter}
           onValueChange={(v) =>
@@ -448,57 +397,165 @@ export function IncomeWorkspace() {
             <SelectItem value="expired">Истёк</SelectItem>
           </SelectContent>
         </Select>
+        <Input
+          type="date"
+          value={periodFrom}
+          onChange={(e) => setPeriodFrom(e.target.value)}
+          className="w-[160px] rounded-lg"
+          aria-label="Период с"
+        />
+        <Input
+          type="date"
+          value={periodTo}
+          onChange={(e) => setPeriodTo(e.target.value)}
+          className="w-[160px] rounded-lg"
+          aria-label="Период по"
+        />
+        {filteredStudentName ? (
+          <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-1.5 text-sm">
+            <span>
+              Ученик: <span className="font-medium">{filteredStudentName}</span>
+            </span>
+            <button
+              type="button"
+              className="rounded p-0.5 hover:bg-muted"
+              aria-label="Сбросить фильтр ученика"
+              onClick={clearStudentFilter}
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        ) : null}
       </div>
 
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-        <div className="min-w-0">
-          <h2 className="mb-1 font-display text-lg font-semibold tracking-tight">
-            Платежи и заказы
-          </h2>
-          <p className="mb-3 text-sm text-muted-foreground">
-            Ручное подтверждение отключено — статус приходит из банка.
-          </p>
-          {filteredRows.length === 0 ? (
-            <EmptyState title="Операций пока нет" />
-          ) : (
-            <ul className="space-y-2">
-              {filteredRows.map((row) => (
-                <CommercePaymentLine
-                  key={row.payment.id}
-                  row={row}
-                  busy={busyId === row.payment.id}
-                  onRefresh={() => void refreshPayment(row.payment.id)}
-                  onRefund={() => void refundPayment(row.payment.id)}
-                />
-              ))}
-            </ul>
-          )}
-        </div>
+      <h2 className="mb-1 font-display text-lg font-semibold tracking-tight">
+        Журнал оплат
+      </h2>
+      <p className="mb-3 text-sm text-muted-foreground">
+        Плательщик и ученик показываются отдельно, если это разные люди.
+      </p>
 
-        <aside className="min-w-0 lg:border-l lg:border-border/70 lg:pl-6">
-          <h2 className="mb-1 font-display text-lg font-semibold tracking-tight">
-            По месяцам
-          </h2>
-          <p className="mb-3 text-sm text-muted-foreground">
-            «Поступило» — только оплаченные платежи минус возвраты.
-          </p>
-          {months.length === 0 ? (
-            <EmptyState title="Нет данных по месяцам" />
-          ) : (
-            <div>
-              {months.map((m) => (
-                <MonthBlock
-                  key={m.monthKey}
-                  month={m}
-                  defaultOpen={m.monthKey === currentMonthKey}
-                  query={query}
-                  statusFilter={statusFilter}
-                />
-              ))}
-            </div>
-          )}
-        </aside>
-      </div>
+      {filteredRows.length === 0 ? (
+        <EmptyState title="Операций по фильтру нет" />
+      ) : (
+        <ul className="space-y-2">
+          {filteredRows.map((row) => {
+            const { payment, order } = row;
+            const busy = busyId === payment.id;
+            const signed =
+              payment.status === "refunded"
+                ? -payment.amount
+                : payment.amount;
+            return (
+              <li
+                key={payment.id}
+                className="rounded-xl border border-border/60 px-3 py-3 text-sm hover:bg-muted/30"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <p className="font-medium">
+                      <Link
+                        href={`/direkciya/students/${payment.studentId}`}
+                        className="hover:underline"
+                      >
+                        {row.studentName}
+                      </Link>
+                      {order ? (
+                        <span className="font-normal text-muted-foreground">
+                          {" "}
+                          · {order.tariffNameSnapshot}
+                        </span>
+                      ) : null}
+                    </p>
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      {formatDateTime(row.eventAt)}
+                      {" · "}
+                      {row.directionName}
+                      {order ? ` · ${order.lessonsCount} зан.` : ""}
+                      {" · "}
+                      {providerLabel(payment.provider)}
+                      {" · "}
+                      {paymentRecordStatusLabel(payment.status)}
+                      {order
+                        ? ` · заказ: ${lessonOrderStatusLabel(order.status)}`
+                        : null}
+                    </p>
+                    {row.payerDiffers ? (
+                      <p className="text-xs text-muted-foreground">
+                        Плательщик:{" "}
+                        <span className="font-medium text-foreground">
+                          {row.payerName}
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Плательщик: {row.payerName}
+                        {row.payerName === row.studentName
+                          ? " (ученик)"
+                          : ""}
+                      </p>
+                    )}
+                    {payment.status === "refunded" ? (
+                      <p className="text-xs text-destructive/90">
+                        Возврат оформлен
+                        {payment.failureReason
+                          ? `: ${payment.failureReason}`
+                          : ""}
+                      </p>
+                    ) : payment.failureReason ? (
+                      <p className="text-xs text-destructive/90">
+                        {payment.failureReason}
+                      </p>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="text-xs font-medium underline-offset-2 hover:underline"
+                      onClick={() => focusStudent(payment.studentId)}
+                    >
+                      Все покупки этого ученика
+                    </button>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
+                    <span
+                      className={cn(
+                        "tabular-nums font-semibold",
+                        payment.status === "refunded" && "text-destructive"
+                      )}
+                    >
+                      {money(signed)}
+                    </span>
+                    {payment.status === "pending" ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 rounded-lg"
+                        disabled={busy}
+                        onClick={() => void refreshPayment(payment.id)}
+                      >
+                        <RefreshCw className="mr-1 size-3.5" />
+                        Обновить
+                      </Button>
+                    ) : null}
+                    {payment.status === "paid" ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 rounded-lg"
+                        disabled={busy}
+                        onClick={() => void refundPayment(payment.id)}
+                      >
+                        Возврат
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

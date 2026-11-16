@@ -16,6 +16,7 @@ import {
   STUDENT_PAY_PATH,
   type PaymentFlowStatus,
 } from "@/lib/payment-checkout";
+import { lessonsCountLabel } from "@/lib/ru-plural";
 import { apiPlatform } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
 
@@ -116,7 +117,7 @@ export function PaymentCompletePanel() {
         detail={
           displayStatus === "paid"
             ? order
-              ? `${order.lessonsCount} занятий · ${order.totalAmount.toLocaleString("ru-RU")} ₽`
+              ? `${lessonsCountLabel(order.lessonsCount)} · ${order.totalAmount.toLocaleString("ru-RU")} ₽`
               : null
             : [RETURN_NOT_PAID_HINT, refreshNote, error]
                 .filter(Boolean)

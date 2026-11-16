@@ -29,6 +29,7 @@ import {
   telegramDisplay,
   telegramHref,
 } from "@/lib/student-contacts";
+import { lessonsCountLabel } from "@/lib/ru-plural";
 import { useDemoStore } from "@/lib/store/demo-store";
 import {
   useStudentCabinetHref,
@@ -504,7 +505,7 @@ function OrdersPreview({ orders }: { orders: LessonOrder[] }) {
                 </p>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
-                {order.lessonsCount} занят.
+                {lessonsCountLabel(order.lessonsCount)}
                 {order.paidAt
                   ? ` · ${formatDate(order.paidAt)}`
                   : order.createdAt

@@ -307,6 +307,8 @@ export async function POST(request: Request) {
           return m.adminRefundLessonPaymentAction(db, ctx, p);
         case "adminAdjustLessonBalance":
           return m.adminAdjustLessonBalanceAction(db, ctx, p);
+        case "listStudentBalanceLedger":
+          return m.listStudentBalanceLedgerAction(db, ctx, p);
         case "getCommerceIncomeOverview":
           return m.getCommerceIncomeOverviewAction(db, ctx);
         case "getIncomeOverview":
