@@ -10,7 +10,7 @@ export const landingRequisites = {
   phoneTel: "+79000658503",
   telegramHandle: "@Tobilk1011",
   telegramUrl: "https://t.me/Tobilk1011",
-  email: "tgusyn@gmail.com",
+  email: "zxcvt005@gmail.com",
 } as const;
 
 export const landingRequisitesMeta = {

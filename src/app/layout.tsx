@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Literata, Manrope } from "next/font/google";
 
+import { LegalNoticesRoot } from "@/components/legal/legal-notices-root";
 import { Toaster } from "@/components/ui/sonner";
 import {
   auditoriaBackgroundBootScript,
@@ -83,6 +84,7 @@ export default function RootLayout({
       <body className="flex min-h-full flex-col bg-background font-sans text-foreground">
         <DemoStoreProvider>
           {children}
+          <LegalNoticesRoot />
           <Toaster position="top-right" />
         </DemoStoreProvider>
       </body>

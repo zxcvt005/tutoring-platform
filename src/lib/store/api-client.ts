@@ -385,6 +385,8 @@ export async function apiRegisterStudent(body: {
   password: string;
   passwordConfirm: string;
   contacts?: string;
+  personalDataConsent: true;
+  marketingConsent?: boolean;
 }) {
   const headers = await mutatingHeaders();
   const res = await fetch("/api/auth/register/student", {
@@ -472,7 +474,13 @@ export async function apiGetPublicInvitation(token: string) {
 
 export async function apiAcceptInvitation(
   token: string,
-  body: { email: string; password: string; passwordConfirm: string }
+  body: {
+    email: string;
+    password: string;
+    passwordConfirm: string;
+    personalDataConsent: true;
+    marketingConsent?: boolean;
+  }
 ) {
   const headers = await mutatingHeaders();
   const res = await fetch(

@@ -23,6 +23,8 @@ const bodySchema = z.object({
   password: z.string().min(1).max(200),
   passwordConfirm: z.string().min(1).max(200),
   contacts: z.string().max(500).optional(),
+  personalDataConsent: z.literal(true),
+  marketingConsent: z.boolean().optional().default(false),
 });
 
 export async function POST(request: Request) {
@@ -33,9 +35,26 @@ export async function POST(request: Request) {
     const db = getDb();
 
     const result = await registerStudent(db, {
-      ...body,
+      fullName: body.fullName,
+      email: body.email,
+      password: body.password,
+      passwordConfirm: body.passwordConfirm,
+      contacts: body.contacts,
       userAgent: meta.userAgent,
       ip: meta.ip,
+    });
+
+    const { safeRecordConsentBundle } = await import(
+      "@/server/services/safe-legal-consents"
+    );
+    await safeRecordConsentBundle(db, null, {
+      source: "register_student",
+      privacyAck: true,
+      personalData: true,
+      marketing: body.marketingConsent === true ? true : false,
+      userId: result.user.id,
+      contactRaw: body.email,
+      organizationId: result.organizationId,
     });
 
     const ctx = await resolveAuthContext(db, result.session.rawToken);

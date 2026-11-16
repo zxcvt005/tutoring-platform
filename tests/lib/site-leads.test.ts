@@ -38,6 +38,8 @@ describe("landing lead validation for public intake", () => {
     parentName: "Анна",
     contact: "+7 900 111-22-33",
     comment: "",
+    personalDataConsent: true,
+    marketingConsent: false,
   };
 
   it("rejects empty and oversized fields", () => {

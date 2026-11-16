@@ -13,11 +13,19 @@ export type LandingLeadInput = {
   parentName: string;
   contact: string;
   comment: string;
+  personalDataConsent: boolean;
+  marketingConsent: boolean;
 };
 
 export type LandingLeadErrors = Partial<
   Record<
-    "studentName" | "gradeId" | "level" | "parentName" | "contact" | "comment",
+    | "studentName"
+    | "gradeId"
+    | "level"
+    | "parentName"
+    | "contact"
+    | "comment"
+    | "personalDataConsent",
     string
   >
 >;
@@ -78,6 +86,10 @@ export function validateLandingLead(input: LandingLeadInput): LandingLeadErrors 
   if (input.comment.trim().length > 500) {
     errors.comment = "Комментарий слишком длинный.";
   }
+  if (!input.personalDataConsent) {
+    errors.personalDataConsent =
+      "Необходимо согласие на обработку персональных данных.";
+  }
   return errors;
 }
 
@@ -119,6 +131,8 @@ export async function submitLandingLead(
         parentName: input.parentName.trim(),
         contact: input.contact.trim(),
         comment: input.comment.trim(),
+        personalDataConsent: true as const,
+        marketingConsent: Boolean(input.marketingConsent),
       }),
     });
     const json = (await res.json().catch(() => null)) as

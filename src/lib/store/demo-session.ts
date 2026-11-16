@@ -65,6 +65,7 @@ export function isDemoPublicPath(pathname: string | null): boolean {
     pathname === "/setup" ||
     pathname === "/rekvizity" ||
     pathname === "/private-calls" ||
+    pathname.startsWith("/legal") ||
     pathname.startsWith("/login") ||
     pathname.startsWith("/setup") ||
     pathname.startsWith("/rekvizity/") ||

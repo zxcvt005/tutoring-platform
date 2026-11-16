@@ -7,6 +7,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  emptyFormConsentState,
+  FormConsentFields,
+  type FormConsentState,
+} from "@/components/legal/form-consent-fields";
+import {
   LANDING_GRADES,
   submitLandingLead,
   validateLandingStudentStep,
@@ -27,6 +32,7 @@ export function LeadForm() {
   const [parentName, setParentName] = useState("");
   const [contact, setContact] = useState("");
   const [comment, setComment] = useState("");
+  const [consents, setConsents] = useState<FormConsentState>(emptyFormConsentState);
   const [errors, setErrors] = useState<LandingLeadErrors>(emptyErrors);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
@@ -49,6 +55,8 @@ export function LeadForm() {
       parentName,
       contact,
       comment,
+      personalDataConsent: consents.personalData,
+      marketingConsent: consents.marketing,
     };
   }
 
@@ -236,6 +244,17 @@ export function LeadForm() {
             />
           </Field>
 
+          <FormConsentFields
+            idPrefix={`${formId}-lead`}
+            value={consents}
+            onChange={setConsents}
+            showMarketing
+            errors={
+              errors.personalDataConsent
+                ? { personalData: errors.personalDataConsent }
+                : undefined
+            }
+          />
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button
               type="button"
@@ -264,18 +283,12 @@ export function LeadForm() {
         <p className="text-sm text-destructive" role="alert">
           {submitError}
         </p>
-      ) : (
-        <div className="flex flex-col gap-2 text-sm leading-relaxed text-muted-foreground">
-          <p>
-            Кнопка ничего не списывает. После отправки мы напишем, чтобы
-            назначить диагностику.
-          </p>
-          <p>
-            Отправляя заявку, вы оставляете контакт для связи по диагностике.
-            Политика конфиденциальности на сайте пока не опубликована.
-          </p>
-        </div>
-      )}
+      ) : step === 2 ? (
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          Кнопка ничего не списывает. После отправки мы напишем, чтобы назначить
+          диагностику.
+        </p>
+      ) : null}
     </form>
   );
 }

@@ -513,6 +513,8 @@ export const landingFooter = {
   blurb:
     "«Неодин» — персональная подготовка к ЕГЭ по физике с репетитором на собственной платформе.",
   requisitesLabel: "Реквизиты",
+  documentsHeading: "Документы",
+  cookieSettingsLabel: "Настройки Cookie",
 } as const;
 
 export function formulaCountPhrase(count: number): string {

@@ -93,6 +93,7 @@ describe("landing content", () => {
 
   it("publishes exact IP requisites for the public page and footer", () => {
     expect(landingFooter.requisitesLabel).toBe("Реквизиты");
+    expect(landingFooter.documentsHeading).toBe("Документы");
     expect(landingRequisitesPath).toBe("/rekvizity");
     expect(landingRequisites).toEqual({
       legalName: "ИП Гусын Анатолий Владимирович",
@@ -104,7 +105,7 @@ describe("landing content", () => {
       phoneTel: "+79000658503",
       telegramHandle: "@Tobilk1011",
       telegramUrl: "https://t.me/Tobilk1011",
-      email: "tgusyn@gmail.com",
+      email: "zxcvt005@gmail.com",
     });
   });
 
@@ -129,6 +130,8 @@ describe("landing lead", () => {
     parentName: "Анна",
     contact: "+7 900 111-22-33",
     comment: "",
+    personalDataConsent: true,
+    marketingConsent: false,
   };
 
   it("marks public delivery as connected", () => {
@@ -155,5 +158,12 @@ describe("landing lead", () => {
 
   it("accepts a valid payload shape", () => {
     expect(validateLandingLead(valid)).toEqual({});
+  });
+
+  it("requires personal data consent", () => {
+    expect(
+      validateLandingLead({ ...valid, personalDataConsent: false })
+        .personalDataConsent
+    ).toBeTruthy();
   });
 });

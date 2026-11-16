@@ -6,6 +6,12 @@ import Link from "next/link";
 
 import { PasswordField } from "@/components/auth/password-field";
 import { RegisterShell } from "@/components/auth/register-shell";
+import {
+  emptyFormConsentState,
+  FormConsentFields,
+  validateRequiredFormConsents,
+  type FormConsentState,
+} from "@/components/legal/form-consent-fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,6 +24,7 @@ export default function RegisterStudentPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [consents, setConsents] = useState<FormConsentState>(emptyFormConsentState);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -28,6 +35,11 @@ export default function RegisterStudentPage() {
       setError("Пароль и подтверждение не совпадают");
       return;
     }
+    const consentErrors = validateRequiredFormConsents(consents);
+    if (consentErrors.personalData) {
+      setError(consentErrors.personalData);
+      return;
+    }
     setLoading(true);
     try {
       await apiRegisterStudent({
@@ -36,6 +48,8 @@ export default function RegisterStudentPage() {
         password,
         passwordConfirm,
         contacts: contacts.trim() || undefined,
+        personalDataConsent: true,
+        marketingConsent: consents.marketing,
       });
       router.replace("/auditoria");
     } catch (err) {
@@ -94,6 +108,12 @@ export default function RegisterStudentPage() {
           label="Повтор пароля"
           value={passwordConfirm}
           onChange={setPasswordConfirm}
+        />
+        <FormConsentFields
+          idPrefix="register-student"
+          value={consents}
+          onChange={setConsents}
+          showMarketing
         />
         {error ? (
           <p className="text-sm text-destructive" role="alert">

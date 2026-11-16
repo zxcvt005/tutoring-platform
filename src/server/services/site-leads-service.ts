@@ -53,9 +53,13 @@ async function resolvePublicOrganizationId(db: AppDb): Promise<string> {
 
 export async function createSiteLeadFromLanding(
   db: AppDb,
-  input: LandingLeadInput
+  input: Omit<LandingLeadInput, "personalDataConsent" | "marketingConsent">
 ): Promise<{ id: string }> {
-  const errors = validateLandingLead(input);
+  const errors = validateLandingLead({
+    ...input,
+    personalDataConsent: true,
+    marketingConsent: false,
+  });
   if (Object.keys(errors).length > 0) {
     const first = Object.values(errors)[0];
     throw validationError(first || "Проверьте поля заявки");

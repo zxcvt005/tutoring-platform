@@ -19,6 +19,8 @@ const bodySchema = z.object({
   parentName: z.string().min(1).max(80),
   contact: z.string().min(1).max(120),
   comment: z.string().max(500).optional().default(""),
+  personalDataConsent: z.literal(true),
+  marketingConsent: z.boolean().optional().default(false),
 });
 
 export async function POST(request: Request) {
@@ -34,7 +36,8 @@ export async function POST(request: Request) {
     });
 
     const body = parseBody(bodySchema, await readJsonBody(request));
-    const result = await createSiteLeadFromLanding(getDb(), {
+    const db = getDb();
+    const result = await createSiteLeadFromLanding(db, {
       studentName: body.studentName,
       gradeId: body.gradeId,
       level: body.level ?? "",
@@ -42,6 +45,19 @@ export async function POST(request: Request) {
       contact: body.contact,
       comment: body.comment ?? "",
     });
+
+    const { safeRecordConsentBundle } = await import(
+      "@/server/services/safe-legal-consents"
+    );
+    await safeRecordConsentBundle(db, null, {
+      source: "landing_lead",
+      privacyAck: true,
+      personalData: true,
+      marketing: body.marketingConsent === true ? true : false,
+      siteLeadId: result.id,
+      contactRaw: body.contact,
+    });
+
     // Public response: only opaque id, no personal fields.
     return jsonOk({ id: result.id });
   } catch (err) {

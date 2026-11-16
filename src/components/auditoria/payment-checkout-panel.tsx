@@ -1,11 +1,23 @@
 "use client";
 
 import { CreditCard, MessageCircle, ShieldCheck } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { PaymentStatusCard } from "@/components/auditoria/payment-flow-view";
+import {
+  emptyFormConsentState,
+  FormConsentFields,
+  validateRequiredFormConsents,
+  type FormConsentState,
+} from "@/components/legal/form-consent-fields";
 import { requestOpenTeacherChat } from "@/lib/chat/student-teacher-chat";
+import {
+  isPublicOfferPublished,
+  LEGAL_DOCUMENTS,
+  PUBLIC_OFFER_PENDING_NOTICE,
+} from "@/lib/legal/documents";
 import {
   CHANGE_TARIFF_HINT,
   CHECKOUT_PAYMENT_SESSION_KEY,
@@ -42,7 +54,13 @@ export function PaymentCheckoutPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [consents, setConsents] = useState<FormConsentState>(emptyFormConsentState);
+  const [consentErrors, setConsentErrors] = useState<
+    Partial<Record<keyof FormConsentState, string>>
+  >({});
   const inflight = useRef(false);
+  const offerAvailable = isPublicOfferPublished();
+  const offerPath = LEGAL_DOCUMENTS["public-offer"].path;
 
   const studentId = data.currentStudentId;
   const student = data.students.find((item) => item.id === studentId) ?? null;
@@ -223,10 +241,23 @@ export function PaymentCheckoutPanel() {
 
   async function goToSchoolPayment() {
     if (inflight.current) return;
+    if (!offerAvailable) {
+      toast.error(PUBLIC_OFFER_PENDING_NOTICE);
+      setError(PUBLIC_OFFER_PENDING_NOTICE);
+      return;
+    }
     const tId = selectedTariff?.id ?? tariffId;
     const oId = selectedOption?.id ?? optionId;
     if (!tId || !oId) {
       toast.error("Выберите тариф и вариант покупки");
+      return;
+    }
+    const nextConsentErrors = validateRequiredFormConsents(consents, {
+      requireOffer: true,
+    });
+    setConsentErrors(nextConsentErrors);
+    if (Object.keys(nextConsentErrors).length > 0) {
+      toast.error("Подтвердите обязательные согласия перед оплатой");
       return;
     }
     inflight.current = true;
@@ -236,6 +267,9 @@ export function PaymentCheckoutPanel() {
       const res = await apiPlatform<CheckoutResponse>("createLessonCheckout", {
         tariffId: tId,
         optionId: oId,
+        personalDataConsent: true,
+        publicOfferConsent: true,
+        marketingConsent: consents.marketing,
       });
       const checkoutUrl = resolveCheckoutUrl(res.checkoutUrl);
       if (!checkoutUrl) {
@@ -346,14 +380,47 @@ export function PaymentCheckoutPanel() {
                   </div>
                 </div>
 
+                {!offerAvailable ? (
+                  <div
+                    className="rounded-2xl border border-border/60 bg-muted/20 px-4 py-3 text-sm leading-relaxed text-foreground/85"
+                    role="status"
+                  >
+                    <p>{PUBLIC_OFFER_PENDING_NOTICE}</p>
+                    <p className="mt-2">
+                      <Link
+                        href={offerPath}
+                        className="font-medium underline-offset-2 hover:underline"
+                      >
+                        Страница публичной оферты
+                      </Link>
+                    </p>
+                  </div>
+                ) : (
+                  <FormConsentFields
+                    idPrefix="checkout"
+                    value={consents}
+                    onChange={(next) => {
+                      setConsents(next);
+                      setConsentErrors({});
+                    }}
+                    showMarketing
+                    showPublicOffer
+                    publicOfferAvailable
+                    errors={consentErrors}
+                  />
+                )}
                 <button
                   type="button"
-                  disabled={!canPay || busy}
+                  disabled={!canPay || busy || !offerAvailable}
                   onClick={() => void goToSchoolPayment()}
                   className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-full bg-[#e7dff6]/95 px-5 text-base font-medium disabled:opacity-60"
                 >
                   <CreditCard className="size-4 shrink-0" aria-hidden />
-                  {busy ? "Создаём заказ…" : "Перейти к оплате"}
+                  {!offerAvailable
+                    ? "Оплата временно недоступна"
+                    : busy
+                      ? "Создаём заказ…"
+                      : "Перейти к оплате"}
                 </button>
                 {error ? (
                   <p className="text-sm text-destructive" role="alert">

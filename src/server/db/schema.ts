@@ -2885,6 +2885,49 @@ export const siteLeads = pgTable(
 );
 
 /**
+ * Журнал юридических согласий / ознакомлений / cookie-настроек.
+ * Записи только добавляются (история не перезаписывается).
+ */
+export const legalConsents = pgTable(
+  "legal_consents",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").references(() => organizations.id, {
+      onDelete: "set null",
+    }),
+    kind: text("kind").notNull(),
+    status: text("status").notNull(),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    siteLeadId: text("site_lead_id").references(() => siteLeads.id, {
+      onDelete: "set null",
+    }),
+    /** Усечённый контакт/email для связи без полной копии ПДн в журнале. */
+    contactHint: text("contact_hint"),
+    source: text("source").notNull(),
+    documentSlug: text("document_slug"),
+    documentVersion: text("document_version").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("legal_consents_org_created_idx").on(t.organizationId, t.createdAt),
+    index("legal_consents_user_idx").on(t.userId),
+    index("legal_consents_lead_idx").on(t.siteLeadId),
+    index("legal_consents_kind_idx").on(t.kind, t.createdAt),
+    check(
+      "legal_consents_kind_check",
+      sql`${t.kind} in ('privacy_ack', 'personal_data', 'marketing', 'cookie_prefs', 'public_offer')`
+    ),
+    check(
+      "legal_consents_status_check",
+      sql`${t.status} in ('granted', 'withdrawn')`
+    ),
+  ]
+);
+
+/**
  * Ручные «Пробные уроки» (Дирекция).
  * Изолировано от Press trial_lessons, base_leads, учеников и расписания.
  */
@@ -3189,6 +3232,7 @@ export const schema = {
   errorPracticeSessionItems,
   baseLeads,
   siteLeads,
+  legalConsents,
   manualTrialLessons,
   directorExpenses,
   quickAccessLinks,

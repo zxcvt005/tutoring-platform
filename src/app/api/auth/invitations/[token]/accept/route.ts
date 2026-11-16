@@ -21,6 +21,8 @@ const bodySchema = z.object({
   email: z.string().email().max(320),
   password: z.string().min(1).max(200),
   passwordConfirm: z.string().min(1).max(200),
+  personalDataConsent: z.literal(true),
+  marketingConsent: z.boolean().optional().default(false),
 });
 
 type Params = { params: Promise<{ token: string }> };
@@ -40,6 +42,19 @@ export async function POST(request: Request, { params }: Params) {
       passwordConfirm: body.passwordConfirm,
       userAgent: meta.userAgent,
       ip: meta.ip,
+    });
+
+    const { safeRecordConsentBundle } = await import(
+      "@/server/services/safe-legal-consents"
+    );
+    await safeRecordConsentBundle(db, null, {
+      source: "invite_accept",
+      privacyAck: true,
+      personalData: true,
+      marketing: body.marketingConsent === true ? true : false,
+      userId: result.user.id,
+      contactRaw: body.email,
+      organizationId: result.organizationId ?? null,
     });
 
     const ctx = await resolveAuthContext(db, result.session.rawToken);

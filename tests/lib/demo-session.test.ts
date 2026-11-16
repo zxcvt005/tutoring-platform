@@ -115,6 +115,10 @@ describe("demo session stability", () => {
     expect(demoSessionBootKey("/login")).toBe("public");
     expect(demoSessionBootKey("/")).toBe("public");
     expect(demoSessionBootKey("/rekvizity")).toBe("public");
+    expect(demoSessionBootKey("/legal/privacy-policy")).toBe("public");
+    expect(isDemoPublicPath("/legal/privacy-policy")).toBe(true);
+    expect(isDemoPublicPath("/legal/offer")).toBe(true);
+    expect(isDemoPublicPath("/legal/public-offer")).toBe(true);
     expect(demoSessionBootKey("/demo/student")).toBe("public");
     expect(demoSessionBootKey("/demo/student/homework")).toBe("public");
     expect(demoSessionBootKey("/direkciya/students")).toBe("director");

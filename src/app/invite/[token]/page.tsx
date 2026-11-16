@@ -6,6 +6,12 @@ import { useParams, useRouter } from "next/navigation";
 
 import { PasswordField } from "@/components/auth/password-field";
 import { RegisterShell } from "@/components/auth/register-shell";
+import {
+  emptyFormConsentState,
+  FormConsentFields,
+  validateRequiredFormConsents,
+  type FormConsentState,
+} from "@/components/legal/form-consent-fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,6 +41,7 @@ export default function InviteAcceptPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [consents, setConsents] = useState<FormConsentState>(emptyFormConsentState);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -64,12 +71,19 @@ export default function InviteAcceptPage() {
       setError("Пароль и подтверждение не совпадают");
       return;
     }
+    const consentErrors = validateRequiredFormConsents(consents);
+    if (consentErrors.personalData) {
+      setError(consentErrors.personalData);
+      return;
+    }
     setLoading(true);
     try {
       const result = await apiAcceptInvitation(token, {
         email,
         password,
         passwordConfirm,
+        personalDataConsent: true,
+        marketingConsent: consents.marketing,
       });
       router.replace(cabinetHomeForRole(result.role));
     } catch (err) {
@@ -163,6 +177,12 @@ export default function InviteAcceptPage() {
           label="Повтор пароля"
           value={passwordConfirm}
           onChange={setPasswordConfirm}
+        />
+        <FormConsentFields
+          idPrefix="invite-accept"
+          value={consents}
+          onChange={setConsents}
+          showMarketing
         />
         {error ? (
           <p className="text-sm text-destructive" role="alert">

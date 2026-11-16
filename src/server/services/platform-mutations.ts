@@ -2613,13 +2613,50 @@ export async function createLessonCheckoutAction(
   ctx: AuthContext,
   payload: Record<string, unknown>
 ) {
+  const { validationError } = await import("@/server/errors");
+  const {
+    isPublicOfferPublished,
+    PUBLIC_OFFER_PENDING_NOTICE,
+  } = await import("@/lib/legal/documents");
+
+  if (!isPublicOfferPublished()) {
+    throw validationError(PUBLIC_OFFER_PENDING_NOTICE);
+  }
+  if (payload.personalDataConsent !== true) {
+    throw validationError(
+      "Необходимо согласие на обработку персональных данных"
+    );
+  }
+  if (payload.publicOfferConsent !== true) {
+    throw validationError("Необходимо согласие с условиями оферты");
+  }
+
   const { createCheckout } = await import(
     "@/server/services/lesson-orders-service"
   );
-  return createCheckout(db, ctx, {
+  const checkout = await createCheckout(db, ctx, {
     tariffId: String(payload.tariffId ?? ""),
     optionId: String(payload.optionId ?? ""),
   });
+
+  const { safeRecordConsentBundle } = await import(
+    "@/server/services/safe-legal-consents"
+  );
+  await safeRecordConsentBundle(db, ctx, {
+    source: "checkout",
+    privacyAck: true,
+    personalData: true,
+    publicOffer: true,
+    marketing:
+      payload.marketingConsent === true
+        ? true
+        : payload.marketingConsent === false
+          ? false
+          : null,
+    contactRaw: ctx.email ?? null,
+  });
+
+  return checkout;
 }
 
 export async function studentPayAction(
