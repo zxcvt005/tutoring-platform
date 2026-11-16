@@ -45,6 +45,10 @@ function paymentRowsForAnalytics(
       return {
         id: p.id,
         studentId: p.studentId,
+        studentName:
+          p.studentNameSnapshot?.trim() ||
+          order?.studentNameSnapshot?.trim() ||
+          null,
         assignmentId: p.orderId,
         amount: signedAmount,
         status: mapPaymentStatus(p.status),
@@ -74,10 +78,12 @@ export async function getCommerceIncomeOverview(
   const orderById = new Map(orderRows.map((o) => [o.id, o]));
   const mappedPayments = paymentRowsForAnalytics(paymentRows, orderById);
 
-  const paidOrders = orderRows.filter((o) => o.status === "paid");
+  const paidOrders = orderRows.filter(
+    (o) => o.status === "paid" && o.studentId != null
+  );
   const assignmentLike = paidOrders.map((o) => ({
     id: o.id,
-    studentId: o.studentId,
+    studentId: o.studentId as string,
     tariffName: o.tariffNameSnapshot,
     lessonsLimitSnapshot: o.lessonsCount,
     status: "active" as const,
@@ -88,6 +94,7 @@ export async function getCommerceIncomeOverview(
     payments: mappedPayments.map((p) => ({
       id: p.id,
       studentId: p.studentId,
+      studentName: p.studentName,
       assignmentId: p.assignmentId,
       amount: p.amount,
       status: p.status,

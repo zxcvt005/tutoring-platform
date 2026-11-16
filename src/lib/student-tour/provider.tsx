@@ -319,7 +319,7 @@ export function StudentTourProvider({
         toast.success("Профиль обновлён в демо");
         return ok();
       },
-      deleteStudent: () => undefined,
+      deleteStudent: async () => ({ ok: false as const, error: "unavailable" }),
       archiveStudent: async () => blocked(noopMsg),
       restoreStudent: async () => blocked(noopMsg),
       upsertLesson: async () => blocked(noopMsg),

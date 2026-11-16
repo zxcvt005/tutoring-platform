@@ -103,12 +103,14 @@ export async function listPressStudents(
       (a.paidAt?.getTime() ?? a.createdAt.getTime())
   );
   for (const row of sortedOrders) {
+    if (!row.studentId) continue;
     if (tariffByStudent.has(row.studentId)) continue;
     if (row.status === "paid") {
       tariffByStudent.set(row.studentId, row.tariffName ?? "Тариф");
     }
   }
   for (const row of sortedOrders) {
+    if (!row.studentId) continue;
     if (tariffByStudent.has(row.studentId)) continue;
     if (row.tariffName) tariffByStudent.set(row.studentId, row.tariffName);
   }

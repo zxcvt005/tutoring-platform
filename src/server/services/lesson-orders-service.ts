@@ -393,6 +393,11 @@ export async function confirmPaidFromBank(
 
     let ledgerId = order.creditLedgerEntryId;
     if (!ledgerId) {
+      if (!order.studentId) {
+        throw badRequest(
+          "Нельзя зачислить занятия: заказ отвязан от удалённого ученика"
+        );
+      }
       ledgerId = newId("sll");
       await tx.insert(studentLessonLedger).values({
         id: ledgerId,
@@ -577,18 +582,22 @@ export async function adminRefundPayment(
         )
         .limit(1);
       if (!claw) {
-        await tx.insert(studentLessonLedger).values({
-          id: newId("sll"),
-          organizationId: ctx.organizationId,
-          studentId: order.studentId,
-          directionId: order.directionId,
-          delta: -order.lessonsCount,
-          reason: "refund_clawback",
-          orderId: order.id,
-          actorUserId: ctx.userId,
-          note: input.reason?.trim() || "Возврат оплаты",
-          createdAt: now,
-        });
+        if (!order.studentId) {
+          // Профиль уже удалён — баланс списан вместе с ним; clawback в ledger не нужен
+        } else {
+          await tx.insert(studentLessonLedger).values({
+            id: newId("sll"),
+            organizationId: ctx.organizationId,
+            studentId: order.studentId,
+            directionId: order.directionId,
+            delta: -order.lessonsCount,
+            reason: "refund_clawback",
+            orderId: order.id,
+            actorUserId: ctx.userId,
+            note: input.reason?.trim() || "Возврат оплаты",
+            createdAt: now,
+          });
+        }
       }
     }
 
@@ -952,7 +961,9 @@ export async function listOrdersForDirector(db: AppDb, ctx: AuthContext) {
 
   return rows.map((row) =>
     mapOrderRow(row, {
-      studentName: studentName.get(row.studentId),
+      studentName: row.studentId
+        ? studentName.get(row.studentId)
+        : row.studentNameSnapshot ?? undefined,
       directionName: directionName.get(row.directionId),
     })
   );

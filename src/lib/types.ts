@@ -269,10 +269,14 @@ export type LessonOrderStatus =
 
 export type LessonOrder = {
   id: string;
-  studentId: string;
-  payerUserId: string;
+  /** Null, если ученик удалён, а заказ сохранён в финансах */
+  studentId: string | null;
+  /** Null, если плательщик (аккаунт ученика) удалён */
+  payerUserId: string | null;
   /** Имя плательщика (если отличается от ученика — видно в журнале оплат) */
   payerName?: string | null;
+  /** Snapshot ФИО ученика (в т.ч. после удаления профиля) */
+  studentNameSnapshot?: string | null;
   tariffId: string;
   optionId?: string | null;
   directionId: string;
@@ -428,7 +432,10 @@ export type StudentTariffAssignment = {
 
 export type PaymentRecord = {
   id: string;
-  studentId: string;
+  /** Null, если ученик удалён, а платёж сохранён в финансах */
+  studentId: string | null;
+  /** Snapshot ФИО ученика (в т.ч. после удаления профиля) */
+  studentNameSnapshot?: string | null;
   orderId: string;
   amount: number;
   currency: "RUB";

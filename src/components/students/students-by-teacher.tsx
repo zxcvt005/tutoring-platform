@@ -111,6 +111,7 @@ export function StudentsByTeacher({
     upsertStudent,
     archiveStudent,
     restoreStudent,
+    deleteStudent,
     studentsForTeacher,
     unassignedStudents,
     reload,
@@ -128,6 +129,9 @@ export function StudentsByTeacher({
   const [archiveReason, setArchiveReason] =
     useState<StudentArchiveReason>("stopped");
   const [archiveComment, setArchiveComment] = useState("");
+  const [deleteFor, setDeleteFor] = useState<Student | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [restoreBusyId, setRestoreBusyId] = useState<string | null>(null);
 
@@ -296,6 +300,35 @@ export function StudentsByTeacher({
       toast.error(e instanceof Error ? e.message : "Не удалось вернуть");
     } finally {
       setRestoreBusyId(null);
+    }
+  }
+
+  function openPermanentDelete(student: Student) {
+    setDeleteConfirmName("");
+    setDeleteFor(student);
+  }
+
+  async function confirmPermanentDelete() {
+    if (!deleteFor) return;
+    setDeleteBusy(true);
+    try {
+      const result = await deleteStudent({
+        id: deleteFor.id,
+        confirmFullName: deleteConfirmName.trim(),
+      });
+      if (!result.ok) {
+        toast.error(result.error || "Не удалось удалить ученика");
+        return;
+      }
+      toast.success("Ученик удалён безвозвратно");
+      setDeleteFor(null);
+      setDeleteConfirmName("");
+      setOpen(false);
+      await reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Не удалось удалить");
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -629,17 +662,33 @@ export function StudentsByTeacher({
                         >
                           В архив
                         </button>
+                        <button
+                          type="button"
+                          className="text-sm text-destructive underline-offset-2 hover:underline"
+                          onClick={() => openPermanentDelete(s)}
+                        >
+                          Удалить навсегда
+                        </button>
                       </>
                     ) : null}
                     {archivedView ? (
-                      <button
-                        type="button"
-                        className="text-sm font-medium underline-offset-2 hover:underline"
-                        disabled={restoreBusyId === s.id}
-                        onClick={() => void confirmRestore(s)}
-                      >
-                        Вернуть в работу
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="text-sm font-medium underline-offset-2 hover:underline"
+                          disabled={restoreBusyId === s.id}
+                          onClick={() => void confirmRestore(s)}
+                        >
+                          Вернуть в работу
+                        </button>
+                        <button
+                          type="button"
+                          className="text-sm text-destructive underline-offset-2 hover:underline"
+                          onClick={() => openPermanentDelete(s)}
+                        >
+                          Удалить навсегда
+                        </button>
+                      </>
                     ) : null}
                   </div>
                 </TableCell>
@@ -804,19 +853,33 @@ export function StudentsByTeacher({
           </div>
           <DialogFooter className="mx-0 mb-0 shrink-0 gap-2 rounded-none sm:justify-between">
             {form.id && mode === "direkciya" ? (
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={() => {
-                  const student = data.students.find((x) => x.id === form.id);
-                  if (!student) return;
-                  setArchiveReason("stopped");
-                  setArchiveComment("");
-                  setArchiveFor(student);
-                }}
-              >
-                В архив
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => {
+                    const student = data.students.find((x) => x.id === form.id);
+                    if (!student) return;
+                    setArchiveReason("stopped");
+                    setArchiveComment("");
+                    setArchiveFor(student);
+                  }}
+                >
+                  В архив
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                  onClick={() => {
+                    const student = data.students.find((x) => x.id === form.id);
+                    if (!student) return;
+                    openPermanentDelete(student);
+                  }}
+                >
+                  Удалить навсегда
+                </Button>
+              </div>
             ) : (
               <span />
             )}
@@ -902,6 +965,83 @@ export function StudentsByTeacher({
               onClick={() => void confirmArchive()}
             >
               Перевести в архив
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!deleteFor}
+        onOpenChange={(o) => {
+          if (!o) {
+            setDeleteFor(null);
+            setDeleteConfirmName("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              Удалить навсегда
+              {deleteFor ? ` · ${deleteFor.fullName}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="font-medium text-destructive">
+              Действие необратимо. Восстановить ученика будет нельзя.
+            </p>
+            <p className="text-muted-foreground">
+              Будут безвозвратно удалены:
+            </p>
+            <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+              <li>аккаунт и профиль ученика;</li>
+              <li>неуспешные попытки оплаты и незавершённые заказы;</li>
+              <li>абонементы, баланс и история движения занятий;</li>
+              <li>приглашения и согласия, связанные с учеником;</li>
+              <li>посещаемость и участие в занятиях (сами групповые занятия и другие ученики сохранятся);</li>
+              <li>прочие учебные данные, принадлежащие только этому ученику.</li>
+            </ul>
+            <p className="text-muted-foreground">
+              Успешные платежи, подтверждённые возвраты и PDF-документы расчётов
+              сохраняются в финансовом разделе дирекции (без связи с удалённым
+              аккаунтом). Не затрагиваются: директора, преподаватели, другие
+              ученики, направления, тарифы, материалы и настройки школы.
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="delete-student-confirm-name">
+                Введите полное имя ученика для подтверждения
+              </Label>
+              <Input
+                id="delete-student-confirm-name"
+                value={deleteConfirmName}
+                onChange={(e) => setDeleteConfirmName(e.target.value)}
+                placeholder={deleteFor?.fullName ?? "ФИО"}
+                autoComplete="off"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setDeleteFor(null);
+                setDeleteConfirmName("");
+              }}
+            >
+              Отмена
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={
+                deleteBusy ||
+                !deleteFor ||
+                deleteConfirmName.trim() !== (deleteFor?.fullName.trim() ?? "")
+              }
+              onClick={() => void confirmPermanentDelete()}
+            >
+              Удалить безвозвратно
             </Button>
           </DialogFooter>
         </DialogContent>

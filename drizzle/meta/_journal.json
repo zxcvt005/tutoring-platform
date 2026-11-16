@@ -351,6 +351,13 @@
       "when": 1797200000000,
       "tag": "0049_settlement_documents",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1797300000000,
+      "tag": "0050_finance_detach_on_student_delete",
+      "breakpoints": true
     }
   ]
 }

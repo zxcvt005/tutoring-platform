@@ -521,15 +521,15 @@ export async function restoreStudent(db: AppDb, ctx: AuthContext, id: string) {
   return { ok: true, alreadyActive: false };
 }
 
-export async function deleteStudent(db: AppDb, ctx: AuthContext, id: string) {
-  requireRoles(ctx, ["director", "teacher"]);
-  const [row] = await db.select().from(students).where(eq(students.id, id)).limit(1);
-  if (!row || row.organizationId !== ctx.organizationId) throw notFound();
-  if (ctx.role === "teacher" && row.primaryTeacherId !== ctx.teacherId) {
-    throw forbidden();
-  }
-  await db.delete(students).where(eq(students.id, id));
-  return { ok: true };
+export async function deleteStudent(
+  db: AppDb,
+  ctx: AuthContext,
+  input: { id: string; confirmFullName: string }
+) {
+  const { permanentlyDeleteStudent } = await import(
+    "@/server/services/student-permanent-delete"
+  );
+  return permanentlyDeleteStudent(db, ctx, input);
 }
 
 export async function upsertLesson(

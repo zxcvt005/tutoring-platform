@@ -19,7 +19,7 @@ export type IncomeMonthKey = string; // YYYY-MM
 
 export type IncomePaymentRow = {
   id: string;
-  studentId: string;
+  studentId: string | null;
   studentName: string;
   assignmentId: string;
   tariffName: string | null;
@@ -167,7 +167,8 @@ export function revenueEventAt(p: {
 export function buildMonthSummaries(input: {
   payments: Array<{
     id: string;
-    studentId: string;
+    studentId: string | null;
+    studentName?: string | null;
     assignmentId: string;
     amount: number;
     status: PaymentRecordStatus;
@@ -178,7 +179,7 @@ export function buildMonthSummaries(input: {
   students: Array<{ id: string; fullName: string; createdAt: string }>;
   assignments: Array<{
     id: string;
-    studentId?: string;
+    studentId?: string | null;
     tariffName?: string | null;
     lessonsLimitSnapshot?: number | null;
     status?: string;
@@ -206,13 +207,19 @@ export function buildMonthSummaries(input: {
     const displayAt =
       p.status === "paid" && p.paidAt ? p.paidAt : p.createdAt;
     const key = monthKeyFromInstant(displayAt);
+    const studentName =
+      (p.studentId ? nameById.get(p.studentId) : undefined) ??
+      p.studentName?.trim() ??
+      (p.studentId ? p.studentId : "Удалённый ученик");
     const row: IncomePaymentRow = {
       id: p.id,
       studentId: p.studentId,
-      studentName: nameById.get(p.studentId) ?? p.studentId,
+      studentName,
       assignmentId: p.assignmentId,
       tariffName: tariffByAsg.get(p.assignmentId) ?? null,
-      currentTariffName: currentNameByStudent.get(p.studentId) ?? null,
+      currentTariffName: p.studentId
+        ? currentNameByStudent.get(p.studentId) ?? null
+        : null,
       lessonsLimit: limitByAsg.get(p.assignmentId) ?? null,
       amount: p.amount,
       status: p.status,

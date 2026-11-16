@@ -637,7 +637,9 @@ export async function buildBootstrap(
 
   if (ctx.role === "teacher") {
     const studentIds = new Set(studentRows.map((s) => s.id));
-    orderRows = orderRows.filter((o) => studentIds.has(o.studentId));
+    orderRows = orderRows.filter(
+      (o) => o.studentId != null && studentIds.has(o.studentId)
+    );
     paymentRows = [];
     const tariffIds = new Set(orderRows.map((o) => o.tariffId));
     tariffRows = tariffRows.filter(
@@ -723,7 +725,11 @@ export async function buildBootstrap(
   });
 
   const payerUserIds = [
-    ...new Set(orderRows.map((o) => o.payerUserId).filter(Boolean)),
+    ...new Set(
+      orderRows
+        .map((o) => o.payerUserId)
+        .filter((id): id is string => Boolean(id))
+    ),
   ];
   const payerNameByUserId = new Map<string, string>();
   if (payerUserIds.length > 0 && ctx.role === "director") {
@@ -740,17 +746,26 @@ export async function buildBootstrap(
 
   const studentById = new Map(mappedStudents.map((s) => [s.id, s]));
   const mappedLessonOrders: LessonOrder[] = orderRows.map((o) => {
-    const student = studentById.get(o.studentId);
-    const payerName = payerNameByUserId.get(o.payerUserId) ?? null;
+    const student = o.studentId ? studentById.get(o.studentId) : undefined;
+    const livePayerName = o.payerUserId
+      ? payerNameByUserId.get(o.payerUserId) ?? null
+      : null;
+    const payerName =
+      o.payerNameSnapshot?.trim() ||
+      (student?.userId &&
+      o.payerUserId &&
+      student.userId === o.payerUserId
+        ? student.fullName
+        : livePayerName) ||
+      null;
     const direction = directionById.get(o.directionId);
     return {
       id: o.id,
       studentId: o.studentId,
       payerUserId: o.payerUserId,
-      payerName:
-        student?.userId && student.userId === o.payerUserId
-          ? student.fullName
-          : payerName,
+      payerName,
+      studentNameSnapshot:
+        o.studentNameSnapshot?.trim() || student?.fullName || null,
       tariffId: o.tariffId,
       optionId: o.optionId,
       directionId: o.directionId,
@@ -772,20 +787,25 @@ export async function buildBootstrap(
     };
   });
 
-  const mappedPayments: PaymentRecord[] = paymentRows.map((p) => ({
-    id: p.id,
-    studentId: p.studentId,
-    orderId: p.orderId,
-    amount: Number(p.amount),
-    currency: "RUB",
-    status: p.status as PaymentRecord["status"],
-    provider: p.provider,
-    externalId: p.externalId ?? undefined,
-    paymentLinkId: p.paymentLinkId ?? undefined,
-    paidAt: p.paidAt?.toISOString(),
-    createdAt: p.createdAt.toISOString(),
-    failureReason: p.failureReason ?? null,
-  }));
+  const mappedPayments: PaymentRecord[] = paymentRows.map((p) => {
+    const student = p.studentId ? studentById.get(p.studentId) : undefined;
+    return {
+      id: p.id,
+      studentId: p.studentId,
+      studentNameSnapshot:
+        p.studentNameSnapshot?.trim() || student?.fullName || null,
+      orderId: p.orderId,
+      amount: Number(p.amount),
+      currency: "RUB",
+      status: p.status as PaymentRecord["status"],
+      provider: p.provider,
+      externalId: p.externalId ?? undefined,
+      paymentLinkId: p.paymentLinkId ?? undefined,
+      paidAt: p.paidAt?.toISOString(),
+      createdAt: p.createdAt.toISOString(),
+      failureReason: p.failureReason ?? null,
+    };
+  });
 
   let mappedSettlementDocuments: SettlementDocumentSummary[] = [];
   if (ctx.role !== "teacher" && ctx.role !== "press" && mappedPayments.length > 0) {

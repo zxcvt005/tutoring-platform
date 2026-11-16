@@ -104,7 +104,10 @@ export type DemoStoreValue = {
   upsertStudent: (
     student: Omit<Student, "id"> & { id?: string }
   ) => Promise<OkResult>;
-  deleteStudent: (id: string) => void;
+  deleteStudent: (input: {
+    id: string;
+    confirmFullName: string;
+  }) => Promise<OkResult>;
   archiveStudent: (input: {
     id: string;
     reason: "trial_not_continued" | "stopped" | "other";
@@ -531,9 +534,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         void run("deleteTeacher", { id });
       },
       upsertStudent: (student) => run("upsertStudent", student),
-      deleteStudent: (id) => {
-        void run("deleteStudent", { id });
-      },
+      deleteStudent: (input) => run("deleteStudent", input),
       archiveStudent: (input) => run("archiveStudent", input),
       restoreStudent: (id) => run("restoreStudent", { id }),
       upsertLesson: (lesson) => run("upsertLesson", lesson),

@@ -384,19 +384,21 @@ export async function assertCanAccessSettlementDocument(
   if (order.payerUserId === ctx.userId) return;
 
   if (ctx.role === "student" && ctx.studentId) {
-    if (order.studentId === ctx.studentId) return;
-    const [mine] = await db
-      .select({ id: students.id })
-      .from(students)
-      .where(
-        and(
-          eq(students.id, order.studentId),
-          eq(students.userId, ctx.userId),
-          eq(students.organizationId, ctx.organizationId)
+    if (order.studentId && order.studentId === ctx.studentId) return;
+    if (order.studentId) {
+      const [mine] = await db
+        .select({ id: students.id })
+        .from(students)
+        .where(
+          and(
+            eq(students.id, order.studentId),
+            eq(students.userId, ctx.userId),
+            eq(students.organizationId, ctx.organizationId)
+          )
         )
-      )
-      .limit(1);
-    if (mine) return;
+        .limit(1);
+      if (mine) return;
+    }
   }
 
   throw forbidden();

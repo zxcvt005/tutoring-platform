@@ -944,12 +944,14 @@ export const lessonOrders = pgTable(
     organizationId: text("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    payerUserId: text("payer_user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "restrict" }),
-    studentId: text("student_id")
-      .notNull()
-      .references(() => students.id, { onDelete: "cascade" }),
+    /** Null after permanent student delete (finance retained). */
+    payerUserId: text("payer_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    /** Null after permanent student delete (finance retained). */
+    studentId: text("student_id").references(() => students.id, {
+      onDelete: "set null",
+    }),
     tariffId: text("tariff_id")
       .notNull()
       .references(() => tariffs.id, { onDelete: "restrict" }),
@@ -960,6 +962,10 @@ export const lessonOrders = pgTable(
       .notNull()
       .references(() => learningDirections.id, { onDelete: "restrict" }),
     tariffNameSnapshot: text("tariff_name_snapshot").notNull(),
+    /** FIO ученика на момент заказа / после detach при удалении профиля */
+    studentNameSnapshot: text("student_name_snapshot"),
+    /** FIO плательщика; заполняется при detach, если payer user удаляется */
+    payerNameSnapshot: text("payer_name_snapshot"),
     lessonsCount: integer("lessons_count").notNull(),
     totalAmount: numeric("total_amount", {
       precision: 12,
@@ -1006,9 +1012,10 @@ export const payments = pgTable(
     organizationId: text("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    studentId: text("student_id")
-      .notNull()
-      .references(() => students.id, { onDelete: "cascade" }),
+    /** Null after permanent student delete (finance retained). */
+    studentId: text("student_id").references(() => students.id, {
+      onDelete: "set null",
+    }),
     orderId: text("order_id")
       .notNull()
       .references(() => lessonOrders.id, { onDelete: "restrict" }),
@@ -1023,6 +1030,8 @@ export const payments = pgTable(
     paidAt: timestamp("paid_at", { withTimezone: true }),
     failureReason: text("failure_reason"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    /** FIO ученика; обязательно заполняется при detach профиля */
+    studentNameSnapshot: text("student_name_snapshot"),
     ...timestamps,
   },
   (t) => [

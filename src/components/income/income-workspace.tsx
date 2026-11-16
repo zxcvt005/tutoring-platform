@@ -145,14 +145,20 @@ export function IncomeWorkspace() {
 
   const studentName = useMemo(() => {
     const map = new Map(students.map((s) => [s.id, s.fullName]));
-    return (id: string) => map.get(id) ?? "Ученик";
+    return (id: string | null | undefined, snapshot?: string | null) => {
+      if (id && map.has(id)) return map.get(id)!;
+      const snap = snapshot?.trim();
+      if (snap) return snap;
+      return id ? "Ученик" : "Удалённый ученик";
+    };
   }, [students]);
 
   const studentUserId = useMemo(() => {
     const map = new Map(
       students.map((s) => [s.id, s.userId ?? null] as const)
     );
-    return (id: string) => map.get(id) ?? null;
+    return (id: string | null | undefined) =>
+      id ? map.get(id) ?? null : null;
   }, [students]);
 
   const orderById = useMemo(
@@ -169,10 +175,15 @@ export function IncomeWorkspace() {
       )
       .map((payment) => {
         const order = orderById.get(payment.orderId) ?? null;
-        const sName = studentName(payment.studentId);
+        const sName = studentName(
+          payment.studentId,
+          payment.studentNameSnapshot ?? order?.studentNameSnapshot
+        );
         const payerName =
           order?.payerName?.trim() ||
-          (order && studentUserId(payment.studentId) === order.payerUserId
+          (order &&
+          order.payerUserId &&
+          studentUserId(payment.studentId) === order.payerUserId
             ? sName
             : null) ||
           sName;
@@ -471,12 +482,16 @@ export function IncomeWorkspace() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0 flex-1 space-y-1">
                     <p className="font-medium">
-                      <Link
-                        href={`/direkciya/students/${payment.studentId}`}
-                        className="hover:underline"
-                      >
-                        {row.studentName}
-                      </Link>
+                      {payment.studentId ? (
+                        <Link
+                          href={`/direkciya/students/${payment.studentId}`}
+                          className="hover:underline"
+                        >
+                          {row.studentName}
+                        </Link>
+                      ) : (
+                        <span>{row.studentName}</span>
+                      )}
                       {order ? (
                         <span className="font-normal text-muted-foreground">
                           {" "}
@@ -524,13 +539,19 @@ export function IncomeWorkspace() {
                         {payment.failureReason}
                       </p>
                     ) : null}
-                    <button
-                      type="button"
-                      className="text-xs font-medium underline-offset-2 hover:underline"
-                      onClick={() => focusStudent(payment.studentId)}
-                    >
-                      Все покупки этого ученика
-                    </button>
+                    {payment.studentId ? (
+                      <button
+                        type="button"
+                        className="text-xs font-medium underline-offset-2 hover:underline"
+                        onClick={() => focusStudent(payment.studentId!)}
+                      >
+                        Все покупки этого ученика
+                      </button>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Профиль ученика удалён · запись сохранена в финансах
+                      </p>
+                    )}
                     <SettlementDownloadLinks
                       documents={docsByPayment.get(payment.id) ?? []}
                       className="mt-1"

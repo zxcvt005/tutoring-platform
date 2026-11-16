@@ -41,7 +41,10 @@ export async function POST(request: Request) {
         case "upsertStudent":
           return m.upsertStudent(db, ctx, p as never);
         case "deleteStudent":
-          return m.deleteStudent(db, ctx, String(p.id));
+          return m.deleteStudent(db, ctx, {
+            id: String(p.id),
+            confirmFullName: String(p.confirmFullName ?? ""),
+          });
         case "archiveStudent":
           return m.archiveStudent(db, ctx, {
             id: String(p.id),
