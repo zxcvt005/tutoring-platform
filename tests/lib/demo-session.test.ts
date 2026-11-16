@@ -114,6 +114,7 @@ describe("demo session stability", () => {
     expect(demoSessionBootKey("/kafedra/feedback/sch_s12")).toBe("teacher");
     expect(demoSessionBootKey("/login")).toBe("public");
     expect(demoSessionBootKey("/")).toBe("public");
+    expect(demoSessionBootKey("/rekvizity")).toBe("public");
     expect(demoSessionBootKey("/demo/student")).toBe("public");
     expect(demoSessionBootKey("/demo/student/homework")).toBe("public");
     expect(demoSessionBootKey("/direkciya/students")).toBe("director");

@@ -512,8 +512,7 @@ export const landingFinal = {
 export const landingFooter = {
   blurb:
     "«Неодин» — персональная подготовка к ЕГЭ по физике с репетитором на собственной платформе.",
-  contactsPlaceholder:
-    "Публичные контакты, адрес и юридические документы появятся здесь чуть позже.",
+  requisitesLabel: "Реквизиты",
 } as const;
 
 export function formulaCountPhrase(count: number): string {

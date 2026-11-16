@@ -12,6 +12,10 @@ import {
   landingTeachers,
 } from "@/lib/landing/content";
 import {
+  landingRequisites,
+  landingRequisitesPath,
+} from "@/lib/landing/requisites";
+import {
   LANDING_LEAD_DELIVERY,
   validateLandingLead,
   validateLandingStudentStep,
@@ -85,6 +89,23 @@ describe("landing content", () => {
       "#faq",
       "#apply",
     ]);
+  });
+
+  it("publishes exact IP requisites for the public page and footer", () => {
+    expect(landingFooter.requisitesLabel).toBe("Реквизиты");
+    expect(landingRequisitesPath).toBe("/rekvizity");
+    expect(landingRequisites).toEqual({
+      legalName: "ИП Гусын Анатолий Владимирович",
+      inn: "744515573967",
+      ogrnip: "326745600118741",
+      address:
+        "625006, Россия, Тюменская обл., г. Тюмень, ул. Северная, д. 3, к. 2, кв. 29",
+      phoneDisplay: "+7 900 065-85-03",
+      phoneTel: "+79000658503",
+      telegramHandle: "@Tobilk1011",
+      telegramUrl: "https://t.me/Tobilk1011",
+      email: "tgusyn@gmail.com",
+    });
   });
 
   it("answers the required objections without draft badges", () => {
