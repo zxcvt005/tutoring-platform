@@ -84,7 +84,8 @@
 
 1. Создать Postgres → сохранить `DATABASE_URL`.
 2. Создать приложение, задать env (включая длинный `BOOTSTRAP_ADMIN_TOKEN`).
-3. One-off / SSH / release command в каталоге `/app`:
+3. Миграции: `npm start` в контейнере сначала выполняет `node scripts/db-migrate.mjs`, затем `next start`
+   (ошибка migrate не блокирует старт приложения). One-off / SSH по желанию:
    ```bash
    npm run db:migrate
    ```
