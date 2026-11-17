@@ -388,7 +388,7 @@ export function StudentTourProvider({
         return ok();
       },
       reviewHomeworkAssignment: async () => blocked(noopMsg),
-      deleteHomeworkAssignment: () => undefined,
+      deleteHomeworkAssignment: async () => blocked(noopMsg),
       upsertTheory: async () => blocked(noopMsg),
       deleteTheory: async () => blocked(noopMsg),
       assignTheory: async () => blocked(noopMsg),

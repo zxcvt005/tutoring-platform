@@ -1076,40 +1076,8 @@ export async function completeLesson(
     }
   }
 
-  for (const [studentId, status] of byStudent) {
-    if (attendanceDebitsLesson(status)) {
-      await applyAttendanceBalance(db, ctx, {
-        lessonId: input.lessonId,
-        studentId,
-        attendanceStatus: status,
-        lessonCancelled: false,
-      });
-    }
-    const { previous } = await writeAttendanceRow(
-      db,
-      input.lessonId,
-      studentId,
-      status
-    );
-    if (!attendanceDebitsLesson(status)) {
-      await applyAttendanceBalance(db, ctx, {
-        lessonId: input.lessonId,
-        studentId,
-        attendanceStatus: status,
-        lessonCancelled: false,
-      });
-    }
-    if (previous !== status) {
-      await emitAttendanceSaved(db, lesson, studentId, status);
-    }
-  }
-  const becameDone = await maybeMarkLessonDone(db, input.lessonId);
-  if (becameDone) {
-    await emitLessonConducted(db, lesson);
-  }
-
+  // ДЗ до отметки/списания: ошибка назначения не должна оставлять «Отмечено» без ДЗ.
   let assignedCount = 0;
-  // Фильтр ДЗ по направлению/предмету и классу каждого ученика (системные папки БЗ).
   const { listMaterialFolders } = await import("@/server/services/folder-service");
   const {
     materialMatchesStudentClass,
@@ -1148,18 +1116,21 @@ export async function completeLesson(
 
   for (const assign of homeworkAssigns) {
     if (!assign.homeworkId) continue;
-    // ДЗ только ученику этого индивидуального занятия (игнор чужих id в payload).
     const requested = assign.studentIds.filter((id) => id === soleStudentId);
-    const targetIds = requested.length ? requested : [soleStudentId];
+    const studentIds = requested.length ? requested : [soleStudentId];
     const [hw] = await db
-      .select({ folderId: tests.folderId })
+      .select({
+        folderId: tests.folderId,
+        title: tests.title,
+      })
       .from(tests)
       .where(eq(tests.id, assign.homeworkId))
       .limit(1);
-    let studentIds = targetIds;
+    if (!hw) {
+      throw notFound("Тест для домашнего задания не найден");
+    }
     // Классовый фильтр только для материалов в системном пути «предмет → класс».
-    // Обычные тесты преподавателя вне этих папок назначаются как раньше.
-    if (subjectKey && hw) {
+    if (subjectKey) {
       const classPath = resolveFolderClassPath(foldersForFilter, hw.folderId);
       if (classPath) {
         const [st] = await db
@@ -1177,11 +1148,12 @@ export async function completeLesson(
             grade
           )
         ) {
-          continue;
+          throw badRequest(
+            `Тест «${hw.title}» нельзя назначить: не подходит классу или предмету ученика`
+          );
         }
       }
     }
-    if (!studentIds.length) continue;
     const result = await assignHomework(db, ctx, {
       homeworkId: assign.homeworkId,
       topicId: topicId || undefined,
@@ -1192,6 +1164,39 @@ export async function completeLesson(
     });
     assignedCount += result.created;
   }
+
+  for (const [studentId, status] of byStudent) {
+    if (attendanceDebitsLesson(status)) {
+      await applyAttendanceBalance(db, ctx, {
+        lessonId: input.lessonId,
+        studentId,
+        attendanceStatus: status,
+        lessonCancelled: false,
+      });
+    }
+    const { previous } = await writeAttendanceRow(
+      db,
+      input.lessonId,
+      studentId,
+      status
+    );
+    if (!attendanceDebitsLesson(status)) {
+      await applyAttendanceBalance(db, ctx, {
+        lessonId: input.lessonId,
+        studentId,
+        attendanceStatus: status,
+        lessonCancelled: false,
+      });
+    }
+    if (previous !== status) {
+      await emitAttendanceSaved(db, lesson, studentId, status);
+    }
+  }
+  const becameDone = await maybeMarkLessonDone(db, input.lessonId);
+  if (becameDone) {
+    await emitLessonConducted(db, lesson);
+  }
+
   await settleLessonPayroll(db, ctx, input.lessonId);
   return { ok: true, assignedCount };
 }

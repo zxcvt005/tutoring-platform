@@ -16,6 +16,7 @@ import {
   publishHomework,
   setAttendance,
   setLessonTopics,
+  upsertHomework,
   upsertLesson,
 } from "@/server/services/platform-mutations";
 import {
@@ -200,6 +201,79 @@ describe("attendance requires topic, homework is optional", () => {
       .where(eq(lessonTopics.lessonId, lessonId));
     expect(topics.some((row) => row.title === "Динамика")).toBe(true);
     expect(await homeworkCount(t.db, lessonId)).toBe(1);
+    expect(await netDebit(t.db, lessonId)).toBe(-1);
+  });
+
+  it("assigns school KB homework, marks attendance and debits once", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await asRole(t.db, "director@demo.local");
+    const anna = await asRole(t.db, "anna@example.com");
+    const directionId = await pay(t.db, director, "s11");
+    const lessonId = await pastLesson(t.db, anna, "s11", directionId);
+
+    const schoolHw = await upsertHomework(t.db, director, {
+      teacherId: "",
+      libraryScope: "school",
+      title: "Школьный ДЗ на уроке",
+      status: "published",
+      purpose: "homework",
+      questions: [
+        {
+          id: "q1",
+          type: "single_choice",
+          prompt: "2+2",
+          maxScore: 1,
+          options: [
+            { id: "oa", text: "4" },
+            { id: "ob", text: "5" },
+          ],
+          correctOptionIds: ["oa"],
+        },
+      ],
+    });
+
+    await completeLesson(t.db, anna, {
+      lessonId,
+      topics: [{ title: "Кинематика" }],
+      attendances: [{ studentId: "s11", status: "present" }],
+      homeworkAssigns: [{ homeworkId: schoolHw.id, studentIds: ["s11"] }],
+    });
+
+    expect(await homeworkCount(t.db, lessonId)).toBe(1);
+    expect(await netDebit(t.db, lessonId)).toBe(-1);
+
+    await completeLesson(t.db, anna, {
+      lessonId,
+      topics: [{ title: "Кинематика" }],
+      attendances: [{ studentId: "s11", status: "present" }],
+      homeworkAssigns: [{ homeworkId: schoolHw.id, studentIds: ["s11"] }],
+    });
+    expect(await homeworkCount(t.db, lessonId)).toBe(1);
+    expect(await netDebit(t.db, lessonId)).toBe(-1);
+  });
+
+  it("does not debit when homework assign fails before attendance", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await asRole(t.db, "director@demo.local");
+    const anna = await asRole(t.db, "anna@example.com");
+    const directionId = await pay(t.db, director, "s11");
+    const lessonId = await pastLesson(t.db, anna, "s11", directionId);
+
+    await expect(
+      completeLesson(t.db, anna, {
+        lessonId,
+        topics: [{ title: "Кинематика" }],
+        attendances: [{ studentId: "s11", status: "present" }],
+        homeworkAssigns: [
+          { homeworkId: "missing-homework-id", studentIds: ["s11"] },
+        ],
+      })
+    ).rejects.toMatchObject({ status: 404 });
+
+    expect(await homeworkCount(t.db, lessonId)).toBe(0);
+    expect(await netDebit(t.db, lessonId)).toBe(0);
   });
 
   it("does not debit excused absence without homework", async () => {

@@ -151,7 +151,7 @@ export type DemoStoreValue = {
       sectionId?: string | null;
       sortOrder?: number;
     }
-  ) => Promise<OkResult>;
+  ) => Promise<OkResult & { id?: string }>;
   upsertTopicSection: (
     section: Omit<TopicSection, "id" | "sortOrder"> & {
       id?: string;
@@ -249,7 +249,7 @@ export type DemoStoreValue = {
     }[],
     overallFeedback?: string
   ) => Promise<OkResult>;
-  deleteHomeworkAssignment: (id: string) => void;
+  deleteHomeworkAssignment: (id: string) => Promise<OkResult>;
   upsertTheory: (input: {
     id?: string;
     teacherId: string;
@@ -632,9 +632,10 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         run("setLessonTopic", { lessonId, title, topicId: topicId ?? null }),
       setLessonTopics: (lessonId, topics) =>
         run("setLessonTopics", { lessonId, topics }),
-      saveTopic: (topic) => {
+      saveTopic: async (topic) => {
         const id = topic.id ?? newClientId("tp");
-        return run("upsertTopic", { ...topic, id });
+        const r = await run("upsertTopic", { ...topic, id });
+        return { ...r, id: r.id ?? id };
       },
       upsertTopicSection: (section) => {
         const id = section.id ?? newClientId("sec");
@@ -748,9 +749,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         if (r.ok) toast.success("Проверка сохранена");
         return r;
       },
-      deleteHomeworkAssignment: (id) => {
-        void run("deleteHomeworkAssignment", { id });
-      },
+      deleteHomeworkAssignment: (id) => run("deleteHomeworkAssignment", { id }),
       upsertTheory: async (input) => {
         const r = await run("upsertTheory", input);
         if (r.ok) {

@@ -796,7 +796,7 @@ function LessonCard({
               ) : null}
               {showContentEditor ? (
                 <LessonContentEditor
-                  key={`${lesson.id}-${sid}-${(lesson.lessonTopics ?? []).map((t) => t.id).join(",")}`}
+                  key={`${lesson.id}-${sid}`}
                   lesson={lesson}
                   studentId={sid}
                   required={waiting}

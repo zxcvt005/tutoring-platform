@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import { TopicSuggestField } from "@/components/kafedra/topic-suggest-field";
 import { Button } from "@/components/ui/button";
@@ -94,6 +95,9 @@ export function LessonContentEditor({
       a.sourceKind !== "theory" &&
       a.sourceKind !== "intensive"
   );
+  const savedAssignmentKey = savedAssignments
+    .map((a) => `${a.id}:${a.homeworkId}`)
+    .join("|");
   const [topics, setTopics] = useState<DraftLessonTopic[]>(() =>
     draftTopicsFromSaved(savedTopics)
   );
@@ -107,6 +111,21 @@ export function LessonContentEditor({
   const [busy, setBusy] = useState(false);
   const [dupHint, setDupHint] = useState<string | null>(null);
   const [requiredHint, setRequiredHint] = useState<string | null>(null);
+
+  // Подтянуть сохранённые назначения после reload, не затирая несохранённый черновик.
+  useEffect(() => {
+    setHw((prev) => {
+      const unsaved = prev.filter((item) => !item.assignmentId);
+      const fromServer = savedAssignments.map((a) => ({
+        homeworkId: a.homeworkId,
+        assignmentId: a.id,
+      }));
+      const serverIds = new Set(fromServer.map((x) => x.homeworkId));
+      const pending = unsaved.filter((x) => !serverIds.has(x.homeworkId));
+      return [...fromServer, ...pending];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ключ стабилизирует список назначений
+  }, [savedAssignmentKey]);
 
   // Актуальный класс/направление ученика — сбросить выбор вне нового фильтра.
   if (testId && !tests.some((t) => t.id === testId)) {
@@ -164,27 +183,45 @@ export function LessonContentEditor({
         setRequiredHint("Укажите хотя бы одну тему занятия.");
         return;
       }
+      const draftHw = [...hw];
       const topicResult = await setLessonTopics(lesson.id, normalized);
-      if (!topicResult.ok) return;
+      if (!topicResult.ok) {
+        toast.error(topicResult.error ?? "Не удалось сохранить темы");
+        return;
+      }
       const keep = new Set(
-        hw.filter((x) => x.assignmentId).map((x) => x.assignmentId as string)
+        draftHw
+          .filter((x) => x.assignmentId)
+          .map((x) => x.assignmentId as string)
       );
       for (const a of savedAssignments) {
         if (!keep.has(a.id) && a.status === "assigned") {
-          await deleteHomeworkAssignment(a.id);
+          const deleted = await deleteHomeworkAssignment(a.id);
+          if (deleted && deleted.ok === false) {
+            toast.error(deleted.error ?? "Не удалось удалить назначение");
+            return;
+          }
         }
       }
       const firstTopicId = normalized.find((t) => t.topicId)?.topicId ?? null;
-      for (const item of hw) {
+      for (const item of draftHw) {
         if (item.assignmentId) continue;
-        await assignHomework({
+        const assigned = await assignHomework({
           homeworkId: item.homeworkId,
           teacherId: lesson.teacherId,
           studentIds: [studentId],
           lessonId: lesson.id,
           topicId: firstTopicId,
         });
+        if (!assigned.ok) {
+          toast.error(
+            assigned.error ??
+              "Темы сохранены, но домашнее задание не назначено. Повторите сохранение."
+          );
+          return;
+        }
       }
+      toast.success("Темы и домашние задания сохранены");
     } finally {
       setBusy(false);
     }

@@ -79,7 +79,7 @@ function CompleteForm({
     data,
     topicsForLessonCatalog,
     completeLesson,
-    upsertTopic,
+    saveTopic,
     sectionsForTeacher,
     publishedHomeworksForLessonCatalog,
   } = useDemoStore();
@@ -169,39 +169,47 @@ function CompleteForm({
 
   function save() {
     if (saveLock.current || saving || !studentId) return;
-    const nextTopics = [...pickedTopics];
-    if (creatingTopic) {
-      if (!newTitle.trim()) return;
-      const tid = upsertTopic({
-        teacherId: lesson.teacherId,
-        sectionId: null,
-        title: newTitle.trim(),
-        subject: lesson.subject || "Предмет",
-        description: newDesc.trim() || newTitle.trim(),
-        status: "active",
-      });
-      nextTopics.push({ topicId: tid, title: newTitle.trim() });
-    }
-
-    if (lessonHasOccurred(lesson) && attendance) {
-      if (nextTopics.length === 0) {
-        setFormError(LESSON_MARK_CONTENT_ERROR);
-        return;
-      }
-    }
-    setFormError(null);
-
-    const due = dueAt ? fromAppDateTimeLocalValue(dueAt) : undefined;
-    const homeworkAssigns = homeworkIds.map((homeworkId) => ({
-      homeworkId,
-      studentIds: [studentId],
-      dueAt: due,
-    }));
 
     saveLock.current = true;
     setSaving(true);
     void (async () => {
       try {
+        const nextTopics = [...pickedTopics];
+        if (creatingTopic) {
+          if (!newTitle.trim()) {
+            setFormError("Укажите название новой темы");
+            return;
+          }
+          const created = await saveTopic({
+            teacherId: lesson.teacherId,
+            sectionId: null,
+            title: newTitle.trim(),
+            subject: lesson.subject || "Предмет",
+            description: newDesc.trim() || newTitle.trim(),
+            status: "active",
+          });
+          if (!created.ok || !created.id) {
+            setFormError(created.error ?? "Не удалось создать тему");
+            return;
+          }
+          nextTopics.push({ topicId: created.id, title: newTitle.trim() });
+        }
+
+        if (lessonHasOccurred(lesson) && attendance) {
+          if (nextTopics.length === 0) {
+            setFormError(LESSON_MARK_CONTENT_ERROR);
+            return;
+          }
+        }
+        setFormError(null);
+
+        const due = dueAt ? fromAppDateTimeLocalValue(dueAt) : undefined;
+        const homeworkAssigns = homeworkIds.map((homeworkId) => ({
+          homeworkId,
+          studentIds: [studentId],
+          dueAt: due,
+        }));
+
         const result = await completeLesson({
           lessonId: lesson.id,
           topics: nextTopics,
@@ -210,7 +218,14 @@ function CompleteForm({
             : [],
           homeworkAssigns,
         });
-        if (result.ok) onClose();
+        if (result.ok) {
+          onClose();
+          return;
+        }
+        setFormError(
+          result.error ??
+            "Не удалось сохранить занятие. Проверьте темы, ДЗ и повторите."
+        );
       } finally {
         saveLock.current = false;
         setSaving(false);
