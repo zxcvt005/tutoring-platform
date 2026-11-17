@@ -24,6 +24,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { canManageSchoolKnowledgeBase } from "@/lib/auth/school-knowledge";
+import {
+  folderMatchesSection,
+  isSubsectionFolder,
+  type MaterialsSection,
+} from "@/lib/folders/material-folders";
 import { formatDate } from "@/lib/format";
 import { isCatalogHomeworkPurpose } from "@/lib/homework/source-kind";
 import { apiPlatform } from "@/lib/store/api-client";
@@ -31,7 +36,6 @@ import { useDemoStore } from "@/lib/store/demo-store";
 import { cn } from "@/lib/utils";
 import type {
   Homework,
-  Intensive,
   MaterialOrigin,
   TheoryMaterial,
   Topic,
@@ -101,8 +105,10 @@ export function KnowledgeWorkspace({
     title: string;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [testOpen, setTestOpen] = useState(false);
   const [editingTest, setEditingTest] = useState<Homework | null>(null);
+  const [testFolderId, setTestFolderId] = useState<string | null>(null);
   const [testOwner, setTestOwner] = useState<{
     teacherId: string;
     libraryScope: "school" | "teacher";
@@ -112,6 +118,7 @@ export function KnowledgeWorkspace({
     id: undefined as string | undefined,
     teacherId: "",
     libraryScope: "school" as "school" | "teacher",
+    folderId: null as string | null,
     sectionId: null as string | null,
     title: "",
     subject: "",
@@ -135,14 +142,17 @@ export function KnowledgeWorkspace({
     ]);
   }, [data.theories, data.homeworks, data.topics]);
 
-  const schoolItems =
-    kind === "intensive"
-      ? schoolIntensives
-      : kind === "theory"
-        ? schoolTheories
-        : kind === "test"
-          ? schoolTests
-          : schoolTopics;
+  const schoolFolders = useMemo(
+    () =>
+      (data.materialFolders ?? []).filter(
+        (folder) =>
+          folder.ownerScope === "school" &&
+          folder.teacherId == null &&
+          folderMatchesSection(folder, kind as MaterialsSection)
+      ),
+    [data.materialFolders, kind]
+  );
+
   if (auth && !canManageSchoolKnowledgeBase(auth.role)) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -157,14 +167,33 @@ export function KnowledgeWorkspace({
     );
   }
 
+  /** Папка создания: корень, текущий подраздел, либо ошибка для корня раздела. */
+  function resolveCreateFolderId(
+    materialKind: Kind
+  ): string | null | "invalid" {
+    if (kind !== materialKind) return null;
+    if (!currentFolderId) return null;
+    if (!isSubsectionFolder(schoolFolders, currentFolderId)) return "invalid";
+    return currentFolderId;
+  }
+
   function openNewTest() {
+    const folderId = resolveCreateFolderId("test");
+    if (folderId === "invalid") {
+      toast.error(
+        "Сначала откройте подраздел (папку внутри раздела), затем создайте тест"
+      );
+      return;
+    }
     setEditingTest(null);
+    setTestFolderId(folderId);
     setTestOwner({ teacherId: "", libraryScope: "school" });
     setTestOpen(true);
   }
 
   function openTest(hw: Homework) {
     setEditingTest(hw);
+    setTestFolderId(hw.folderId ?? hw.sectionId ?? null);
     setTestOwner({
       teacherId: hw.libraryScope === "school" ? "" : hw.teacherId,
       libraryScope: hw.libraryScope === "school" ? "school" : "teacher",
@@ -173,10 +202,18 @@ export function KnowledgeWorkspace({
   }
 
   function openNewTopic() {
+    const folderId = resolveCreateFolderId("topic");
+    if (folderId === "invalid") {
+      toast.error(
+        "Сначала откройте подраздел (папку внутри раздела), затем создайте тему"
+      );
+      return;
+    }
     setTopicForm({
       id: undefined,
       teacherId: "",
       libraryScope: "school",
+      folderId,
       sectionId: null,
       title: "",
       subject: "",
@@ -184,6 +221,30 @@ export function KnowledgeWorkspace({
       status: "active",
     });
     setTopicOpen(true);
+  }
+
+  function openNewTheory() {
+    const folderId = resolveCreateFolderId("theory");
+    if (folderId === "invalid") {
+      toast.error(
+        "Сначала откройте подраздел (папку внутри раздела), затем создайте теорию"
+      );
+      return;
+    }
+    const q = folderId ? `?folderId=${encodeURIComponent(folderId)}` : "";
+    router.push(`${knowledgeBasePath}/theory/new${q}`);
+  }
+
+  function openNewIntensive() {
+    const folderId = resolveCreateFolderId("intensive");
+    if (folderId === "invalid") {
+      toast.error(
+        "Сначала откройте подраздел (папку внутри раздела), затем создайте интенсив"
+      );
+      return;
+    }
+    const q = folderId ? `?folderId=${encodeURIComponent(folderId)}` : "";
+    router.push(`${knowledgeBasePath}/intensives/new${q}`);
   }
 
   function openSavedCopy(kind: Kind, id: string) {
@@ -248,6 +309,7 @@ export function KnowledgeWorkspace({
       id: topic.id,
       teacherId: topic.libraryScope === "school" ? "" : topic.teacherId,
       libraryScope: topic.libraryScope === "school" ? "school" : "teacher",
+      folderId: topic.folderId ?? topic.sectionId ?? null,
       sectionId: topic.sectionId,
       title: topic.title,
       subject: topic.subject,
@@ -267,7 +329,9 @@ export function KnowledgeWorkspace({
       id: topicForm.id,
       teacherId: topicForm.libraryScope === "school" ? "" : topicForm.teacherId,
       libraryScope: topicForm.libraryScope,
-      sectionId: topicForm.libraryScope === "school" ? null : topicForm.sectionId,
+      folderId: topicForm.folderId,
+      sectionId:
+        topicForm.libraryScope === "school" ? null : topicForm.folderId,
       title: topicForm.title.trim(),
       subject: topicForm.subject.trim() || "Предмет",
       description: topicForm.description.trim(),
@@ -303,18 +367,10 @@ export function KnowledgeWorkspace({
       {block === "school" ? (
         <div className="space-y-3">
           <div className="flex flex-wrap gap-2">
-            <Button
-              nativeButton={false}
-              variant="outline"
-              render={<Link href={`${knowledgeBasePath}/theory/new`} />}
-            >
+            <Button type="button" variant="outline" onClick={openNewTheory}>
               Новая теория
             </Button>
-            <Button
-              nativeButton={false}
-              variant="outline"
-              render={<Link href={`${knowledgeBasePath}/intensives/new`} />}
-            >
+            <Button type="button" variant="outline" onClick={openNewIntensive}>
               Новый интенсив
             </Button>
             <Button type="button" variant="outline" onClick={openNewTest}>
@@ -338,18 +394,23 @@ export function KnowledgeWorkspace({
                 type="button"
                 size="sm"
                 variant={kind === value ? "default" : "outline"}
-                onClick={() => setKind(value)}
+                onClick={() => {
+                  setKind(value);
+                  setCurrentFolderId(null);
+                }}
               >
                 {label}
               </Button>
             ))}
           </div>
           <MaterialsFolderPanel
+            key={`school-${kind}`}
             ownerScope="school"
             teacherId={null}
             canEdit
             kinds={["folder", kind]}
             contentKind={kind}
+            onCurrentFolderChange={setCurrentFolderId}
             onOpenMaterial={(itemKind, id) => {
               if (itemKind === "theory") {
                 router.push(`${knowledgeBasePath}/theory/${id}`);
@@ -362,6 +423,7 @@ export function KnowledgeWorkspace({
                 const hw = schoolTests.find((t) => t.id === id);
                 if (hw) {
                   setEditingTest(hw);
+                  setTestFolderId(hw.folderId ?? hw.sectionId ?? null);
                   setTestOwner({ teacherId: "", libraryScope: "school" });
                   setTestOpen(true);
                 }
@@ -420,6 +482,7 @@ export function KnowledgeWorkspace({
         teacherId={testOwner.teacherId}
         libraryScope={testOwner.libraryScope}
         homework={editingTest}
+        folderId={testFolderId}
         open={testOpen}
         onOpenChange={setTestOpen}
         purpose="homework"

@@ -1492,32 +1492,14 @@ export async function upsertTopic(
       : topic.sectionId !== undefined
         ? topic.sectionId
         : (existing?.folderId ?? existing?.sectionId ?? null);
-  if (owner.libraryScope === "school") folderId = null;
-  if (owner.libraryScope === "teacher" && folderId) {
-    const [folder] = await db
-      .select()
-      .from(materialFolders)
-      .where(eq(materialFolders.id, folderId))
-      .limit(1);
-    if (!folder || folder.organizationId !== ctx.organizationId) {
-      throw badRequest("Папка не найдена");
-    }
-    if (!folder.parentId) {
-      throw badRequest(
-        "Тему можно размещать только внутри подраздела, не в корне раздела"
-      );
-    }
-    const { folderAcceptsMaterialKind, normalizeFolderContentKind } =
-      await import("@/lib/folders/material-folders");
-    if (
-      !folderAcceptsMaterialKind(
-        normalizeFolderContentKind(folder.contentKind),
-        "topic"
-      )
-    ) {
-      throw badRequest("Папка принадлежит другому типу раздела");
-    }
-  }
+  folderId = await assertMaterialFolderPlacement(db, ctx, {
+    folderId,
+    libraryScope: owner.libraryScope,
+    teacherId: owner.teacherId,
+    materialKind: "topic",
+    rootDeniedMessage:
+      "Тему можно размещать только внутри подраздела, не в корне раздела",
+  });
   const { legacySectionIdForFolder } = await import(
     "@/server/services/folder-service"
   );
@@ -1688,18 +1670,65 @@ export async function reorderTopics(
  * Папка теста — единственное место в каталоге.
  * sectionId остаётся legacy-колонкой и не выбирает папку:
  * пустой раздел не затирает уже сохранённый folderId.
+ * Школьная и преподавательская библиотеки используют один и тот же folderId.
  */
 function resolveHomeworkFolderId(
   hw: { folderId?: string | null; sectionId?: string | null },
   existing: { folderId: string | null } | undefined,
-  libraryScope: LibraryScope,
   purpose: string
 ): string | null {
-  if (libraryScope === "school") return null;
   if (purpose !== "homework") return existing?.folderId ?? null;
   if (hw.folderId !== undefined) return hw.folderId ?? null;
   if (hw.sectionId) return hw.sectionId;
   return existing?.folderId ?? null;
+}
+
+async function assertMaterialFolderPlacement(
+  db: AppDb,
+  ctx: AuthContext,
+  args: {
+    folderId: string | null;
+    libraryScope: LibraryScope;
+    teacherId: string | null;
+    materialKind: "topic" | "test";
+    rootDeniedMessage: string;
+  }
+): Promise<string | null> {
+  const { folderId, libraryScope, teacherId, materialKind, rootDeniedMessage } =
+    args;
+  if (!folderId) return null;
+  const [folder] = await db
+    .select()
+    .from(materialFolders)
+    .where(eq(materialFolders.id, folderId))
+    .limit(1);
+  if (!folder || folder.organizationId !== ctx.organizationId) {
+    throw badRequest("Папка не найдена");
+  }
+  if (libraryScope === "school") {
+    if (folder.ownerScope !== "school") {
+      throw badRequest("Папка не найдена");
+    }
+  } else if (
+    folder.ownerScope !== "teacher" ||
+    folder.teacherId !== teacherId
+  ) {
+    throw badRequest("Папка не найдена");
+  }
+  if (!folder.parentId) {
+    throw badRequest(rootDeniedMessage);
+  }
+  const { folderAcceptsMaterialKind, normalizeFolderContentKind } =
+    await import("@/lib/folders/material-folders");
+  if (
+    !folderAcceptsMaterialKind(
+      normalizeFolderContentKind(folder.contentKind),
+      materialKind
+    )
+  ) {
+    throw badRequest("Папка принадлежит другому типу раздела");
+  }
+  return folderId;
 }
 
 export async function upsertHomework(
@@ -1719,35 +1748,20 @@ export async function upsertHomework(
     : [];
   const owner = await resolveLibraryOwner(db, ctx, hw, existing);
   const purpose = hw.purpose ?? existing?.purpose ?? "homework";
-  const folderId = resolveHomeworkFolderId(hw, existing, owner.libraryScope, purpose);
+  let folderId = resolveHomeworkFolderId(hw, existing, purpose);
   const description =
     hw.description === undefined
       ? (existing?.description ?? null)
       : normalizeOptionalDescription(hw.description);
-  if (owner.libraryScope === "teacher" && purpose === "homework" && folderId) {
-    const [folder] = await db
-      .select()
-      .from(materialFolders)
-      .where(eq(materialFolders.id, folderId))
-      .limit(1);
-    if (!folder || folder.organizationId !== ctx.organizationId) {
-      throw badRequest("Папка не найдена");
-    }
-    if (!folder.parentId) {
-      throw badRequest(
-        "Домашнее задание можно размещать только внутри подраздела, не в корне раздела"
-      );
-    }
-    const { folderAcceptsMaterialKind, normalizeFolderContentKind } =
-      await import("@/lib/folders/material-folders");
-    if (
-      !folderAcceptsMaterialKind(
-        normalizeFolderContentKind(folder.contentKind),
-        "test"
-      )
-    ) {
-      throw badRequest("Папка принадлежит другому типу раздела");
-    }
+  if (purpose === "homework") {
+    folderId = await assertMaterialFolderPlacement(db, ctx, {
+      folderId,
+      libraryScope: owner.libraryScope,
+      teacherId: owner.teacherId,
+      materialKind: "test",
+      rootDeniedMessage:
+        "Домашнее задание можно размещать только внутри подраздела, не в корне раздела",
+    });
   }
   const { legacySectionIdForFolder } = await import(
     "@/server/services/folder-service"

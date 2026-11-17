@@ -377,6 +377,16 @@ export async function upsertIntensive(
     if (!folder || folder.organizationId !== ctx.organizationId) {
       throw badRequest("Папка не найдена");
     }
+    if (scope === "school") {
+      if (folder.ownerScope !== "school") {
+        throw badRequest("Папка не найдена");
+      }
+    } else if (
+      folder.ownerScope !== "teacher" ||
+      folder.teacherId !== teacherId
+    ) {
+      throw badRequest("Папка не найдена");
+    }
     if (!folder.parentId) {
       throw badRequest(
         "Интенсив можно размещать только внутри подраздела, не в корне раздела"

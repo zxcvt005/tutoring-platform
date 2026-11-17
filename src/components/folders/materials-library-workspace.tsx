@@ -342,6 +342,7 @@ export function MaterialsSectionWorkspace({
       ) : null}
 
       <MaterialsFolderPanel
+        key={`${ownerScope}-${teacherId}-${section}-${showArchived ? "arch" : "active"}`}
         kinds={meta.kinds}
         contentKind={section}
         ownerScope={ownerScope}

@@ -97,8 +97,29 @@ export function TestEditorDialog({
       ? (folderId ?? homework?.folderId ?? homework?.sectionId ?? null)
       : null;
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+    <Dialog
+      open={open}
+      disablePointerDismissal
+      onOpenChange={(next, eventDetails) => {
+        if (!next) {
+          const reason = eventDetails.reason;
+          if (
+            reason === "outside-press" ||
+            reason === "escape-key" ||
+            reason === "close-press" ||
+            reason === "focus-out"
+          ) {
+            eventDetails.cancel();
+            return;
+          }
+        }
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent
+        showCloseButton={false}
+        className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+      >
         {open ? (
           <TestEditorForm
             key={homework?.id ?? "new"}
@@ -149,6 +170,7 @@ function TestEditorForm({
   const [preview, setPreview] = useState(false);
   const [addType, setAddType] = useState<QuestionType>("single_choice");
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
 
   const maxScore = useMemo(
     () => computeMaxScore(form.questions),
@@ -221,7 +243,7 @@ function TestEditorForm({
   }
 
   async function save(andPublish: boolean) {
-    if (busy) return;
+    if (busy || busyRef.current) return;
     if (!form.title.trim()) {
       toast.error("Укажите название теста");
       return;
@@ -236,6 +258,7 @@ function TestEditorForm({
         return;
       }
     }
+    busyRef.current = true;
     setBusy(true);
     try {
       // Сначала дожидаемся сохранения теста: раньше upsertHomework был
@@ -270,6 +293,7 @@ function TestEditorForm({
       onSaved?.({ id: saved.id });
       onClose();
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }

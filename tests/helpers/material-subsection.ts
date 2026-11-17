@@ -26,3 +26,25 @@ export async function ensureTeacherSubsection(
   });
   return { root, sub, folderId: sub.id };
 }
+
+/** Школьные папки базы знаний: раздел + подраздел. */
+export async function ensureSchoolSubsection(
+  db: AppDb,
+  ctx: AuthContext,
+  contentKind: Exclude<FolderContentKind, "shared"> = "topic"
+) {
+  const root = await upsertMaterialFolder(db, ctx, {
+    title: `Школа · раздел ${contentKind}`,
+    ownerScope: "school",
+    teacherId: null,
+    contentKind,
+  });
+  const sub = await upsertMaterialFolder(db, ctx, {
+    title: `Школа · подраздел ${contentKind}`,
+    ownerScope: "school",
+    teacherId: null,
+    parentId: root.id,
+    contentKind,
+  });
+  return { root, sub, folderId: sub.id };
+}
