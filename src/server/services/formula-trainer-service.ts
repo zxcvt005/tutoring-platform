@@ -40,10 +40,8 @@ import type {
   TrainerSessionPublic,
   TrainerSettings,
 } from "@/lib/formula-trainer/types";
-import { FORMULA_TRAINER_PRODUCT_SLUG } from "@/lib/products";
 import type { AuthContext } from "@/server/authz/context";
 import { requireStudentProfile } from "@/server/authz/require";
-import { requireStudentProductAccess } from "@/server/services/products-service";
 import {
   formulaTrainerProgress,
   formulaTrainerQuestions,
@@ -63,10 +61,10 @@ function assertOwnStudent(ctx: AuthContext, studentId: string) {
   }
 }
 
-async function requireStudent(db: AppDb, ctx: AuthContext) {
+/** Тренажёр доступен любому авторизованному ученику Аудитории (без тарифа/баланса). */
+async function requireStudent(_db: AppDb, ctx: AuthContext) {
   const studentId = await requireStudentProfile(ctx);
   assertOwnStudent(ctx, studentId);
-  await requireStudentProductAccess(db, ctx, FORMULA_TRAINER_PRODUCT_SLUG);
   return studentId;
 }
 

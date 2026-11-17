@@ -61,6 +61,16 @@ describe("auditoria call history", () => {
 });
 
 describe("formula trainer home entry", () => {
+  it("shows the trainer on Auditoria home for every student", () => {
+    const src = readFileSync(
+      "src/components/auditoria/home-panel.tsx",
+      "utf8"
+    );
+    expect(src).toContain("<FormulaTrainerQuickCard />");
+    expect(src).not.toContain("availableProductSlugs");
+    expect(src).not.toContain("FORMULA_TRAINER_PRODUCT_SLUG");
+  });
+
   it("opens the full trainer and does not start the quick question", () => {
     const src = readFileSync(
       "src/components/formula-trainer/quick-card.tsx",

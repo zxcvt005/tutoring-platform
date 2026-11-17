@@ -15,7 +15,6 @@ import {
   submitFormulaAnswer,
   updateFormulaTrainerSettings,
 } from "@/server/services/formula-trainer-service";
-import { grantFormulaTrainerOnTariff } from "../helpers/products";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
 
 describe("formula trainer service", () => {
@@ -34,11 +33,7 @@ describe("formula trainer service", () => {
       email,
       password: DEMO_PASSWORD,
     });
-    const ctx = await resolveAuthContext(db, session.rawToken);
-    if (email === "s1@demo.local") {
-      await grantFormulaTrainerOnTariff(db, ctx.organizationId, "s1");
-    }
-    return ctx;
+    return resolveAuthContext(db, session.rawToken);
   }
 
   it("quick question is choice-only and answer is idempotent", async () => {
@@ -157,5 +152,25 @@ describe("formula trainer service", () => {
       expect(next.question.kind).toBe("choice");
       expect(next.question.options).toHaveLength(4);
     }
+  });
+
+  it("is open for every student without product grant or balance", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const s1 = await asStudent(t.db, "s1@demo.local");
+    const s2 = await asStudent(t.db, "s2@demo.local");
+
+    const q1 = await getOrCreateQuickQuestion(t.db, s1);
+    const q2 = await getOrCreateQuickQuestion(t.db, s2);
+    expect(q1.question).not.toBeNull();
+    expect(q2.question).not.toBeNull();
+    expect(q1.question!.questionId).not.toBe(q2.question!.questionId);
+
+    const { session } = await loginWithPassword(t.db, {
+      email: "director@demo.local",
+      password: DEMO_PASSWORD,
+    });
+    const director = await resolveAuthContext(t.db, session.rawToken);
+    await expect(getOrCreateQuickQuestion(t.db, director)).rejects.toThrow();
   });
 });

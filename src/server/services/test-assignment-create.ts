@@ -35,7 +35,10 @@ export async function createTestAssignmentWithSnapshot(
     lessonId?: string | null;
     dueAt?: Date | null;
     status?: "assigned" | "overdue";
-    /** Снимок теста базы знаний. Для обычного ДЗ оригинал школы по-прежнему нельзя назначить. */
+    /**
+     * Устарело: школьные оригиналы назначаются через immutable snapshot
+     * и больше не требуют отдельного флага. Поле сохранено для совместимости вызовов.
+     */
     allowSchoolOriginal?: boolean;
   }
 ): Promise<string> {
@@ -61,9 +64,9 @@ export async function createTestAssignmentWithSnapshot(
   const questions = (hw.questionsPublic as TestQuestion[]) ?? [];
   if (!questions.length) throw badRequest("В тесте нет заданий");
 
-  if (!hw.teacherId && !input.allowSchoolOriginal) {
-    throw badRequest("Оригинал базы знаний нельзя назначить напрямую");
-  }
+  // Школьный оригинал (teacherId=null) назначается как есть: владелец и тело
+  // теста не меняются, ученик работает только со snapshot назначения.
+  void input.allowSchoolOriginal;
   const topicId = input.topicId || hw.topicId || null;
   const fullForSnapshot: Homework = {
     id: hw.id,

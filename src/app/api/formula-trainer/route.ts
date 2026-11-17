@@ -8,7 +8,7 @@ import {
   readJsonBody,
   requireAuth,
 } from "@/server/http/request";
-import { FORMULA_TRAINER_PRODUCT_SLUG } from "@/lib/products";
+import { requireStudentProfile } from "@/server/authz/require";
 import {
   getCatalogPublic,
   getCurrentTrainerQuestion,
@@ -20,7 +20,6 @@ import {
   submitFormulaAnswer,
   updateFormulaTrainerSettings,
 } from "@/server/services/formula-trainer-service";
-import { requireStudentProductAccess } from "@/server/services/products-service";
 
 const bodySchema = z.object({
   action: z.string(),
@@ -40,11 +39,7 @@ export async function GET(request: Request) {
       case "quick":
         return jsonOk(await getOrCreateQuickQuestion(db, ctx));
       case "catalog":
-        await requireStudentProductAccess(
-          db,
-          ctx,
-          FORMULA_TRAINER_PRODUCT_SLUG
-        );
+        await requireStudentProfile(ctx);
         return jsonOk(await getCatalogPublic());
       default:
         throw validationError(`Неизвестное действие: ${action}`);

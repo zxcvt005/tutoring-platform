@@ -237,9 +237,9 @@ describe("products catalog and access", () => {
     expect(
       await studentHasProductAccess(t.db, student, FORMULA_TRAINER_PRODUCT_SLUG)
     ).toBe(false);
-    await expect(getOrCreateQuickQuestion(t.db, student)).rejects.toThrow(
-      /недоступен/i
-    );
+    // Тренажёр формул больше не зависит от product snapshot / баланса.
+    const stillOpen = await getOrCreateQuickQuestion(t.db, student);
+    expect(stillOpen.question).not.toBeNull();
 
     const progressAfterRevoke = await t.db
       .select()

@@ -22,6 +22,10 @@ import {
   upsertTopic,
 } from "@/server/services/platform-mutations";
 import {
+  getAssignmentForViewer,
+  submitAssignment,
+} from "@/server/services/assignments-service";
+import {
   assignTheory,
   upsertTheory,
 } from "@/server/services/theory-service";
@@ -190,7 +194,7 @@ describe("knowledge base copies", () => {
     ).rejects.toMatchObject({ status: 403 });
   });
 
-  it("assigns school published theory but not school homework originals", async () => {
+  it("assigns school and teacher homework via snapshot without moving the original", async () => {
     const db = await openDb();
     const director = await login(db, "director@demo.local");
     const anna = await login(db, "anna@example.com");
@@ -228,15 +232,68 @@ describe("knowledge base copies", () => {
     });
     expect(theoryAssigned.created).toBe(1);
 
-    await expect(
-      assignHomework(db, anna, {
-        homeworkId: schoolHw.id,
-        teacherId: "t1",
-        studentIds: ["s1"],
-      })
-    ).rejects.toMatchObject({
-      message: "Оригинал базы знаний нельзя назначить напрямую",
+    const schoolAssigned = await assignHomework(db, anna, {
+      homeworkId: schoolHw.id,
+      teacherId: "t1",
+      studentIds: ["s1", "s2"],
     });
+    expect(schoolAssigned.created).toBe(2);
+
+    const schoolRows = await db
+      .select()
+      .from(testAssignments)
+      .where(eq(testAssignments.testId, schoolHw.id));
+    expect(schoolRows).toHaveLength(2);
+    expect(new Set(schoolRows.map((r) => r.studentId))).toEqual(
+      new Set(["s1", "s2"])
+    );
+
+    for (const row of schoolRows) {
+      const [snap] = await db
+        .select()
+        .from(assignmentSnapshots)
+        .where(eq(assignmentSnapshots.assignmentId, row.id));
+      expect(snap?.title).toBe("Школьный тест");
+    }
+
+    const [original] = await db
+      .select()
+      .from(tests)
+      .where(eq(tests.id, schoolHw.id))
+      .limit(1);
+    expect(original?.libraryScope).toBe("school");
+    expect(original?.teacherId).toBeNull();
+    expect(original?.title).toBe("Школьный тест");
+
+    await upsertHomework(db, director, {
+      id: schoolHw.id,
+      teacherId: "",
+      libraryScope: "school",
+      title: "Школьный тест изменён",
+      status: "published",
+      purpose: "homework",
+      questions: [
+        {
+          id: "q1",
+          type: "single_choice",
+          prompt: "2+2",
+          maxScore: 1,
+          options: [
+            { id: "oa", text: "4" },
+            { id: "ob", text: "5" },
+          ],
+          correctOptionIds: ["oa"],
+        },
+      ],
+    });
+
+    for (const row of schoolRows) {
+      const [snap] = await db
+        .select()
+        .from(assignmentSnapshots)
+        .where(eq(assignmentSnapshots.assignmentId, row.id));
+      expect(snap?.title).toBe("Школьный тест");
+    }
 
     const hwAssigned = await assignHomework(db, anna, {
       homeworkId: teacherHw.id,
@@ -244,6 +301,34 @@ describe("knowledge base copies", () => {
       studentIds: ["s1"],
     });
     expect(hwAssigned.created).toBe(1);
+
+    const s1 = await login(db, "s1@demo.local");
+    const s1School = schoolRows.find((r) => r.studentId === "s1")!;
+    const viewed = await getAssignmentForViewer(db, s1, s1School.id);
+    expect(viewed.snapshot.title).toBe("Школьный тест");
+    expect(viewed.snapshot.answerKeys).toBeUndefined();
+
+    const submitted = await submitAssignment(
+      db,
+      s1,
+      s1School.id,
+      [{ questionId: "q1", selectedOptionIds: ["oa"] }],
+      1
+    );
+    expect([
+      "graded",
+      "reviewed",
+      "remaining_questions",
+      "attempt1_submitted",
+    ]).toContain(submitted.status);
+
+    // После завершения можно назначить тот же оригинал снова (новое назначение).
+    const reassign = await assignHomework(db, anna, {
+      homeworkId: schoolHw.id,
+      teacherId: "t1",
+      studentIds: ["s1"],
+    });
+    expect(reassign.created).toBe(1);
   });
 
   it("isolates listKnowledgeBase by organization", async () => {

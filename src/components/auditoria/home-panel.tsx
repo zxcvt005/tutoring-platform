@@ -12,7 +12,6 @@ import { MyTariffBlock } from "@/components/auditoria/my-tariff-block";
 import { AuditoriaTeacherCard } from "@/components/auditoria/teacher-card";
 import { EmptyState } from "@/components/empty-state";
 import { FormulaTrainerQuickCard } from "@/components/formula-trainer/quick-card";
-import { FORMULA_TRAINER_PRODUCT_SLUG } from "@/lib/products";
 import { StudentInviteBanners } from "@/components/video-calls/student-invite-banners";
 import { TheoryNewMark } from "@/components/theory/theory-new-mark";
 import { homeworkAssignedDateInfo, sortHomeworkForStudent } from "@/lib/homework-list";
@@ -131,10 +130,7 @@ export function AuditoriaHomePanel() {
         <MyTariffBlock studentId={studentId} compact featured />
       </div>
 
-      {!tour.active &&
-      (data.availableProductSlugs ?? []).includes(FORMULA_TRAINER_PRODUCT_SLUG) ? (
-        <FormulaTrainerQuickCard />
-      ) : null}
+      {!tour.active ? <FormulaTrainerQuickCard /> : null}
 
       <div className="grid min-w-0 gap-4 lg:grid-cols-2">
         <div className="min-w-0">

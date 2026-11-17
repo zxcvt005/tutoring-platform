@@ -14,7 +14,6 @@ import {
   submitFormulaAnswer,
   updateFormulaTrainerSettings,
 } from "@/server/services/formula-trainer-service";
-import { grantFormulaTrainerOnTariff } from "../helpers/products";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
 
 describe("formula trainer sessions", () => {
@@ -33,9 +32,7 @@ describe("formula trainer sessions", () => {
       email,
       password: DEMO_PASSWORD,
     });
-    const ctx = await resolveAuthContext(db, session.rawToken);
-    await grantFormulaTrainerOnTariff(db, ctx.organizationId, "s1");
-    return ctx;
+    return resolveAuthContext(db, session.rawToken);
   }
 
   it("saves one session, resumes it, and does not score an answer twice", async () => {
