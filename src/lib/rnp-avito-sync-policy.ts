@@ -1,6 +1,11 @@
 /**
  * Политика устаревания API-метрик РНП Авито (Europe/Moscow calendar days).
  * Никогда не синхронизируем будущие даты.
+ *
+ * Авто: только последние 7 календарных дней (сегодня + 6 назад) по TTL.
+ *   Дни старше 7 суток — только история (в т.ч. никогда не синкавшиеся),
+ *   чтобы открытие таблицы не устраивало шторм запросов к Avito.
+ * Force: то же окно 7 дней, но без учёта TTL (принудительное обновление).
  */
 
 import { addAppDateKey, appDateKey } from "@/lib/app-time";
@@ -10,6 +15,9 @@ export type RnpAvitoSyncMode = "auto" | "force";
 const MS_MIN = 60_000;
 const MS_HOUR = 60 * MS_MIN;
 const MS_DAY = 24 * MS_HOUR;
+
+/** Сколько календарных дней назад ещё участвуют в auto/force (0 = сегодня). */
+export const RNP_AVITO_LIVE_WINDOW_DAYS = 6;
 
 /** Сегодня: 5 мин; вчера/позавчера: 1 ч; дни 3–6 назад: 1 сут; старше: без авто. */
 export function syncTtlMsForAge(daysAgo: number): number | null {
@@ -31,9 +39,11 @@ export function calendarDaysBetween(earlier: string, later: string): number {
 
 /**
  * Нужна ли повторная синхронизация метрики для дня.
- * - never synced → всегда да (первый проход истории).
- * - auto: по TTL в зависимости от возраста дня; старше 7 дней — только история.
- * - force: все дни выбранного месяца до сегодня (игнор TTL), без будущих дат.
+ * - будущие даты — нет;
+ * - старше live-окна (7 дней) — нет (ни auto, ни force);
+ * - force в окне — всегда да;
+ * - auto never-synced в окне — да;
+ * - auto с syncedAt — по TTL.
  */
 export function isRnpAvitoMetricStale(
   syncedAt: Date | string | null | undefined,
@@ -44,6 +54,9 @@ export function isRnpAvitoMetricStale(
   const today = appDateKey(now);
   if (dayDate > today) return false;
 
+  const ago = calendarDaysBetween(dayDate, today);
+  if (ago > RNP_AVITO_LIVE_WINDOW_DAYS) return false;
+
   if (mode === "force") {
     return true;
   }
@@ -52,7 +65,6 @@ export function isRnpAvitoMetricStale(
     return true;
   }
 
-  const ago = calendarDaysBetween(dayDate, today);
   const ttl = syncTtlMsForAge(ago);
   if (ttl == null) return false;
 

@@ -25,6 +25,9 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+/** Nov 1–2 попадали в live-окно (7 суток) относительно этой «сейчас». */
+const syncNow = () => fromAppWall(2026, 11, 2, 18, 0, 0);
+
 describe("rnp avito sync", () => {
   let close: (() => Promise<void>) | undefined;
   const prevEnv = {
@@ -193,7 +196,7 @@ describe("rnp avito sync", () => {
       t.db,
       director,
       { year: 2026, month: 11, mode: "force" },
-      { fetchFn: mockAvitoOk() }
+      { nowDate: syncNow, fetchFn: mockAvitoOk() }
     );
     expect(first.syncedDays).toBeGreaterThanOrEqual(2);
     expect(first.apiCalls).toBeGreaterThanOrEqual(2);
@@ -216,6 +219,7 @@ describe("rnp avito sync", () => {
       director,
       { year: 2026, month: 11, mode: "auto" },
       {
+        nowDate: syncNow,
         fetchFn: async (url) => {
           apiHits += 1;
           return mockAvitoOk()(url, {});
@@ -267,7 +271,7 @@ describe("rnp avito sync", () => {
       t.db,
       director,
       { year: 2026, month: 11, mode: "force" },
-      { fetchFn: mockAvitoOk() }
+      { nowDate: syncNow, fetchFn: mockAvitoOk() }
     );
     const dayAfter = afterSync.monthPayload.days.find(
       (d) => d.date === "2026-11-01"
@@ -290,6 +294,7 @@ describe("rnp avito sync", () => {
       director,
       { year: 2026, month: 11, mode: "force" },
       {
+        nowDate: syncNow,
         fetchFn: async (url) => {
           const u = String(url);
           if (u.includes("/token/")) {
@@ -352,7 +357,7 @@ describe("rnp avito sync", () => {
     expect(day2.impressions).toBe(20);
   });
 
-  it("does not partially update the month when Avito returns an error", async () => {
+  it("keeps successful budget updates when items fetch fails", async () => {
     const t = await createTestDb();
     close = t.close;
     setEnv();
@@ -362,52 +367,57 @@ describe("rnp avito sync", () => {
       t.db,
       director,
       { year: 2026, month: 11, mode: "force" },
-      { fetchFn: mockAvitoOk() }
+      { nowDate: syncNow, fetchFn: mockAvitoOk() }
     );
 
     let spendCalls = 0;
-    await expect(
-      syncRnpAvitoMonth(
-        t.db,
-        director,
-        { year: 2026, month: 11, mode: "force" },
-        {
-          fetchFn: async (url) => {
-            const u = String(url);
-            if (u.includes("/token/")) {
-              return jsonResponse({ access_token: "tok", expires_in: 3600 });
-            }
-            if (u.includes("/spendings")) {
-              spendCalls += 1;
-              return jsonResponse({
-                result: {
-                  timestamp: 1,
-                  groupings: [
-                    {
-                      date: "2026-11-01",
-                      type: "day",
-                      spendings: [
-                        { slug: "promotion", value: 9999, services: [] },
-                      ],
-                    },
-                  ],
-                },
-              });
-            }
-            return jsonResponse({ error: { message: "down" } }, 503);
-          },
-        }
-      )
-    ).rejects.toMatchObject({ status: 503 });
+    const partial = await syncRnpAvitoMonth(
+      t.db,
+      director,
+      { year: 2026, month: 11, mode: "force" },
+      {
+        nowDate: syncNow,
+        fetchFn: async (url) => {
+          const u = String(url);
+          if (u.includes("/token/")) {
+            return jsonResponse({ access_token: "tok", expires_in: 3600 });
+          }
+          if (u.includes("/spendings")) {
+            spendCalls += 1;
+            return jsonResponse({
+              result: {
+                timestamp: 1,
+                groupings: [
+                  {
+                    date: "2026-11-01",
+                    type: "day",
+                    spendings: [
+                      { slug: "promotion", value: 9999, services: [] },
+                    ],
+                  },
+                ],
+              },
+            });
+          }
+          return jsonResponse({ error: { message: "down" } }, 503);
+        },
+      }
+    );
 
     expect(spendCalls).toBe(1);
+    expect(partial.budgetSynced).toBe(true);
+    expect(partial.itemsSynced).toBe(false);
+    expect(partial.warnings?.length).toBeGreaterThan(0);
     const month = await getRnpAvitoMonth(t.db, director, {
       year: 2026,
       month: 11,
     });
-    // Ошибка items до записи — бюджет 1-го числа не затирается.
+    // Бюджет обновился; impressions с прошлой успешной sync не затёрты.
     expect(month.days.find((d) => d.date === "2026-11-01")!.budgetSpentRub).toBe(
-      2000
+      9999
+    );
+    expect(month.days.find((d) => d.date === "2026-11-01")!.impressions).toBe(
+      100
     );
   });
 
@@ -418,12 +428,13 @@ describe("rnp avito sync", () => {
     const student = await asRole(t.db, "s1@demo.local");
     await expect(
       syncRnpAvitoMonth(t.db, student, { year: 2026, month: 11 }, {
+        nowDate: syncNow,
         fetchFn: mockAvitoOk(),
       })
     ).rejects.toMatchObject({ code: "forbidden" });
   });
 
-  it("blocks concurrent sync of the same month", async () => {
+  it("coalesces concurrent sync of the same month and mode", async () => {
     const t = await createTestDb();
     close = t.close;
     setEnv();
@@ -433,47 +444,49 @@ describe("rnp avito sync", () => {
     const spendGate = new Promise<void>((resolve) => {
       releaseSpend = resolve;
     });
-    let hitSpend = false;
+    let spendCalls = 0;
+
+    const deps = {
+      nowDate: syncNow,
+      fetchFn: async (url: string) => {
+        const u = String(url);
+        if (u.includes("/token/")) {
+          return jsonResponse({ access_token: "tok", expires_in: 3600 });
+        }
+        if (u.includes("/spendings")) {
+          spendCalls += 1;
+          await spendGate;
+          return jsonResponse({
+            result: { timestamp: 1, groupings: [] },
+          });
+        }
+        return jsonResponse({
+          result: { dataTotalCount: 0, groupings: [] },
+        });
+      },
+    };
 
     const first = syncRnpAvitoMonth(
       t.db,
       director,
-      { year: 2026, month: 11 },
-      {
-        fetchFn: async (url) => {
-          const u = String(url);
-          if (u.includes("/token/")) {
-            return jsonResponse({ access_token: "tok", expires_in: 3600 });
-          }
-          if (u.includes("/spendings")) {
-            hitSpend = true;
-            await spendGate;
-            return jsonResponse({
-              result: { timestamp: 1, groupings: [] },
-            });
-          }
-          return jsonResponse({
-            result: { dataTotalCount: 0, groupings: [] },
-          });
-        },
-      }
+      { year: 2026, month: 11, mode: "force" },
+      deps
+    );
+    const second = syncRnpAvitoMonth(
+      t.db,
+      director,
+      { year: 2026, month: 11, mode: "force" },
+      deps
     );
 
-    for (let i = 0; i < 50 && !hitSpend; i++) {
+    for (let i = 0; i < 50 && spendCalls === 0; i++) {
       await new Promise((r) => setTimeout(r, 10));
     }
-    expect(hitSpend).toBe(true);
-
-    await expect(
-      syncRnpAvitoMonth(
-        t.db,
-        director,
-        { year: 2026, month: 11 },
-        { fetchFn: mockAvitoOk() }
-      )
-    ).rejects.toMatchObject({ code: "conflict" });
+    expect(spendCalls).toBe(1);
 
     releaseSpend();
-    await first;
+    const [a, b] = await Promise.all([first, second]);
+    expect(a).toEqual(b);
+    expect(spendCalls).toBe(1);
   });
 });

@@ -64,6 +64,11 @@ type SyncMonthResult = {
   mode: "auto" | "force";
   lastSyncedAt: string | null;
   monthPayload: RnpAvitoMonthPayload;
+  warnings?: string[];
+  budgetSynced?: boolean;
+  itemsSynced?: boolean;
+  rateLimited?: boolean;
+  retryAfterMs?: number | null;
 };
 
 function trialSourceKey(
@@ -155,12 +160,16 @@ export function RnpAvitoWorkspace({
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [rateLimitUntil, setRateLimitUntil] = useState<number | null>(null);
   const [, startTransition] = useTransition();
 
   const daysRef = useRef(days);
   const saveGenRef = useRef(new Map<string, number>());
   const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncInflightRef = useRef(new Map<string, Promise<void>>());
+  /** Клиентский антишторм: не чаще 1 auto/мин на месяц (серверный TTL решает, нужны ли API). */
+  const autoSyncAtRef = useRef(new Map<string, number>());
   const persistManualRef = useRef<
     | ((
         date: string,
@@ -190,43 +199,80 @@ export function RnpAvitoWorkspace({
 
   const runSync = useCallback(
     async (y: number, m: number, mode: "auto" | "force") => {
-      setSyncError(null);
-      if (mode === "force") setSyncing(true);
-      try {
-        const data = await apiCall<SyncMonthResult>("syncRnpAvitoMonth", {
-          year: y,
-          month: m,
-          mode,
-        });
-        // Не сбрасываем таблицу: подменяем дни только после ответа.
-        if (data.year === y && data.month === m) {
-          setDays(data.monthPayload.days);
-          setApiConnected(data.monthPayload.apiConnected);
-          setAvitoEnv(data.monthPayload.avitoEnv);
-          setLastSyncedAt(data.lastSyncedAt);
-        }
-        if (mode === "force") {
-          if (data.skipped) {
-            toast.message("Данные уже актуальны, запросы к Avito не нужны");
-          } else {
-            toast.success(
-              `Синхронизировано · ${data.syncedDays} дн. · API ${data.apiCalls}`
-            );
-          }
-        }
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Не удалось синхронизировать";
-        if (mode === "force") {
-          setSyncError(message);
-          toast.error(message);
-        }
-        // auto: тихий провал, таблица из БД остаётся
-      } finally {
-        if (mode === "force") setSyncing(false);
+      const key = `${y}-${m}:${mode}`;
+      const existing = syncInflightRef.current.get(key);
+      if (existing) return existing;
+
+      if (
+        rateLimitUntil != null &&
+        Date.now() < rateLimitUntil &&
+        mode === "auto"
+      ) {
+        return;
       }
+
+      const task = (async () => {
+        setSyncError(null);
+        if (mode === "force") setSyncing(true);
+        try {
+          const data = await apiCall<SyncMonthResult>("syncRnpAvitoMonth", {
+            year: y,
+            month: m,
+            mode,
+          });
+          // Не сбрасываем таблицу: подменяем дни только после ответа.
+          if (data.year === y && data.month === m) {
+            setDays(data.monthPayload.days);
+            setApiConnected(data.monthPayload.apiConnected);
+            setAvitoEnv(data.monthPayload.avitoEnv);
+            setLastSyncedAt(data.lastSyncedAt);
+          }
+          if (data.rateLimited && data.retryAfterMs) {
+            setRateLimitUntil(Date.now() + data.retryAfterMs);
+          } else if (!data.rateLimited) {
+            setRateLimitUntil(null);
+          }
+          if (mode === "force") {
+            if (data.skipped) {
+              toast.message("Данные уже актуальны, запросы к Avito не нужны");
+            } else if (data.warnings?.length) {
+              toast.message(
+                `Частично обновлено · ${data.syncedDays} дн. · ${data.warnings[0]}`
+              );
+            } else {
+              toast.success(
+                `Синхронизировано · ${data.syncedDays} дн. · API ${data.apiCalls}`
+              );
+            }
+          }
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "Не удалось синхронизировать";
+          const details = (
+            err as { details?: { retryAfterMs?: number; code?: string } }
+          )?.details;
+          if (
+            details?.code === "avito_rate_limited" ||
+            /слишком много запросов/i.test(message)
+          ) {
+            const wait = details?.retryAfterMs ?? 60_000;
+            setRateLimitUntil(Date.now() + wait);
+          }
+          if (mode === "force") {
+            setSyncError(message);
+            toast.error(message);
+          }
+          // auto: тихий провал, таблица из БД остаётся
+        } finally {
+          if (mode === "force") setSyncing(false);
+          syncInflightRef.current.delete(key);
+        }
+      })();
+
+      syncInflightRef.current.set(key, task);
+      return task;
     },
-    [apiCall]
+    [apiCall, rateLimitUntil]
   );
 
   const loadMonth = useCallback(
@@ -248,8 +294,13 @@ export function RnpAvitoWorkspace({
           setLastSyncedAt(data.lastSyncedAt);
           setReady(true);
         });
-        // Фоновая выборочная синхронизация устаревших дней (0 API, если всё свежо).
-        void runSync(data.year, data.month, "auto");
+        // Антишторм: Strict Mode / быстрые переключения не запускают пачку auto.
+        const autoKey = `${data.year}-${data.month}`;
+        const lastAuto = autoSyncAtRef.current.get(autoKey) ?? 0;
+        if (Date.now() - lastAuto > 60_000) {
+          autoSyncAtRef.current.set(autoKey, Date.now());
+          void runSync(data.year, data.month, "auto");
+        }
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : "Ошибка загрузки");
         setReady(true);
@@ -259,6 +310,12 @@ export function RnpAvitoWorkspace({
   );
 
   async function syncAvito() {
+    if (rateLimitUntil != null && Date.now() < rateLimitUntil) {
+      const sec = Math.ceil((rateLimitUntil - Date.now()) / 1000);
+      toast.message(`Avito временно ограничил запросы. Повторите через ~${sec} с.`);
+      return;
+    }
+    // Force может повторяться; снимаем «уже делали auto» только для UX.
     await runSync(year, month, "force");
   }
 
@@ -528,10 +585,17 @@ export function RnpAvitoWorkspace({
             <Button
               type="button"
               className="rounded-full"
-              disabled={syncing}
+              disabled={
+                syncing ||
+                (rateLimitUntil != null && Date.now() < rateLimitUntil)
+              }
               onClick={() => void syncAvito()}
             >
-              {syncing ? "Синхронизация…" : "Синхронизировать с Avito"}
+              {syncing
+                ? "Синхронизация…"
+                : rateLimitUntil != null && Date.now() < rateLimitUntil
+                  ? "Ожидание лимита Avito…"
+                  : "Синхронизировать с Avito"}
             </Button>
           </div>
         }
@@ -543,6 +607,12 @@ export function RnpAvitoWorkspace({
             ? `Последняя синхронизация: ${new Date(lastSyncedAt).toLocaleString("ru-RU")}`
             : "Ещё не синхронизировано"}
         </span>
+        {rateLimitUntil != null && Date.now() < rateLimitUntil ? (
+          <span>
+            Avito ограничил частоту запросов. Повтор через ~{" "}
+            {Math.max(1, Math.ceil((rateLimitUntil - Date.now()) / 1000))} с.
+          </span>
+        ) : null}
         {!apiConnected ? (
           <span>
             {avitoEnv?.missingKeys.length

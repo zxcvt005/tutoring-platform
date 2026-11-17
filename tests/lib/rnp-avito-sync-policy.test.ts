@@ -20,14 +20,19 @@ describe("rnp avito sync policy", () => {
     expect(syncTtlMsForAge(7)).toBeNull();
   });
 
-  it("marks never-synced days stale and respects auto TTL / force window", () => {
+  it("limits auto/force to the live 7-day window and respects TTL", () => {
     const now = fromAppWall(2026, 11, 14, 12, 0, 0);
-    expect(
-      isRnpAvitoMetricStale(null, "2026-11-01", now, "auto")
-    ).toBe(true);
-    expect(
-      isRnpAvitoMetricStale(null, "2026-11-15", now, "auto")
-    ).toBe(false);
+
+    // Older than 7 days: neither auto nor force (history only)
+    expect(isRnpAvitoMetricStale(null, "2026-11-01", now, "auto")).toBe(false);
+    expect(isRnpAvitoMetricStale(null, "2026-11-01", now, "force")).toBe(false);
+
+    // Future
+    expect(isRnpAvitoMetricStale(null, "2026-11-15", now, "auto")).toBe(false);
+
+    // Never-synced inside live window
+    expect(isRnpAvitoMetricStale(null, "2026-11-14", now, "auto")).toBe(true);
+    expect(isRnpAvitoMetricStale(null, "2026-11-08", now, "auto")).toBe(true);
 
     const freshToday = new Date(now.getTime() - 60_000);
     expect(
@@ -39,21 +44,20 @@ describe("rnp avito sync policy", () => {
     ).toBe(true);
 
     const hourAgo = new Date(now.getTime() - 60_000);
-    expect(
-      isRnpAvitoMetricStale(hourAgo, "2026-11-13", now, "auto")
-    ).toBe(false);
+    expect(isRnpAvitoMetricStale(hourAgo, "2026-11-13", now, "auto")).toBe(
+      false
+    );
 
-    // Older than 7 days: auto never refreshes once synced
-    const oldSync = fromAppWall(2026, 10, 1, 0, 0, 0);
+    // Force ignores TTL inside live window
     expect(
-      isRnpAvitoMetricStale(oldSync, "2026-11-01", now, "auto")
-    ).toBe(false);
-    // force обновляет весь выбранный месяц до сегодня
-    expect(
-      isRnpAvitoMetricStale(oldSync, "2026-11-01", now, "force")
+      isRnpAvitoMetricStale(freshToday, "2026-11-14", now, "force")
     ).toBe(true);
+    expect(isRnpAvitoMetricStale(hourAgo, "2026-11-10", now, "force")).toBe(
+      true
+    );
+    // Day 7 ago (ago=7) outside window
     expect(
-      isRnpAvitoMetricStale(oldSync, "2026-11-15", now, "force")
+      isRnpAvitoMetricStale(null, "2026-11-07", now, "force")
     ).toBe(false);
   });
 });

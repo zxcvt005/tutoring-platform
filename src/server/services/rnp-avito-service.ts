@@ -22,6 +22,7 @@ import {
 import {
   fetchAvitoItemStatsPage,
   fetchAvitoSpendings,
+  getAvitoClientDiagnostics,
   type AvitoClientDeps,
 } from "@/server/avito/client";
 import { diagnoseAvitoEnv, requireAvitoEnv } from "@/server/avito/env";
@@ -34,13 +35,36 @@ import type { AuthContext } from "@/server/authz/context";
 import { requireRoles } from "@/server/authz/require";
 import { manualTrialLessons, rnpAvitoDailyStats } from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
-import { conflict, validationError } from "@/server/errors";
+import { conflict, serviceUnavailable, validationError } from "@/server/errors";
 
 const ITEM_STATS_PAGE_SIZE = 100;
 const MAX_ITEM_STATS_PAGES = 20;
 
-/** Prevent concurrent sync of the same org+month in one process. */
-const syncLocks = new Set<string>();
+export type SyncRnpAvitoMonthResult = {
+  year: number;
+  month: number;
+  /** Дней, по которым записали/отметили sync хотя бы одной метрики */
+  syncedDays: number;
+  /** Сколько HTTP-вызовов к Avito stats API (без token) */
+  apiCalls: number;
+  /** true если запросов к Avito не было (данные свежие) */
+  skipped: boolean;
+  mode: RnpAvitoSyncMode;
+  lastSyncedAt: string | null;
+  monthPayload: RnpAvitoMonthPayload;
+  /** Частичные ошибки источников (бюджет / статистика объявлений) */
+  warnings?: string[];
+  budgetSynced?: boolean;
+  itemsSynced?: boolean;
+  rateLimited?: boolean;
+  retryAfterMs?: number | null;
+};
+
+/**
+ * Inflight по org+month+mode (одинаковые вызовы склеиваются).
+ * Разные mode на одном месяце ждут друг друга, не бегут параллельно к Avito.
+ */
+const syncInflight = new Map<string, Promise<SyncRnpAvitoMonthResult>>();
 
 function newId() {
   return `rnp_${randomBytes(6).toString("hex")}`;
@@ -48,7 +72,7 @@ function newId() {
 
 /** Test helper */
 export function resetRnpAvitoSyncLocks() {
-  syncLocks.clear();
+  syncInflight.clear();
 }
 
 const MAX_COUNT = 1_000_000;
@@ -534,20 +558,6 @@ async function fetchAllItemStatsByDay(
   return { byDay: merged, pages };
 }
 
-export type SyncRnpAvitoMonthResult = {
-  year: number;
-  month: number;
-  /** Дней, по которым записали/отметили sync хотя бы одной метрики */
-  syncedDays: number;
-  /** Сколько HTTP-вызовов к Avito stats API (без token) */
-  apiCalls: number;
-  /** true если запросов к Avito не было (данные свежие) */
-  skipped: boolean;
-  mode: RnpAvitoSyncMode;
-  lastSyncedAt: string | null;
-  monthPayload: RnpAvitoMonthPayload;
-};
-
 type DayApiPatch = {
   dayDate: string;
   budgetSpentRub?: number;
@@ -562,84 +572,126 @@ type DayApiPatch = {
 
 /**
  * Выборочная синхронизация API-метрик месяца.
- * - auto: только устаревшие дни по TTL; повторное открытие без API при свежих данных.
- * - force: обновляет окно последних 7 дней (+ никогда не синхронизированные дни).
+ * - auto: устаревшие дни только в live-окне (7 суток) по TTL.
+ * - force: то же окно, без TTL.
+ * Бюджет и статистика объявлений запрашиваются независимо.
  * Не затирает историю нулями при отсутствии дня в ответе.
  * Ручные пробные (trials_* / *_is_manual) не трогает.
- * При ошибке fetch/parse до записи — без изменений в БД.
  */
+export type RnpAvitoSyncDeps = AvitoClientDeps & {
+  /** Для тестов: фиксированная «сейчас» календаря (не путать с AvitoClientDeps.now ms). */
+  nowDate?: () => Date;
+};
+
 export async function syncRnpAvitoMonth(
   db: AppDb,
   ctx: AuthContext,
   input: { year: number; month: number; mode?: RnpAvitoSyncMode },
-  deps: AvitoClientDeps = {}
+  deps: RnpAvitoSyncDeps = {}
 ): Promise<SyncRnpAvitoMonthResult> {
   requireRoles(ctx, ["director"]);
   const { year, month } = parseYearMonth(input.year, input.month);
   const mode: RnpAvitoSyncMode = input.mode === "auto" ? "auto" : "force";
-  const lockKey = `${ctx.organizationId}:${year}-${month}`;
-  if (syncLocks.has(lockKey)) {
-    throw conflict("Синхронизация этого месяца уже выполняется");
+  const monthKey = `${ctx.organizationId}:${year}-${month}`;
+  const lockKey = `${monthKey}:${mode}`;
+  const otherKey = `${monthKey}:${mode === "auto" ? "force" : "auto"}`;
+
+  const existing = syncInflight.get(lockKey);
+  if (existing) return existing;
+
+  const other = syncInflight.get(otherKey);
+  const run = (other ? other.catch(() => undefined) : Promise.resolve())
+    .then(() => runSyncRnpAvitoMonth(db, ctx, { year, month, mode }, deps))
+    .finally(() => {
+      if (syncInflight.get(lockKey) === run) syncInflight.delete(lockKey);
+    });
+  syncInflight.set(lockKey, run);
+  return run;
+}
+
+async function runSyncRnpAvitoMonth(
+  db: AppDb,
+  ctx: AuthContext,
+  input: { year: number; month: number; mode: RnpAvitoSyncMode },
+  deps: RnpAvitoSyncDeps
+): Promise<SyncRnpAvitoMonthResult> {
+  const { year, month, mode } = input;
+  const started = Date.now();
+  const now = deps.nowDate?.() ?? new Date();
+  const from = isoDate(year, month, 1);
+  const to = isoDate(year, month, daysInMonth(year, month));
+  const eligibleDates = monthDatesThroughToday(year, month, now);
+
+  const existingRows = await db
+    .select()
+    .from(rnpAvitoDailyStats)
+    .where(
+      and(
+        eq(rnpAvitoDailyStats.organizationId, ctx.organizationId),
+        gte(rnpAvitoDailyStats.dayDate, from),
+        lte(rnpAvitoDailyStats.dayDate, to)
+      )
+    );
+  const byDate = new Map(existingRows.map((r) => [r.dayDate, r]));
+
+  const budgetStale: string[] = [];
+  const itemsStale: string[] = [];
+  for (const dayDate of eligibleDates) {
+    const row = byDate.get(dayDate);
+    const budgetAt = row?.budgetApiSyncedAt ?? row?.apiSyncedAt ?? null;
+    const itemsAt = row?.itemsApiSyncedAt ?? row?.apiSyncedAt ?? null;
+    if (isRnpAvitoMetricStale(budgetAt, dayDate, now, mode)) {
+      budgetStale.push(dayDate);
+    }
+    if (isRnpAvitoMetricStale(itemsAt, dayDate, now, mode)) {
+      itemsStale.push(dayDate);
+    }
   }
-  syncLocks.add(lockKey);
 
-  try {
-    const now = new Date();
-    const from = isoDate(year, month, 1);
-    const to = isoDate(year, month, daysInMonth(year, month));
-    const eligibleDates = monthDatesThroughToday(year, month, now);
+  console.info(
+    "[rnp-avito]",
+    JSON.stringify({
+      event: "sync_start",
+      mode,
+      year,
+      month,
+      budgetStale: budgetStale.length,
+      itemsStale: itemsStale.length,
+    })
+  );
 
-    const existingRows = await db
-      .select()
-      .from(rnpAvitoDailyStats)
-      .where(
-        and(
-          eq(rnpAvitoDailyStats.organizationId, ctx.organizationId),
-          gte(rnpAvitoDailyStats.dayDate, from),
-          lte(rnpAvitoDailyStats.dayDate, to)
-        )
-      );
-    const byDate = new Map(existingRows.map((r) => [r.dayDate, r]));
+  if (budgetStale.length === 0 && itemsStale.length === 0) {
+    const monthPayload = await getRnpAvitoMonth(db, ctx, { year, month });
+    return {
+      year,
+      month,
+      syncedDays: 0,
+      apiCalls: 0,
+      skipped: true,
+      mode,
+      lastSyncedAt: monthPayload.lastSyncedAt,
+      monthPayload,
+      budgetSynced: true,
+      itemsSynced: true,
+    };
+  }
 
-    const budgetStale: string[] = [];
-    const itemsStale: string[] = [];
-    for (const dayDate of eligibleDates) {
-      const row = byDate.get(dayDate);
-      const budgetAt = row?.budgetApiSyncedAt ?? row?.apiSyncedAt ?? null;
-      const itemsAt = row?.itemsApiSyncedAt ?? row?.apiSyncedAt ?? null;
-      if (isRnpAvitoMetricStale(budgetAt, dayDate, now, mode)) {
-        budgetStale.push(dayDate);
-      }
-      if (isRnpAvitoMetricStale(itemsAt, dayDate, now, mode)) {
-        itemsStale.push(dayDate);
-      }
-    }
+  const cfg = requireAvitoEnv();
+  let apiCalls = 0;
+  let spendingsByDay = new Map<string, number>();
+  let itemsByDay = new Map<
+    string,
+    { impressions: number; views: number; contacts: number }
+  >();
+  const warnings: string[] = [];
+  let budgetOk = budgetStale.length === 0;
+  let itemsOk = itemsStale.length === 0;
+  let rateLimited = false;
+  let retryAfterMs: number | null = null;
 
-    if (budgetStale.length === 0 && itemsStale.length === 0) {
-      const monthPayload = await getRnpAvitoMonth(db, ctx, { year, month });
-      return {
-        year,
-        month,
-        syncedDays: 0,
-        apiCalls: 0,
-        skipped: true,
-        mode,
-        lastSyncedAt: monthPayload.lastSyncedAt,
-        monthPayload,
-      };
-    }
-
-    const cfg = requireAvitoEnv();
-    let apiCalls = 0;
-    let spendingsByDay = new Map<string, number>();
-    let itemsByDay = new Map<
-      string,
-      { impressions: number; views: number; contacts: number }
-    >();
-
-    // Fetch BEFORE writes. Partial failure → no DB changes.
-    const budgetRange = minMaxIsoDates(budgetStale);
-    if (budgetRange) {
+  const budgetRange = minMaxIsoDates(budgetStale);
+  if (budgetRange) {
+    try {
       const spendingsPayload = await fetchAvitoSpendings(
         cfg,
         { dateFrom: budgetRange.from, dateTo: budgetRange.to },
@@ -647,10 +699,30 @@ export async function syncRnpAvitoMonth(
       );
       apiCalls += 1;
       spendingsByDay = parseSpendingsByDay(spendingsPayload);
+      budgetOk = true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Ошибка бюджета Avito";
+      warnings.push(message);
+      if (isAvitoRateLimited(err)) {
+        rateLimited = true;
+        retryAfterMs = readRetryAfterMs(err);
+      }
+      console.info(
+        "[rnp-avito]",
+        JSON.stringify({
+          event: "budget_fetch_failed",
+          year,
+          month,
+          from: budgetRange.from,
+          to: budgetRange.to,
+        })
+      );
     }
+  }
 
-    const itemsRange = minMaxIsoDates(itemsStale);
-    if (itemsRange) {
+  const itemsRange = minMaxIsoDates(itemsStale);
+  if (itemsRange) {
+    try {
       const fetched = await fetchAllItemStatsByDay(
         cfg,
         itemsRange.from,
@@ -659,128 +731,213 @@ export async function syncRnpAvitoMonth(
       );
       itemsByDay = fetched.byDay;
       apiCalls += fetched.pages;
-    }
-
-    const patchDates = new Set([...budgetStale, ...itemsStale]);
-    const patches: DayApiPatch[] = [];
-    for (const dayDate of patchDates) {
-      const patch: DayApiPatch = {
-        dayDate,
-        writeBudgetValue: false,
-        markBudgetSynced: false,
-        writeItemsValue: false,
-        markItemsSynced: false,
-      };
-      if (budgetStale.includes(dayDate)) {
-        patch.markBudgetSynced = true;
-        if (spendingsByDay.has(dayDate)) {
-          patch.writeBudgetValue = true;
-          patch.budgetSpentRub = spendingsByDay.get(dayDate)!;
-        }
-      }
-      if (itemsStale.includes(dayDate)) {
-        patch.markItemsSynced = true;
-        if (itemsByDay.has(dayDate)) {
-          const c = itemsByDay.get(dayDate)!;
-          patch.writeItemsValue = true;
-          patch.impressions = c.impressions;
-          patch.views = c.views;
-          patch.contacts = c.contacts;
-        }
-      }
-      patches.push(patch);
-    }
-
-    const syncedAt = new Date();
-    await db.transaction(async (tx) => {
-      for (const patch of patches) {
-        const [existing] = await tx
-          .select()
-          .from(rnpAvitoDailyStats)
-          .where(
-            and(
-              eq(rnpAvitoDailyStats.organizationId, ctx.organizationId),
-              eq(rnpAvitoDailyStats.dayDate, patch.dayDate)
-            )
-          )
-          .limit(1);
-
-        const setValues: Partial<typeof rnpAvitoDailyStats.$inferInsert> = {
-          updatedAt: syncedAt,
-          apiSyncedAt: syncedAt,
-        };
-        if (patch.markBudgetSynced) {
-          setValues.budgetApiSyncedAt = syncedAt;
-        }
-        if (patch.writeBudgetValue) {
-          setValues.budgetSpentRub = patch.budgetSpentRub ?? null;
-        }
-        if (patch.markItemsSynced) {
-          setValues.itemsApiSyncedAt = syncedAt;
-        }
-        if (patch.writeItemsValue) {
-          setValues.impressions = patch.impressions ?? null;
-          setValues.views = patch.views ?? null;
-          setValues.contacts = patch.contacts ?? null;
-        }
-
-        if (!existing) {
-          await tx.insert(rnpAvitoDailyStats).values({
-            id: newId(),
-            organizationId: ctx.organizationId,
-            dayDate: patch.dayDate,
-            budgetSpentRub: patch.writeBudgetValue
-              ? (patch.budgetSpentRub ?? null)
-              : null,
-            impressions: patch.writeItemsValue
-              ? (patch.impressions ?? null)
-              : null,
-            views: patch.writeItemsValue ? (patch.views ?? null) : null,
-            contacts: patch.writeItemsValue ? (patch.contacts ?? null) : null,
-            apiSyncedAt: syncedAt,
-            budgetApiSyncedAt: patch.markBudgetSynced ? syncedAt : null,
-            itemsApiSyncedAt: patch.markItemsSynced ? syncedAt : null,
-            trialsScheduled: null,
-            trialsCompleted: null,
-            trialsScheduledIsManual: false,
-            trialsCompletedIsManual: false,
-            manualUpdatedAt: syncedAt,
-            createdAt: syncedAt,
-            updatedAt: syncedAt,
-          });
-        } else {
-          await tx
-            .update(rnpAvitoDailyStats)
-            .set(setValues)
-            .where(eq(rnpAvitoDailyStats.id, existing.id));
-        }
-      }
-    });
-
-    try {
-      const { refreshAvitoExpensesFromRnp } = await import(
-        "@/server/services/expenses-service"
-      );
-      await refreshAvitoExpensesFromRnp(db, ctx.organizationId);
+      itemsOk = true;
     } catch (err) {
-      console.error(
-        "[rnp-avito] failed to refresh director expenses after sync",
-        err instanceof Error ? err.message : "unknown"
+      const message =
+        err instanceof Error ? err.message : "Ошибка статистики объявлений Avito";
+      warnings.push(message);
+      if (isAvitoRateLimited(err)) {
+        rateLimited = true;
+        retryAfterMs = readRetryAfterMs(err) ?? retryAfterMs;
+      }
+      console.info(
+        "[rnp-avito]",
+        JSON.stringify({
+          event: "items_fetch_failed",
+          year,
+          month,
+          from: itemsRange.from,
+          to: itemsRange.to,
+        })
       );
     }
+  }
 
+  if (!budgetOk && !itemsOk) {
     const monthPayload = await getRnpAvitoMonth(db, ctx, { year, month });
-    return {
+    const diag = getAvitoClientDiagnostics();
+    console.info(
+      "[rnp-avito]",
+      JSON.stringify({
+        event: "sync_failed",
+        mode,
+        year,
+        month,
+        apiCalls,
+        durationMs: Date.now() - started,
+        rateLimited,
+        clientRateLimited: diag.rateLimited,
+      })
+    );
+    throw serviceUnavailable(
+      warnings[0] ?? "Не удалось синхронизировать Avito",
+      {
+        warnings,
+        rateLimited,
+        retryAfterMs,
+        code: rateLimited ? "avito_rate_limited" : "avito_sync_failed",
+      }
+    );
+  }
+
+  const patches: DayApiPatch[] = [];
+  const patchDates = new Set<string>();
+  if (budgetOk) for (const d of budgetStale) patchDates.add(d);
+  if (itemsOk) for (const d of itemsStale) patchDates.add(d);
+
+  for (const dayDate of patchDates) {
+    const patch: DayApiPatch = {
+      dayDate,
+      writeBudgetValue: false,
+      markBudgetSynced: false,
+      writeItemsValue: false,
+      markItemsSynced: false,
+    };
+    if (budgetOk && budgetStale.includes(dayDate)) {
+      patch.markBudgetSynced = true;
+      if (spendingsByDay.has(dayDate)) {
+        patch.writeBudgetValue = true;
+        patch.budgetSpentRub = spendingsByDay.get(dayDate)!;
+      }
+    }
+    if (itemsOk && itemsStale.includes(dayDate)) {
+      patch.markItemsSynced = true;
+      if (itemsByDay.has(dayDate)) {
+        const c = itemsByDay.get(dayDate)!;
+        patch.writeItemsValue = true;
+        patch.impressions = c.impressions;
+        patch.views = c.views;
+        patch.contacts = c.contacts;
+      }
+    }
+    patches.push(patch);
+  }
+
+  const syncedAt = new Date();
+  await db.transaction(async (tx) => {
+    for (const patch of patches) {
+      const [existingRow] = await tx
+        .select()
+        .from(rnpAvitoDailyStats)
+        .where(
+          and(
+            eq(rnpAvitoDailyStats.organizationId, ctx.organizationId),
+            eq(rnpAvitoDailyStats.dayDate, patch.dayDate)
+          )
+        )
+        .limit(1);
+
+      const setValues: Partial<typeof rnpAvitoDailyStats.$inferInsert> = {
+        updatedAt: syncedAt,
+        apiSyncedAt: syncedAt,
+      };
+      if (patch.markBudgetSynced) {
+        setValues.budgetApiSyncedAt = syncedAt;
+      }
+      if (patch.writeBudgetValue) {
+        setValues.budgetSpentRub = patch.budgetSpentRub ?? null;
+      }
+      if (patch.markItemsSynced) {
+        setValues.itemsApiSyncedAt = syncedAt;
+      }
+      if (patch.writeItemsValue) {
+        setValues.impressions = patch.impressions ?? null;
+        setValues.views = patch.views ?? null;
+        setValues.contacts = patch.contacts ?? null;
+      }
+
+      if (!existingRow) {
+        await tx.insert(rnpAvitoDailyStats).values({
+          id: newId(),
+          organizationId: ctx.organizationId,
+          dayDate: patch.dayDate,
+          budgetSpentRub: patch.writeBudgetValue
+            ? (patch.budgetSpentRub ?? null)
+            : null,
+          impressions: patch.writeItemsValue
+            ? (patch.impressions ?? null)
+            : null,
+          views: patch.writeItemsValue ? (patch.views ?? null) : null,
+          contacts: patch.writeItemsValue ? (patch.contacts ?? null) : null,
+          apiSyncedAt: syncedAt,
+          budgetApiSyncedAt: patch.markBudgetSynced ? syncedAt : null,
+          itemsApiSyncedAt: patch.markItemsSynced ? syncedAt : null,
+          trialsScheduled: null,
+          trialsCompleted: null,
+          trialsScheduledIsManual: false,
+          trialsCompletedIsManual: false,
+          manualUpdatedAt: syncedAt,
+          createdAt: syncedAt,
+          updatedAt: syncedAt,
+        });
+      } else {
+        await tx
+          .update(rnpAvitoDailyStats)
+          .set(setValues)
+          .where(eq(rnpAvitoDailyStats.id, existingRow.id));
+      }
+    }
+  });
+
+  try {
+    const { refreshAvitoExpensesFromRnp } = await import(
+      "@/server/services/expenses-service"
+    );
+    await refreshAvitoExpensesFromRnp(db, ctx.organizationId);
+  } catch (err) {
+    console.error(
+      "[rnp-avito] failed to refresh director expenses after sync",
+      err instanceof Error ? err.message : "unknown"
+    );
+  }
+
+  const monthPayload = await getRnpAvitoMonth(db, ctx, { year, month });
+  const diag = getAvitoClientDiagnostics();
+  console.info(
+    "[rnp-avito]",
+    JSON.stringify({
+      event: "sync_done",
+      mode,
       year,
       month,
       syncedDays: patches.length,
       apiCalls,
-      skipped: false,
-      mode,
-      lastSyncedAt: syncedAt.toISOString(),
-      monthPayload,
-    };
-  } finally {
-    syncLocks.delete(lockKey);
-  }
+      budgetOk,
+      itemsOk,
+      warnings: warnings.length,
+      rateLimited,
+      durationMs: Date.now() - started,
+      clientRequests: diag.requests,
+      clientRateLimited: diag.rateLimited,
+    })
+  );
+
+  return {
+    year,
+    month,
+    syncedDays: patches.length,
+    apiCalls,
+    skipped: false,
+    mode,
+    lastSyncedAt: syncedAt.toISOString(),
+    monthPayload,
+    warnings: warnings.length ? warnings : undefined,
+    budgetSynced: budgetOk,
+    itemsSynced: itemsOk,
+    rateLimited: rateLimited || undefined,
+    retryAfterMs,
+  };
+}
+
+function isAvitoRateLimited(err: unknown): boolean {
+  const details = (err as { details?: { code?: string } } | null)?.details;
+  if (details?.code === "avito_rate_limited") return true;
+  const message = err instanceof Error ? err.message : String(err);
+  return /слишком много запросов/i.test(message);
+}
+
+function readRetryAfterMs(err: unknown): number | null {
+  const details = (err as { details?: { retryAfterMs?: number } } | null)
+    ?.details;
+  return typeof details?.retryAfterMs === "number" ? details.retryAfterMs : null;
 }
