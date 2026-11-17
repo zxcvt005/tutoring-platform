@@ -216,7 +216,8 @@ describe("platform mutations + bootstrap", () => {
       .where(eq(lessons.id, created.id))
       .limit(1);
     expect(row?.topicId).toBeNull();
-    expect(row?.subject).toBe("Свободная формулировка занятия");
+    // Системный предмет занятия сохраняется; свободная формулировка — в lesson_topics.
+    expect(row?.subject).toBe("Математика");
     const links = await t.db
       .select()
       .from(lessonTopics)

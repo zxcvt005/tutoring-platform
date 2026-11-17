@@ -3,7 +3,7 @@ import {
   asSystemGrade,
   matchSystemSubject,
   matchSystemSubjectFromDirection,
-  materialMatchesStudentClass,
+  resolveFolderClassPath,
   type SystemSubjectKey,
 } from "@/lib/folders/system-kb-structure";
 import type { LearningDirection, Student, StudentGrade } from "@/lib/types";
@@ -52,8 +52,10 @@ export function hasMixedParticipantGrades(
 }
 
 /**
- * Материалы, подходящие предмету занятия и классу ученика
- * (только внутри системного пути Предмет → N класс).
+ * Материалы, подходящие предмету занятия и классу ученика.
+ * Внутри системного пути «Предмет → N класс» — строгий фильтр.
+ * Вне системного дерева (личная папка преподавателя и т.п.) — не скрываем
+ * (как на сервере в completeLesson / assignHomework).
  */
 export function filterMaterialsForStudentClass<T extends ClassScopedMaterial>(
   materials: readonly T[],
@@ -66,16 +68,19 @@ export function filterMaterialsForStudentClass<T extends ClassScopedMaterial>(
 ): T[] {
   const subject = opts.subjectKey ?? resolveLessonSystemSubject(opts);
   const grade = asSystemGrade(opts.studentGrade);
-  if (!subject || !grade) return [];
   return materials.filter((m) => {
     if (
       m.subject &&
       matchSystemSubject(m.subject) &&
+      subject &&
       matchSystemSubject(m.subject) !== subject
     ) {
       return false;
     }
-    return materialMatchesStudentClass(folders, m.folderId, subject, grade);
+    const path = resolveFolderClassPath(folders, m.folderId);
+    if (!path) return true;
+    if (!subject || !grade) return false;
+    return path.subject === subject && path.grade === grade;
   });
 }
 

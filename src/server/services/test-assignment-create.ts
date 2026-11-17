@@ -11,6 +11,7 @@ import {
   testAnswerKeys,
   testAssignments,
   tests,
+  topics,
 } from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
 import { badRequest, notFound } from "@/server/errors";
@@ -67,7 +68,16 @@ export async function createTestAssignmentWithSnapshot(
   // Школьный оригинал (teacherId=null) назначается как есть: владелец и тело
   // теста не меняются, ученик работает только со snapshot назначения.
   void input.allowSchoolOriginal;
-  const topicId = input.topicId || hw.topicId || null;
+  // Битая ссылка на тему не должна ронять назначение ДЗ (тема урока уже могла сохраниться отдельно).
+  let topicId = input.topicId || hw.topicId || null;
+  if (topicId) {
+    const [topicRow] = await db
+      .select({ id: topics.id })
+      .from(topics)
+      .where(eq(topics.id, topicId))
+      .limit(1);
+    if (!topicRow) topicId = null;
+  }
   const fullForSnapshot: Homework = {
     id: hw.id,
     topicId,

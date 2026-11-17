@@ -80,6 +80,7 @@ type OkResult = {
   ok: boolean;
   error?: string;
   created?: number;
+  ensured?: number;
   skipped?: number;
   id?: string;
   archived?: boolean;
@@ -145,6 +146,13 @@ export type DemoStoreValue = {
     lessonId: string,
     topics: { topicId?: string | null; title?: string | null }[]
   ) => Promise<OkResult>;
+  saveLessonContent: (input: {
+    lessonId: string;
+    studentId: string;
+    topics: { topicId?: string | null; title?: string | null }[];
+    homeworkIds: string[];
+    attendanceStatus?: AttendanceStatus | null;
+  }) => Promise<OkResult>;
   saveTopic: (
     topic: Omit<Topic, "id" | "sortOrder" | "sectionId"> & {
       id?: string;
@@ -505,6 +513,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       try {
         const result = await apiPlatform<{
           created?: number;
+          ensured?: number;
           skipped?: number;
           id?: string;
           archived?: boolean;
@@ -525,6 +534,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         return {
           ok: true,
           created: result.created,
+          ensured: result.ensured,
           skipped: result.skipped,
           id: result.id,
           archived: result.archived,
@@ -632,6 +642,29 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         run("setLessonTopic", { lessonId, title, topicId: topicId ?? null }),
       setLessonTopics: (lessonId, topics) =>
         run("setLessonTopics", { lessonId, topics }),
+      saveLessonContent: async (input) => {
+        try {
+          const result = await apiPlatform<{
+            homework?: { created?: number; removed?: number };
+          }>("saveLessonContent", input);
+          try {
+            await reload();
+          } catch (reloadErr) {
+            console.error(reloadErr);
+            toast.warning(
+              "Изменения сохранены, но не удалось обновить данные с сервера. Обновите страницу при необходимости."
+            );
+          }
+          return {
+            ok: true,
+            created: result.homework?.created ?? 0,
+          };
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Ошибка сервера";
+          toast.error(message);
+          return { ok: false, error: message };
+        }
+      },
       saveTopic: async (topic) => {
         const id = topic.id ?? newClientId("tp");
         const r = await run("upsertTopic", { ...topic, id });
@@ -715,7 +748,19 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       assignHomework: async (input) => {
         const r = await run("assignHomework", input);
         if (r.ok) {
-          toast.success(`Назначено: ${r.created ?? 0}`);
+          const created = r.created ?? 0;
+          if (created > 0) {
+            toast.success(`Назначено: ${created}`);
+          } else if ((r as { ensured?: number }).ensured) {
+            toast.message("Домашнее задание уже было назначено");
+          } else {
+            toast.error("Домашнее задание не создано");
+            return {
+              ok: false,
+              error: "Домашнее задание не создано",
+              created: 0,
+            };
+          }
         }
         return { ...r, created: r.created ?? 0 };
       },

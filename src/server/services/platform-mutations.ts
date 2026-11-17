@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { parseAppInstant } from "@/lib/app-time";
 import { dateKeyLocal } from "@/lib/calendar-month";
+import { matchSystemSubject } from "@/lib/folders/system-kb-structure";
 import { newId } from "@/lib/format";
 import {
   isFinalAttendanceStatus,
@@ -189,11 +190,26 @@ async function writeLessonTopics(
   }
   const firstCatalog = saved.find((t) => t.topicId)?.topicId ?? null;
   const firstTitle = saved[0]?.title ?? null;
+  // Не затираем системный предмет (Физика/Математика) свободным названием темы —
+  // иначе клиентский классовый фильтр каталога ДЗ обнуляется после сохранения темы.
+  const [existingLesson] = await db
+    .select({ subject: lessons.subject })
+    .from(lessons)
+    .where(eq(lessons.id, lessonId))
+    .limit(1);
+  const nextSubject =
+    firstTitle == null
+      ? existingLesson?.subject ?? null
+      : matchSystemSubject(firstTitle)
+        ? firstTitle
+        : matchSystemSubject(existingLesson?.subject)
+          ? existingLesson!.subject
+          : firstTitle;
   await db
     .update(lessons)
     .set({
       topicId: firstCatalog,
-      subject: firstTitle,
+      subject: nextSubject,
       updatedAt: new Date(),
     })
     .where(eq(lessons.id, lessonId));
@@ -1161,7 +1177,13 @@ export async function completeLesson(
       studentIds,
       lessonId: input.lessonId,
       dueAt: assign.dueAt,
+      requireCreated: true,
     });
+    if ((result.ensured ?? 0) < studentIds.length) {
+      throw badRequest(
+        `Домашнее задание не назначено полностью (${result.ensured ?? 0} из ${studentIds.length})`
+      );
+    }
     assignedCount += result.created;
   }
 
@@ -2036,6 +2058,11 @@ export async function assignHomework(
     studentIds: string[];
     lessonId?: string;
     dueAt?: string;
+    /**
+     * Для lesson-scoped назначений: если ни одно новое назначение не создано
+     * и нет уже существующего активного — ошибка (не {ok:true, created:0}).
+     */
+    requireCreated?: boolean;
   }
 ) {
   requireRoles(ctx, ["teacher", "director"]);
@@ -2062,6 +2089,11 @@ export async function assignHomework(
   );
 
   let created = 0;
+  let ensured = 0;
+  const assignmentIds: string[] = [];
+  const skipped: { studentId: string; reason: string; assignmentId?: string }[] =
+    [];
+
   for (const studentId of studentIds) {
     if (input.lessonId) {
       const dup = await db
@@ -2075,7 +2107,16 @@ export async function assignHomework(
           )
         )
         .limit(1);
-      if (dup[0] && dup[0].status !== "withdrawn") continue;
+      if (dup[0] && dup[0].status !== "withdrawn") {
+        ensured += 1;
+        assignmentIds.push(dup[0].id);
+        skipped.push({
+          studentId,
+          reason: "already_assigned",
+          assignmentId: dup[0].id,
+        });
+        continue;
+      }
     } else {
       const active = await db
         .select()
@@ -2101,6 +2142,13 @@ export async function assignHomework(
         active[0].sourceKind !== "theory" &&
         active[0].sourceKind !== "intensive"
       ) {
+        ensured += 1;
+        assignmentIds.push(active[0].id);
+        skipped.push({
+          studentId,
+          reason: "already_assigned",
+          assignmentId: active[0].id,
+        });
         continue;
       }
     }
@@ -2132,8 +2180,20 @@ export async function assignHomework(
       lessonId: input.lessonId ?? null,
     });
     created += 1;
+    ensured += 1;
+    assignmentIds.push(assignmentId);
   }
-  return { ok: true, created };
+
+  if (
+    (input.requireCreated || Boolean(input.lessonId)) &&
+    ensured < studentIds.length
+  ) {
+    throw badRequest(
+      `Не удалось назначить тест «${hw.title}»: создано ${created} из ${studentIds.length}`
+    );
+  }
+
+  return { ok: true as const, created, ensured, assignmentIds, skipped };
 }
 
 export async function deleteHomeworkAssignment(
@@ -3240,6 +3300,28 @@ export async function reportCameraBackgroundDiagAction(
   return { ok: true as const };
 }
 
+export async function saveLessonContentAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { saveLessonContent } = await import(
+    "@/server/services/lesson-content-service"
+  );
+  return saveLessonContent(db, ctx, {
+    lessonId: String(payload.lessonId ?? ""),
+    studentId: String(payload.studentId ?? ""),
+    topics:
+      (payload.topics as
+        | { topicId?: string | null; title?: string | null }[]
+        | undefined) ?? [],
+    homeworkIds: Array.isArray(payload.homeworkIds)
+      ? (payload.homeworkIds as unknown[]).map((id) => String(id))
+      : [],
+    attendanceStatus: (payload.attendanceStatus as AttendanceStatus | null | undefined) ?? null,
+  });
+}
+
 /** Dispatch table for /api/platform */
 export const platformActions = {
   upsertTeacher,
@@ -3256,6 +3338,7 @@ export const platformActions = {
   resetLessonConduct: resetLessonConductAction,
   setLessonTopic,
   setLessonTopics,
+  saveLessonContent: saveLessonContentAction,
   upsertTopicSection,
   deleteTopicSection,
   reorderTopicSections,

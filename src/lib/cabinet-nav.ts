@@ -26,6 +26,7 @@ export const direkciyaNavItems: CabinetNavItem[] = [
 
 export const kafedraNavItems: CabinetNavItem[] = [
   { href: "/kafedra", label: "Сегодня" },
+  { href: "/kafedra/mark-history", label: "История отметок" },
   { href: "/kafedra/calls", label: "Звонки" },
   { href: "/kafedra/students", label: "Ученики" },
   { href: "/kafedra/schedule", label: "Расписание" },

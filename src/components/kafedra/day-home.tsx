@@ -145,14 +145,8 @@ export function KafedraDayHome() {
         return;
       }
       toast.success("Посещаемость сохранена");
-      const nextAttendances = data.attendances
-        .filter(
-          (row) => row.lessonId !== lesson.id || row.studentId !== studentId
-        )
-        .concat([{ lessonId: lesson.id, studentId, status }]);
-      if (lessonIsAttendanceMarked(lesson, nextAttendances)) {
-        setOpenLessonId(null);
-      }
+      // Карточку не закрываем: преподаватель может сразу назначить/править ДЗ
+      // после отметки (в том числе для пропущенных занятий).
     } finally {
       inflight.current.delete(key);
       setBusyKey(null);
@@ -216,12 +210,20 @@ export function KafedraDayHome() {
             К проверке или просрочено:{" "}
             <span className="font-semibold tabular-nums">{queue}</span>
           </p>
-          <Link
-            href="/kafedra/grades"
-            className="text-sm font-medium underline-offset-2 hover:underline"
-          >
-            Открыть оценки →
-          </Link>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/kafedra/grades"
+              className="text-sm font-medium underline-offset-2 hover:underline"
+            >
+              Открыть оценки →
+            </Link>
+            <Link
+              href="/kafedra/mark-history"
+              className="text-sm font-medium underline-offset-2 hover:underline"
+            >
+              История отметок →
+            </Link>
+          </div>
         </div>
       ) : null}
 

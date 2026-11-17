@@ -133,6 +133,8 @@ export async function POST(request: Request) {
             lessonId: String(p.lessonId),
             topics: (p.topics as { topicId?: string | null; title?: string | null }[]) ?? [],
           });
+        case "saveLessonContent":
+          return m.saveLessonContentAction(db, ctx, p);
         case "upsertTopicSection":
           return m.upsertTopicSection(db, ctx, p as never);
         case "deleteTopicSection":

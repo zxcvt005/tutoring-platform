@@ -30,6 +30,14 @@ import type { Homework, HomeworkAssignment, Lesson } from "@/lib/types";
 
 type DraftHw = { homeworkId: string; assignmentId?: string };
 
+function isActiveLessonHomework(a: HomeworkAssignment): boolean {
+  return (
+    a.sourceKind !== "theory" &&
+    a.sourceKind !== "intensive" &&
+    a.status !== "withdrawn"
+  );
+}
+
 export function LessonContentEditor({
   lesson,
   studentId,
@@ -43,9 +51,7 @@ export function LessonContentEditor({
     data,
     topicsForLessonCatalog,
     publishedHomeworksForLessonCatalog,
-    setLessonTopics,
-    assignHomework,
-    deleteHomeworkAssignment,
+    saveLessonContent,
   } = useDemoStore();
   // Занятие 1:1 — класс и направление только этого ученика / этого урока.
   const student = data.students.find((s) => s.id === studentId);
@@ -92,8 +98,7 @@ export function LessonContentEditor({
     (a) =>
       a.lessonId === lesson.id &&
       a.studentId === studentId &&
-      a.sourceKind !== "theory" &&
-      a.sourceKind !== "intensive"
+      isActiveLessonHomework(a)
   );
   const savedAssignmentKey = savedAssignments
     .map((a) => `${a.id}:${a.homeworkId}`)
@@ -184,44 +189,31 @@ export function LessonContentEditor({
         return;
       }
       const draftHw = [...hw];
-      const topicResult = await setLessonTopics(lesson.id, normalized);
-      if (!topicResult.ok) {
-        toast.error(topicResult.error ?? "Не удалось сохранить темы");
+      const homeworkIds = draftHw.map((item) => item.homeworkId);
+      const result = await saveLessonContent({
+        lessonId: lesson.id,
+        studentId,
+        topics: normalized,
+        homeworkIds,
+      });
+      if (!result.ok) {
+        toast.error(
+          result.error ??
+            "Не удалось сохранить темы и домашние задания. Повторите."
+        );
         return;
       }
-      const keep = new Set(
-        draftHw
-          .filter((x) => x.assignmentId)
-          .map((x) => x.assignmentId as string)
+      const created = result.created ?? 0;
+      if (homeworkIds.length > 0 && created === 0) {
+        // Уже были в БЗ — ок, но явно говорим, что список синхронизирован.
+        toast.success("Темы и домашние задания сохранены");
+        return;
+      }
+      toast.success(
+        created > 0
+          ? `Сохранено. Новых ДЗ: ${created}`
+          : "Темы и домашние задания сохранены"
       );
-      for (const a of savedAssignments) {
-        if (!keep.has(a.id) && a.status === "assigned") {
-          const deleted = await deleteHomeworkAssignment(a.id);
-          if (deleted && deleted.ok === false) {
-            toast.error(deleted.error ?? "Не удалось удалить назначение");
-            return;
-          }
-        }
-      }
-      const firstTopicId = normalized.find((t) => t.topicId)?.topicId ?? null;
-      for (const item of draftHw) {
-        if (item.assignmentId) continue;
-        const assigned = await assignHomework({
-          homeworkId: item.homeworkId,
-          teacherId: lesson.teacherId,
-          studentIds: [studentId],
-          lessonId: lesson.id,
-          topicId: firstTopicId,
-        });
-        if (!assigned.ok) {
-          toast.error(
-            assigned.error ??
-              "Темы сохранены, но домашнее задание не назначено. Повторите сохранение."
-          );
-          return;
-        }
-      }
-      toast.success("Темы и домашние задания сохранены");
     } finally {
       setBusy(false);
     }

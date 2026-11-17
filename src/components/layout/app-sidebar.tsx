@@ -74,6 +74,7 @@ const iconsByHref: Record<string, NavItem["icon"]> = {
   "/direkciya/schedule": CalendarDays,
   "/direkciya/results": ClipboardList,
   "/kafedra": LayoutDashboard,
+  "/kafedra/mark-history": History,
   "/kafedra/calls": Video,
   "/kafedra/students": GraduationCap,
   "/kafedra/schedule": CalendarDays,

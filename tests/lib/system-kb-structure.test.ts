@@ -121,6 +121,7 @@ describe("system kb structure helpers", () => {
     const materials = [
       { id: "a", folderId: "phys7-user", subject: "Физика" },
       { id: "b", folderId: "math10", subject: "Математика" },
+      // Вне системного пути «предмет → класс» не скрываем (как на сервере).
       { id: "c", folderId: null, subject: "Физика" },
     ];
     expect(
@@ -128,7 +129,7 @@ describe("system kb structure helpers", () => {
         lessonSubject: "Физика",
         studentGrade: "7",
       }).map((m) => m.id)
-    ).toEqual(["a"]);
+    ).toEqual(["a", "c"]);
   });
 
   it("keeps only the student grade (+ same-grade school/teacher), not other grades", () => {
@@ -192,10 +193,10 @@ describe("system kb structure helpers", () => {
       { id: "math", folderId: "math10", subject: "Математика" },
     ];
     const byGrade = {
-      "7": ["g7"],
-      "9": ["g9"],
-      "10": ["g10-school", "g10-teacher"],
-      "11": ["g11"],
+      "7": ["g7", "ungraded"],
+      "9": ["g9", "ungraded"],
+      "10": ["g10-school", "g10-teacher", "ungraded"],
+      "11": ["g11", "ungraded"],
     } as const;
     for (const grade of ["7", "9", "10", "11"] as const) {
       const ids = filterMaterialsForStudentClass(materials, richFolders, {
@@ -204,7 +205,8 @@ describe("system kb structure helpers", () => {
         studentGrade: grade,
       }).map((m) => m.id);
       expect(ids).toEqual([...byGrade[grade]]);
-      expect(ids).not.toContain("ungraded");
+      // Папка без классового пути остаётся видимой; чужой предмет — нет.
+      expect(ids).toContain("ungraded");
       expect(ids).not.toContain("math");
     }
     expect(

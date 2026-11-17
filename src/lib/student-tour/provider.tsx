@@ -351,6 +351,7 @@ export function StudentTourProvider({
       resetLessonConduct: async () => blocked(noopMsg),
       setLessonTopic: async () => blocked(noopMsg),
       setLessonTopics: async () => blocked(noopMsg),
+      saveLessonContent: async () => blocked(noopMsg),
       saveTopic: async () => blocked(noopMsg),
       upsertTopicSection: () => "",
       deleteTopicSection: async () => blocked(noopMsg),
