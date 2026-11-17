@@ -212,10 +212,31 @@ describe("cabinet navigation", () => {
       { href: "/pressa/students", label: "Ученики" },
       { href: "/pressa/teachers", label: "Преподаватели" },
       { href: "/pressa/trials", label: "Пробные уроки" },
+      { href: "/pressa/baza", label: "База" },
+      { href: "/pressa/probnye-uroki", label: "Таблица пробных" },
       { href: "/pressa/analytics", label: "Аналитика" },
     ]);
     expect(pressaNavItems.map((i) => i.href).join(" ")).not.toMatch(
       /salaries|tariffs|payments/
     );
+  });
+
+  it("keeps Base and trial CRM tables in both Direkciya and Pressa", () => {
+    expect(direkciyaNavItems).toContainEqual({
+      href: "/direkciya/baza",
+      label: "База",
+    });
+    expect(direkciyaNavItems).toContainEqual({
+      href: "/direkciya/probnye-uroki",
+      label: "Пробные уроки",
+    });
+    expect(pressaNavItems).toContainEqual({
+      href: "/pressa/baza",
+      label: "База",
+    });
+    expect(pressaNavItems).toContainEqual({
+      href: "/pressa/probnye-uroki",
+      label: "Таблица пробных",
+    });
   });
 });

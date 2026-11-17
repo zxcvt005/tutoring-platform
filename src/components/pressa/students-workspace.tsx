@@ -1,12 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { EmptyState } from "@/components/empty-state";
 import { FilterBar } from "@/components/layout/filter-bar";
 import { PageHeader } from "@/components/layout/page-header";
 import { PersonStatusBadge } from "@/components/status-badge";
+import {
+  StudentEnrollmentInvites,
+  type StudentEnrollmentInvitesHandle,
+} from "@/components/students/student-enrollment-invites";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -48,6 +53,8 @@ export function PressStudentsWorkspace() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const enrollmentRef = useRef<StudentEnrollmentInvitesHandle>(null);
+  const [inviteCreating, setInviteCreating] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,7 +83,27 @@ export function PressStudentsWorkspace() {
       <PageHeader
         title="Ученики"
         description="Все ученики школы, включая архивных. Заметки продажника ученику и преподавателю не видны."
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            className="rounded-full"
+            disabled={inviteCreating}
+            data-testid="invite-student-button"
+            onClick={() => {
+              setInviteCreating(true);
+              void enrollmentRef.current
+                ?.createInvite()
+                .finally(() => setInviteCreating(false));
+            }}
+          >
+            {inviteCreating ? "Создание…" : "Пригласить ученика"}
+          </Button>
+        }
       />
+
+      <StudentEnrollmentInvites ref={enrollmentRef} className="mb-6" />
+
       <FilterBar>
         <Input
           value={query}

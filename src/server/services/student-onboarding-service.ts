@@ -136,7 +136,7 @@ export async function createStudentEnrollmentInvitation(
   db: AppDb,
   ctx: AuthContext
 ) {
-  requireRoles(ctx, ["director"]);
+  requireRoles(ctx, ["director", "press"]);
   const studentId = newId("st");
   const now = new Date();
   const expiresAt = new Date(now.getTime() + INVITE_TTL_MS);
@@ -193,7 +193,7 @@ export async function listStudentEnrollmentInvitations(
   db: AppDb,
   ctx: AuthContext
 ) {
-  requireRoles(ctx, ["director", "assistant"]);
+  requireRoles(ctx, ["director", "press", "assistant"]);
 
   const incomplete = await db
     .select()

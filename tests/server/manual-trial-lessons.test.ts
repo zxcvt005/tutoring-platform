@@ -204,5 +204,36 @@ describe("manual trial lessons (Дирекция «Пробные уроки»)"
     expect(created.id).toBeTruthy();
     expect(created.trialLessonId).toBeNull();
   });
+
+  it("shares the same CRM trial rows between director and press", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await asRole(t.db, "director@demo.local");
+    const press = await asRole(t.db, "press@demo.local");
+
+    const created = await createManualTrialLesson(t.db, director);
+    const byPress = await updateManualTrialLesson(t.db, press, {
+      id: created.id,
+      expectedUpdatedAt: created.updatedAt,
+      name: "Правка Прессы",
+    });
+    expect(byPress.name).toBe("Правка Прессы");
+
+    const listedDirector = await listManualTrialLessons(t.db, director);
+    expect(listedDirector.find((r) => r.id === created.id)?.name).toBe(
+      "Правка Прессы"
+    );
+
+    const byDirector = await updateManualTrialLesson(t.db, director, {
+      id: created.id,
+      expectedUpdatedAt: byPress.updatedAt,
+      comment: "Правка Дирекции",
+    });
+    const listedPress = await listManualTrialLessons(t.db, press);
+    expect(listedPress.find((r) => r.id === created.id)?.comment).toBe(
+      "Правка Дирекции"
+    );
+    expect(byDirector.comment).toBe("Правка Дирекции");
+  });
 });
 

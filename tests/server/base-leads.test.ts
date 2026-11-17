@@ -282,4 +282,35 @@ describe("base leads (Дирекция «База»)", () => {
     expect(row.teacher).toBe("");
     expect(row.avitoUrl).toBe("https://example.com/keep");
   });
+
+  it("shares the same Base rows between director and press", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await asRole(t.db, "director@demo.local");
+    const press = await asRole(t.db, "press@demo.local");
+
+    const created = await createBaseLead(t.db, director);
+    const byPress = await updateBaseLead(t.db, press, {
+      id: created.id,
+      expectedUpdatedAt: created.updatedAt,
+      student: "Из Прессы",
+    });
+    expect(byPress.student).toBe("Из Прессы");
+
+    const listedDirector = await listBaseLeads(t.db, director);
+    expect(
+      listedDirector.find((r) => r.id === created.id)?.student
+    ).toBe("Из Прессы");
+
+    const byDirector = await updateBaseLead(t.db, director, {
+      id: created.id,
+      expectedUpdatedAt: byPress.updatedAt,
+      parent: "Из Дирекции",
+    });
+    const listedPress = await listBaseLeads(t.db, press);
+    expect(listedPress.find((r) => r.id === created.id)?.parent).toBe(
+      "Из Дирекции"
+    );
+    expect(byDirector.parent).toBe("Из Дирекции");
+  });
 });

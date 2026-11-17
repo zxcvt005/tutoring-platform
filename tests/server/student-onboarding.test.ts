@@ -187,6 +187,51 @@ describe("student invite onboarding + availability", () => {
     expect(invRow?.usedAt).toBeTruthy();
   });
 
+  it("lets press create invites visible to director and vice versa", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await asDirector(t.db);
+    const { session: pressSession } = await loginWithPassword(t.db, {
+      email: "press@demo.local",
+      password: DEMO_PASSWORD,
+    });
+    const press = await resolveAuthContext(t.db, pressSession.rawToken);
+
+    const fromPress = await createStudentEnrollmentInvitation(t.db, press);
+    const fromDirector = await createStudentEnrollmentInvitation(t.db, director);
+
+    const listedByPress = await (
+      await import("@/server/services/student-onboarding-service")
+    ).listStudentEnrollmentInvitations(t.db, press);
+    const listedByDirector = await (
+      await import("@/server/services/student-onboarding-service")
+    ).listStudentEnrollmentInvitations(t.db, director);
+
+    expect(
+      listedByPress.invitations.some((r) => r.studentId === fromDirector.studentId)
+    ).toBe(true);
+    expect(
+      listedByDirector.invitations.some((r) => r.studentId === fromPress.studentId)
+    ).toBe(true);
+    expect(
+      listedByPress.invitations.find((r) => r.studentId === fromPress.studentId)
+        ?.status
+    ).toBe("awaiting_registration");
+  });
+
+  it("forbids teacher from creating enrollment invitations", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const { session } = await loginWithPassword(t.db, {
+      email: "anna@example.com",
+      password: DEMO_PASSWORD,
+    });
+    const teacher = await resolveAuthContext(t.db, session.rawToken);
+    await expect(
+      createStudentEnrollmentInvitation(t.db, teacher)
+    ).rejects.toMatchObject({ code: "forbidden" });
+  });
+
   it("hides incomplete students from teacher bootstrap", async () => {
     const t = await createTestDb();
     close = t.close;
