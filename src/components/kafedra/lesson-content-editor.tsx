@@ -12,6 +12,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  describeClassFilterEmpty,
+  filterMaterialsForStudentClass,
+} from "@/lib/folders/material-class-filter";
+import {
   canAddAnotherTopic,
   draftTopicsFromSaved,
   isDuplicateTopic,
@@ -42,15 +46,46 @@ export function LessonContentEditor({
     assignHomework,
     deleteHomeworkAssignment,
   } = useDemoStore();
-  const catalog = topicsForLessonCatalog(lesson.teacherId);
-  const tests = publishedHomeworksForLessonCatalog(lesson.teacherId);
+  // Занятие 1:1 — класс и направление только этого ученика / этого урока.
+  const student = data.students.find((s) => s.id === studentId);
+  const subjectCtx = useMemo(
+    () => ({
+      lessonSubject: lesson.subject,
+      directionId: lesson.directionId,
+      directions: data.learningDirections,
+    }),
+    [lesson.subject, lesson.directionId, data.learningDirections]
+  );
+  const allTopics = topicsForLessonCatalog(lesson.teacherId);
+  const allTests = publishedHomeworksForLessonCatalog(lesson.teacherId);
+  const catalog = useMemo(
+    () =>
+      filterMaterialsForStudentClass(allTopics, data.materialFolders, {
+        ...subjectCtx,
+        studentGrade: student?.grade,
+      }),
+    [allTopics, data.materialFolders, subjectCtx, student?.grade]
+  );
+  const tests = useMemo(
+    () =>
+      filterMaterialsForStudentClass(allTests, data.materialFolders, {
+        ...subjectCtx,
+        studentGrade: student?.grade,
+      }),
+    [allTests, data.materialFolders, subjectCtx, student?.grade]
+  );
+  const emptyHint = describeClassFilterEmpty({
+    ...subjectCtx,
+    students: student ? [student] : [],
+    studentGrade: student?.grade,
+  });
   const savedTopics = useMemo(
     () =>
-      topicsForLesson(lesson, catalog).map((t) => ({
+      topicsForLesson(lesson, allTopics).map((t) => ({
         topicId: t.topicId ?? null,
         title: t.title,
       })),
-    [lesson, catalog]
+    [lesson, allTopics]
   );
   const savedAssignments = data.homeworkAssignments.filter(
     (a) =>
@@ -73,6 +108,10 @@ export function LessonContentEditor({
   const [dupHint, setDupHint] = useState<string | null>(null);
   const [requiredHint, setRequiredHint] = useState<string | null>(null);
 
+  // Актуальный класс/направление ученика — сбросить выбор вне нового фильтра.
+  if (testId && !tests.some((t) => t.id === testId)) {
+    setTestId("");
+  }
 
   function updateTopic(
     index: number,
@@ -111,7 +150,7 @@ export function LessonContentEditor({
 
   function homeworkTitle(id: string) {
     const hwItem =
-      tests.find((t) => t.id === id) ??
+      allTests.find((t) => t.id === id) ??
       data.homeworks.find((h) => h.id === id);
     return hwItem?.title || "Тест";
   }
@@ -224,6 +263,7 @@ export function LessonContentEditor({
 
       <HomeworkDraftList
         tests={tests}
+        emptyHint={emptyHint}
         assignments={savedAssignments}
         hw={hw}
         testId={testId}
@@ -232,6 +272,8 @@ export function LessonContentEditor({
         onTestId={setTestId}
         onAdd={() => {
           if (!testId) return;
+          // Только из отфильтрованного каталога класса ученика.
+          if (!tests.some((t) => t.id === testId)) return;
           setHw((prev) =>
             prev.some((x) => x.homeworkId === testId)
               ? prev
@@ -271,6 +313,7 @@ export function LessonContentEditor({
 
 function HomeworkDraftList({
   tests,
+  emptyHint,
   assignments,
   hw,
   testId,
@@ -281,6 +324,7 @@ function HomeworkDraftList({
   onRemove,
 }: {
   tests: Homework[];
+  emptyHint: string;
   assignments: HomeworkAssignment[];
   hw: DraftHw[];
   testId: string;
@@ -331,9 +375,7 @@ function HomeworkDraftList({
         </ul>
       )}
       {tests.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          Опубликованных тестов нет — создайте их в разделе «Тесты».
-        </p>
+        <p className="text-xs text-muted-foreground">{emptyHint}</p>
       ) : (
         <div className="flex gap-2">
           <Select value={testId} onValueChange={(v) => v && onTestId(v)}>

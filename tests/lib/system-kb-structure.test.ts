@@ -131,6 +131,92 @@ describe("system kb structure helpers", () => {
     ).toEqual(["a"]);
   });
 
+  it("keeps only the student grade (+ same-grade school/teacher), not other grades", () => {
+    const richFolders: MaterialFolder[] = [
+      ...folders,
+      {
+        id: "phys9",
+        ownerScope: "school",
+        teacherId: null,
+        parentId: "phys",
+        title: "9 класс",
+        sortOrder: 2,
+        contentKind: "shared",
+        systemKey: gradeSystemKey("physics", "9"),
+      },
+      {
+        id: "phys9-user",
+        ownerScope: "school",
+        teacherId: null,
+        parentId: "phys9",
+        title: "Кинематика",
+        sortOrder: 0,
+        contentKind: "topic",
+      },
+      {
+        id: "phys11",
+        ownerScope: "school",
+        teacherId: null,
+        parentId: "phys",
+        title: "11 класс",
+        sortOrder: 4,
+        contentKind: "shared",
+        systemKey: gradeSystemKey("physics", "11"),
+      },
+      {
+        id: "phys11-user",
+        ownerScope: "school",
+        teacherId: null,
+        parentId: "phys11",
+        title: "Кванты",
+        sortOrder: 0,
+        contentKind: "topic",
+      },
+      {
+        id: "phys10-teacher",
+        ownerScope: "teacher",
+        teacherId: "t1",
+        parentId: "phys10",
+        title: "Мои задачи 10",
+        sortOrder: 1,
+        contentKind: "topic",
+      },
+    ];
+    const materials = [
+      { id: "g7", folderId: "phys7-user", subject: "Физика" },
+      { id: "g9", folderId: "phys9-user", subject: "Физика" },
+      { id: "g10-school", folderId: "phys10-user", subject: "Физика" },
+      { id: "g10-teacher", folderId: "phys10-teacher", subject: "Физика" },
+      { id: "g11", folderId: "phys11-user", subject: "Физика" },
+      { id: "ungraded", folderId: "phys", subject: "Физика" },
+      { id: "math", folderId: "math10", subject: "Математика" },
+    ];
+    const byGrade = {
+      "7": ["g7"],
+      "9": ["g9"],
+      "10": ["g10-school", "g10-teacher"],
+      "11": ["g11"],
+    } as const;
+    for (const grade of ["7", "9", "10", "11"] as const) {
+      const ids = filterMaterialsForStudentClass(materials, richFolders, {
+        directionId: "d-phys",
+        directions: [{ id: "d-phys", slug: "physics", name: "Физика" }],
+        studentGrade: grade,
+      }).map((m) => m.id);
+      expect(ids).toEqual([...byGrade[grade]]);
+      expect(ids).not.toContain("ungraded");
+      expect(ids).not.toContain("math");
+    }
+    expect(
+      filterMaterialsForStudentClass(materials, richFolders, {
+        directionId: "d-math",
+        directions: [{ id: "d-math", slug: "math", name: "Математика" }],
+        lessonSubject: "Физика",
+        studentGrade: "10",
+      }).map((m) => m.id)
+    ).toEqual(["math"]);
+  });
+
   it("does not merge catalogs for mixed grades (lessons are 1:1)", () => {
     const materials = [
       { id: "a", folderId: "phys7-user", subject: "Физика" },
