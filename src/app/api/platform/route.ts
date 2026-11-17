@@ -40,6 +40,57 @@ export async function POST(request: Request) {
           return m.deleteTeacher(db, ctx, String(p.id));
         case "upsertStudent":
           return m.upsertStudent(db, ctx, p as never);
+        case "createStudentEnrollmentInvitation": {
+          const {
+            createStudentEnrollmentInvitation,
+          } = await import("@/server/services/student-onboarding-service");
+          return createStudentEnrollmentInvitation(db, ctx);
+        }
+        case "listStudentEnrollmentInvitations": {
+          const {
+            listStudentEnrollmentInvitations,
+          } = await import("@/server/services/student-onboarding-service");
+          return listStudentEnrollmentInvitations(db, ctx);
+        }
+        case "getStudentOnboardingState": {
+          const {
+            getStudentOnboardingState,
+          } = await import("@/server/services/student-onboarding-service");
+          return getStudentOnboardingState(db, ctx);
+        }
+        case "saveStudentOnboardingProfile": {
+          const {
+            saveStudentOnboardingProfile,
+          } = await import("@/server/services/student-onboarding-service");
+          return saveStudentOnboardingProfile(db, ctx, p as never);
+        }
+        case "saveStudentOnboardingAvailability": {
+          const {
+            saveStudentOnboardingAvailability,
+          } = await import("@/server/services/student-onboarding-service");
+          return saveStudentOnboardingAvailability(
+            db,
+            ctx,
+            (p.slots as never) ?? []
+          );
+        }
+        case "getStudentAvailability": {
+          const {
+            getStudentAvailabilityForViewer,
+          } = await import("@/server/services/student-onboarding-service");
+          return getStudentAvailabilityForViewer(db, ctx, String(p.studentId));
+        }
+        case "updateStudentAvailability": {
+          const {
+            updateStudentAvailabilityByStaff,
+          } = await import("@/server/services/student-onboarding-service");
+          return updateStudentAvailabilityByStaff(
+            db,
+            ctx,
+            String(p.studentId),
+            (p.slots as never) ?? []
+          );
+        }
         case "deleteStudent":
           return m.deleteStudent(db, ctx, {
             id: String(p.id),

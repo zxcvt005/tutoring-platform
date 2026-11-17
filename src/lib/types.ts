@@ -491,10 +491,23 @@ export type Teacher = {
 /** Класс ученика (школа). */
 export type StudentGrade = "7" | "8" | "9" | "10" | "11";
 
+/** Этап обязательной регистрации ученика по приглашению. */
+export type StudentOnboardingStatus =
+  | "invited"
+  | "profile_pending"
+  | "availability_pending"
+  | "complete";
+
+/** Слот свободного времени: weekday 1=пн…7=вс, hourStart 7…23. */
+export type StudentAvailabilitySlot = {
+  weekday: number;
+  hourStart: number;
+};
+
 export type Student = {
   id: string;
   fullName: string;
-  /** Класс 8–11; отсутствует — «Не указан». */
+  /** Класс 7–11; отсутствует — «Не указан». */
   grade?: StudentGrade | null;
   /**
    * Устаревшее свободное поле контакта.
@@ -503,8 +516,14 @@ export type Student = {
   contacts?: string;
   telegram?: string | null;
   phone?: string | null;
+  /** ФИО родителя / представителя. */
+  parentName?: string | null;
   /** Контакты родителей — только дирекция / преподаватель. */
   parentContacts?: string | null;
+  /** Цель обучения. */
+  learningGoal?: string | null;
+  /** complete — полноценный ученик; остальные — незавершённая регистрация. */
+  onboardingStatus?: StudentOnboardingStatus;
   status: PersonStatus;
   teacherId: string;
   /** Внутренние заметки администрации — не отдаются ученику. */
@@ -521,6 +540,8 @@ export type Student = {
   accountRole?: "student" | null;
   /** Балансы занятий по направлениям (денормализация для UI). */
   directionBalances?: StudentDirectionBalance[];
+  /** Свободное время (если загружено). */
+  availabilitySlots?: StudentAvailabilitySlot[];
 };
 
 export type LessonTopicLink = {

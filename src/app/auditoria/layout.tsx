@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { CabinetShell } from "@/components/layout/cabinet-shell";
+import { AuditoriaShell } from "@/components/auditoria/auditoria-shell";
 import { requireCabinetMembership } from "@/server/auth/cabinet-guard";
 
 export const metadata: Metadata = {
@@ -13,5 +13,5 @@ export default async function AuditoriaLayout({
   children: React.ReactNode;
 }) {
   await requireCabinetMembership("auditoria");
-  return <CabinetShell role="auditoria">{children}</CabinetShell>;
+  return <AuditoriaShell>{children}</AuditoriaShell>;
 }

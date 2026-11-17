@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { EnterCabinetButton } from "@/components/admin/enter-cabinet-button";
 import { ProfileAccessPanel } from "@/components/admin/profile-access-panel";
@@ -9,6 +9,10 @@ import { EmptyState } from "@/components/empty-state";
 import { FilterBar } from "@/components/layout/filter-bar";
 import { PageHeader } from "@/components/layout/page-header";
 import { PersonStatusBadge } from "@/components/status-badge";
+import {
+  StudentEnrollmentInvites,
+  type StudentEnrollmentInvitesHandle,
+} from "@/components/students/student-enrollment-invites";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -134,6 +138,8 @@ export function StudentsByTeacher({
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [restoreBusyId, setRestoreBusyId] = useState<string | null>(null);
+  const enrollmentRef = useRef<StudentEnrollmentInvitesHandle>(null);
+  const [inviteCreating, setInviteCreating] = useState(false);
 
   const basePath = mode === "direkciya" ? "/direkciya" : "/kafedra";
 
@@ -346,12 +352,35 @@ export function StudentsByTeacher({
         }
         actions={
           editable && !archivedView ? (
-            <Button type="button" className="rounded-full" onClick={openCreate}>
-              Добавить ученика
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              {mode === "direkciya" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-full"
+                  disabled={inviteCreating}
+                  data-testid="invite-student-button"
+                  onClick={() => {
+                    setInviteCreating(true);
+                    void enrollmentRef.current
+                      ?.createInvite()
+                      .finally(() => setInviteCreating(false));
+                  }}
+                >
+                  {inviteCreating ? "Создание…" : "Пригласить ученика"}
+                </Button>
+              ) : null}
+              <Button type="button" className="rounded-full" onClick={openCreate}>
+                Добавить ученика
+              </Button>
+            </div>
           ) : null
         }
       />
+
+      {mode === "direkciya" && !archivedView ? (
+        <StudentEnrollmentInvites ref={enrollmentRef} className="mb-6" />
+      ) : null}
 
       {mode === "direkciya" ? (
         <div className="mb-4 flex flex-wrap gap-2">

@@ -151,8 +151,19 @@ export const students = pgTable("students", {
   contacts: text("contacts"),
   telegram: text("telegram"),
   phone: text("phone"),
+  /** ФИО родителя / представителя (анкета онбординга). */
+  parentName: text("parent_name"),
   /** Контакты родителей / представителей — только для дирекции. */
   parentContacts: text("parent_contacts"),
+  /** Цель обучения из обязательной анкеты. */
+  learningGoal: text("learning_goal"),
+  /**
+   * invited — ссылка создана, аккаунт ещё не принят;
+   * profile_pending — нужна анкета;
+   * availability_pending — нужно выбрать свободное время;
+   * complete — полноценный ученик (в т.ч. legacy / ручное создание).
+   */
+  onboardingStatus: text("onboarding_status").notNull().default("complete"),
   status: text("status").notNull().default("active"),
   /** Внутренние заметки администрации — не для ученика. */
   notes: text("notes"),
@@ -169,10 +180,15 @@ export const students = pgTable("students", {
 }, (t) => [
   index("students_org_idx").on(t.organizationId),
   index("students_teacher_idx").on(t.primaryTeacherId),
+  index("students_onboarding_status_idx").on(t.organizationId, t.onboardingStatus),
   uniqueIndex("students_org_user_uidx").on(t.organizationId, t.userId),
   check(
     "students_status_check",
     sql`${t.status} in ('active', 'paused', 'archived')`
+  ),
+  check(
+    "students_onboarding_status_check",
+    sql`${t.onboardingStatus} in ('invited', 'profile_pending', 'availability_pending', 'complete')`
   ),
   check(
     "students_archived_reason_check",
@@ -185,8 +201,46 @@ export const students = pgTable("students", {
 ]);
 
 /**
- * Одноразовые приглашения в кабинет для заранее созданных профилей.
+ * Недельная сетка свободного времени ученика.
+ * weekday: 1=пн … 7=вс; hour_start: 7..23 (слот [H:00, H+1:00)).
+ */
+export const studentAvailabilitySlots = pgTable(
+  "student_availability_slots",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    studentId: text("student_id")
+      .notNull()
+      .references(() => students.id, { onDelete: "cascade" }),
+    weekday: integer("weekday").notNull(),
+    hourStart: integer("hour_start").notNull(),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("student_availability_unique_slot_uidx").on(
+      t.studentId,
+      t.weekday,
+      t.hourStart
+    ),
+    index("student_availability_student_idx").on(t.studentId),
+    index("student_availability_org_idx").on(t.organizationId),
+    check(
+      "student_availability_weekday_check",
+      sql`${t.weekday} >= 1 and ${t.weekday} <= 7`
+    ),
+    check(
+      "student_availability_hour_check",
+      sql`${t.hourStart} >= 7 and ${t.hourStart} <= 23`
+    ),
+  ]
+);
+
+/**
+ * Одноразовые приглашения в кабинет.
  * В URL — сырой токен; в БД — sha256(token). Роль фиксируется kind, не клиентом.
+ * rawToken хранится до использования, чтобы директор мог скопировать ссылку снова.
  */
 export const accountInvitations = pgTable(
   "account_invitations",
@@ -204,6 +258,8 @@ export const accountInvitations = pgTable(
       onDelete: "cascade",
     }),
     tokenHash: text("token_hash").notNull(),
+    /** Сырой токен до usedAt/revokedAt; после — null. */
+    rawToken: text("raw_token"),
     createdByUserId: text("created_by_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -3263,6 +3319,7 @@ export const schema = {
   sessions,
   teachers,
   students,
+  studentAvailabilitySlots,
   accountInvitations,
   topicSections,
   materialFolders,

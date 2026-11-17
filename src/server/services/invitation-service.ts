@@ -398,7 +398,7 @@ export async function revokeProfileInvitation(
   if (!invite.revokedAt) {
     await db
       .update(accountInvitations)
-      .set({ revokedAt: new Date() })
+      .set({ revokedAt: new Date(), rawToken: null })
       .where(eq(accountInvitations.id, invite.id));
   }
 
@@ -520,6 +520,7 @@ export async function acceptInvitation(db: AppDb, input: AcceptInvitationInput) 
       }
 
       let fullName = "";
+      let nextOnboardingStatus: string | null = null;
       if (invite.kind === "teacher") {
         if (!invite.teacherId) throw badRequest("Некорректное приглашение");
         const [teacher] = await txDb
@@ -554,6 +555,10 @@ export async function acceptInvitation(db: AppDb, input: AcceptInvitationInput) 
           throw conflict("У профиля ученика уже есть аккаунт");
         }
         fullName = student.fullName;
+        nextOnboardingStatus =
+          student.onboardingStatus === "invited"
+            ? "profile_pending"
+            : student.onboardingStatus;
       }
 
       const userId = newId("user");
@@ -597,6 +602,9 @@ export async function acceptInvitation(db: AppDb, input: AcceptInvitationInput) 
           .update(students)
           .set({
             userId,
+            ...(nextOnboardingStatus
+              ? { onboardingStatus: nextOnboardingStatus }
+              : {}),
             updatedAt: now,
           })
           .where(
@@ -616,6 +624,7 @@ export async function acceptInvitation(db: AppDb, input: AcceptInvitationInput) 
         .set({
           usedAt: now,
           usedByUserId: userId,
+          rawToken: null,
         })
         .where(
           and(
@@ -639,6 +648,7 @@ export async function acceptInvitation(db: AppDb, input: AcceptInvitationInput) 
         teacherId: invite.teacherId,
         studentId: invite.studentId,
         organizationId: invite.organizationId,
+        onboardingStatus: nextOnboardingStatus,
       };
     });
 
@@ -664,6 +674,7 @@ export async function acceptInvitation(db: AppDb, input: AcceptInvitationInput) 
       teacherId: result.teacherId,
       studentId: result.studentId,
       organizationId: result.organizationId,
+      onboardingStatus: result.onboardingStatus,
       session,
     };
   } catch (err) {

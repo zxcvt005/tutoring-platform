@@ -469,7 +469,11 @@ export async function upsertStudent(
         .where(eq(users.id, existing[0].userId));
     }
   } else {
-    await db.insert(students).values({ ...values, createdAt: new Date() });
+    await db.insert(students).values({
+      ...values,
+      onboardingStatus: "complete",
+      createdAt: new Date(),
+    });
   }
   return { id };
 }

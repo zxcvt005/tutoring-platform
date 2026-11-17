@@ -65,6 +65,7 @@ export async function POST(request: Request, { params }: Params) {
       role: me.role,
       teacherId: me.teacherId,
       studentId: me.studentId,
+      onboardingStatus: result.onboardingStatus ?? null,
     });
     res.cookies.set(
       SESSION_COOKIE,

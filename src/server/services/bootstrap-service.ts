@@ -41,6 +41,7 @@ import {
 import { loadOriginMap, originKey } from "@/server/services/material-origins";
 import { loadLessonTopicsMap } from "@/server/services/platform-mutations";
 import { mergeQuestionsWithKeys, stripQuestionKeys } from "@/server/services/question-merge";
+import { isStudentFullyOnboarded } from "@/lib/students/availability";
 import type {
   Attendance,
   DemoData,
@@ -55,8 +56,10 @@ import type {
   SettlementDocumentSummary,
   Student,
   StudentAnswer,
+  StudentAvailabilitySlot,
   StudentDirectionBalance,
   StudentDirectionBalanceRow,
+  StudentOnboardingStatus,
   Tariff,
   TariffFeatureKey,
   TariffPurchaseOption,
@@ -148,7 +151,11 @@ export async function buildBootstrap(
       teacherRows = [];
     } else {
       const tid = ctx.teacherId;
-      studentRows = studentRows.filter((s) => s.primaryTeacherId === tid);
+      studentRows = studentRows.filter(
+        (s) =>
+          s.primaryTeacherId === tid &&
+          isStudentFullyOnboarded(s.onboardingStatus)
+      );
       lessonRows = lessonRows.filter((l) => l.teacherId === tid);
       sectionRows = sectionRows.filter((s) => s.teacherId === tid);
       folderRows = folderRows.filter(
@@ -164,6 +171,13 @@ export async function buildBootstrap(
       );
       assignmentRows = assignmentRows.filter((a) => a.teacherId === tid);
     }
+  }
+
+  if (ctx.role === "director" || ctx.role === "assistant") {
+    // Незавершённые enrollment-регистрации — только в блоке «Приглашения».
+    studentRows = studentRows.filter((s) =>
+      isStudentFullyOnboarded(s.onboardingStatus)
+    );
   }
 
   if (ctx.role === "student" && ctx.studentId) {
@@ -487,6 +501,35 @@ export async function buildBootstrap(
     accountRole: t.userId ? ("teacher" as const) : null,
   }));
 
+  const studentIdsForSlots = studentRows.map((s) => s.id);
+  const availabilityByStudent = new Map<string, StudentAvailabilitySlot[]>();
+  if (
+    studentIdsForSlots.length &&
+    (ctx.role === "director" ||
+      ctx.role === "teacher" ||
+      ctx.role === "assistant" ||
+      ctx.role === "student")
+  ) {
+    const { studentAvailabilitySlots } = await import("@/server/db/schema");
+    try {
+      const slotRows = await db
+        .select({
+          studentId: studentAvailabilitySlots.studentId,
+          weekday: studentAvailabilitySlots.weekday,
+          hourStart: studentAvailabilitySlots.hourStart,
+        })
+        .from(studentAvailabilitySlots)
+        .where(inArray(studentAvailabilitySlots.studentId, studentIdsForSlots));
+      for (const row of slotRows) {
+        const list = availabilityByStudent.get(row.studentId) ?? [];
+        list.push({ weekday: row.weekday, hourStart: row.hourStart });
+        availabilityByStudent.set(row.studentId, list);
+      }
+    } catch {
+      // Таблица может отсутствовать до миграции 0054.
+    }
+  }
+
   const mappedStudents: Student[] = studentRows.map((s) => {
     const base: Student = {
       id: s.id,
@@ -495,6 +538,10 @@ export async function buildBootstrap(
       telegram: s.telegram ?? null,
       phone: s.phone ?? null,
       contacts: s.contacts ?? undefined,
+      onboardingStatus:
+        (s.onboardingStatus as StudentOnboardingStatus | undefined) ??
+        "complete",
+      availabilitySlots: availabilityByStudent.get(s.id) ?? [],
       status: s.status as Student["status"],
       teacherId: s.primaryTeacherId ?? "",
       archivedAt: s.archivedAt?.toISOString() ?? null,
@@ -508,7 +555,11 @@ export async function buildBootstrap(
     };
     // Ученик не получает внутренние заметки и контакты родителей
     if (ctx.role === "student") {
-      return base;
+      return {
+        ...base,
+        parentName: s.parentName ?? null,
+        learningGoal: s.learningGoal ?? null,
+      };
     }
     if (ctx.role === "press") {
       return {
@@ -518,6 +569,8 @@ export async function buildBootstrap(
     }
     return {
       ...base,
+      parentName: s.parentName ?? null,
+      learningGoal: s.learningGoal ?? null,
       parentContacts: s.parentContacts ?? null,
       notes: s.notes ?? undefined,
     };

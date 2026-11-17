@@ -21,6 +21,7 @@ import {
   type PublicInvitationPayload,
 } from "@/lib/store/api-client";
 import { cabinetHomeForRole } from "@/lib/auth/roles";
+import { onboardingPathForStatus } from "@/lib/students/availability";
 
 const STATUS_MESSAGE: Record<
   Exclude<PublicInvitationPayload["status"], "pending">,
@@ -85,7 +86,11 @@ export default function InviteAcceptPage() {
         personalDataConsent: true,
         marketingConsent: consents.marketing,
       });
-      router.replace(cabinetHomeForRole(result.role));
+      const onboardingPath =
+        result.role === "student"
+          ? onboardingPathForStatus(result.onboardingStatus)
+          : null;
+      router.replace(onboardingPath ?? cabinetHomeForRole(result.role));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка регистрации");
     } finally {

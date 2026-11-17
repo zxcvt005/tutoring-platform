@@ -498,6 +498,7 @@ export async function apiAcceptInvitation(
     role: "teacher" | "student";
     teacherId: string | null;
     studentId: string | null;
+    onboardingStatus?: string | null;
   }>(res);
 }
 
