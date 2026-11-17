@@ -489,7 +489,7 @@ export type Teacher = {
 };
 
 /** Класс ученика (школа). */
-export type StudentGrade = "8" | "9" | "10" | "11";
+export type StudentGrade = "7" | "8" | "9" | "10" | "11";
 
 export type Student = {
   id: string;

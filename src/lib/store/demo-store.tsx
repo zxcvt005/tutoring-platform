@@ -204,6 +204,10 @@ export type DemoStoreValue = {
     folderId: string,
     targetParentId: string | null
   ) => Promise<OkResult>;
+  pasteMaterialFolder: (input: {
+    sourceFolderId: string;
+    targetParentId: string | null;
+  }) => Promise<OkResult & { folderId?: string }>;
   reorderMaterialFolders: (input: {
     ownerScope: "school" | "teacher";
     teacherId?: string | null;
@@ -673,6 +677,10 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         run("deleteMaterialFolder", { id, mode }),
       moveMaterialFolder: (folderId, targetParentId) =>
         run("moveMaterialFolder", { folderId, targetParentId }),
+      pasteMaterialFolder: (input) =>
+        run("pasteMaterialFolder", input) as Promise<
+          OkResult & { folderId?: string }
+        >,
       reorderMaterialFolders: (input) =>
         run("reorderMaterialFolders", input),
       moveMaterialToFolder: (kind, id, folderId) =>

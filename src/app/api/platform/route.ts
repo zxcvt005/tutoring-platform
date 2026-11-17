@@ -164,6 +164,15 @@ export async function POST(request: Request) {
             (p.targetParentId as string | null) ?? null
           );
         }
+        case "pasteMaterialFolder": {
+          const {
+            pasteMaterialFolderTree,
+          } = await import("@/server/services/folder-copy-service");
+          return pasteMaterialFolderTree(db, ctx, {
+            sourceFolderId: String(p.sourceFolderId),
+            targetParentId: (p.targetParentId as string | null) ?? null,
+          });
+        }
         case "reorderMaterialFolders": {
           const {
             reorderMaterialFolders,

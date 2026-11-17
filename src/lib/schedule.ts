@@ -172,11 +172,10 @@ export function lessonParticipantsLabel(
   lesson: Lesson,
   nameOf: (id: string) => string
 ): string {
-  const ids = lesson.studentIds;
+  const ids = uniqueStudentIds(lesson.studentIds);
   if (ids.length === 0) return "Без учеников";
-  if (ids.length === 1) return nameOf(ids[0]!);
-  if (ids.length <= 3) return ids.map(nameOf).join(", ");
-  return `${ids.length} учеников`;
+  // Модель: одно занятие — один ученик. Несколько id — legacy до миграции.
+  return nameOf(ids[0]!);
 }
 
 /** Сетка часов */

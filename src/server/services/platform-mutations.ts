@@ -49,6 +49,7 @@ import { splitQuestions } from "@/server/db/question-split";
 import { revokeAllUserSessions } from "@/server/auth/session";
 import {
   attendances,
+  learningDirections,
   lessonStudents,
   lessonTopics,
   lessons,
@@ -958,6 +959,12 @@ export async function completeLesson(
     .where(eq(lessonStudents.lessonId, input.lessonId));
   const participantIds = participants.map((p) => p.studentId);
   if (participantIds.length === 0) throw badRequest("У занятия нет учеников");
+  if (participantIds.length > 1) {
+    throw badRequest(
+      "Занятие связано с несколькими учениками. Обновите данные (разделение legacy-занятий) и повторите."
+    );
+  }
+  const soleStudentId = participantIds[0]!;
   const participantSet = new Set(participantIds);
   const byStudent = new Map(
     (input.attendances ?? []).map((a) => [a.studentId, a.status])
@@ -1074,13 +1081,84 @@ export async function completeLesson(
   }
 
   let assignedCount = 0;
+  // Фильтр ДЗ по направлению/предмету и классу каждого ученика (системные папки БЗ).
+  const { listMaterialFolders } = await import("@/server/services/folder-service");
+  const {
+    materialMatchesStudentClass,
+    matchSystemSubjectFromDirection,
+    asSystemGrade,
+    resolveFolderClassPath,
+  } = await import("@/lib/folders/system-kb-structure");
+  let directionSlug: string | null = null;
+  let directionName: string | null = null;
+  if (lesson.directionId) {
+    const [dir] = await db
+      .select({
+        slug: learningDirections.slug,
+        name: learningDirections.name,
+      })
+      .from(learningDirections)
+      .where(eq(learningDirections.id, lesson.directionId))
+      .limit(1);
+    directionSlug = dir?.slug ?? null;
+    directionName = dir?.name ?? null;
+  }
+  const subjectKey = matchSystemSubjectFromDirection({
+    directionSlug,
+    directionName,
+    lessonSubject: lesson.subject,
+  });
+  const schoolFolders = await listMaterialFolders(db, ctx, {
+    ownerScope: "school",
+    teacherId: null,
+  }).catch(() => []);
+  const teacherFolders = await listMaterialFolders(db, ctx, {
+    ownerScope: "teacher",
+    teacherId: lesson.teacherId,
+  }).catch(() => []);
+  const foldersForFilter = [...schoolFolders, ...teacherFolders];
+
   for (const assign of homeworkAssigns) {
     if (!assign.homeworkId) continue;
+    // ДЗ только ученику этого индивидуального занятия (игнор чужих id в payload).
+    const requested = assign.studentIds.filter((id) => id === soleStudentId);
+    const targetIds = requested.length ? requested : [soleStudentId];
+    const [hw] = await db
+      .select({ folderId: tests.folderId })
+      .from(tests)
+      .where(eq(tests.id, assign.homeworkId))
+      .limit(1);
+    let studentIds = targetIds;
+    // Классовый фильтр только для материалов в системном пути «предмет → класс».
+    // Обычные тесты преподавателя вне этих папок назначаются как раньше.
+    if (subjectKey && hw) {
+      const classPath = resolveFolderClassPath(foldersForFilter, hw.folderId);
+      if (classPath) {
+        const [st] = await db
+          .select({ grade: students.grade })
+          .from(students)
+          .where(eq(students.id, soleStudentId))
+          .limit(1);
+        const grade = asSystemGrade(st?.grade);
+        if (
+          !grade ||
+          !materialMatchesStudentClass(
+            foldersForFilter,
+            hw.folderId,
+            subjectKey,
+            grade
+          )
+        ) {
+          continue;
+        }
+      }
+    }
+    if (!studentIds.length) continue;
     const result = await assignHomework(db, ctx, {
       homeworkId: assign.homeworkId,
       topicId: topicId || undefined,
       teacherId: lesson.teacherId,
-      studentIds: assign.studentIds,
+      studentIds,
       lessonId: input.lessonId,
       dueAt: assign.dueAt,
     });

@@ -2,7 +2,7 @@
  * Безопасные ссылки и нормализация контактов ученика.
  */
 
-export const STUDENT_GRADES = ["8", "9", "10", "11"] as const;
+export const STUDENT_GRADES = ["7", "8", "9", "10", "11"] as const;
 
 export function gradeLabel(grade?: string | null): string {
   if (!grade) return "Не указан";
@@ -52,9 +52,9 @@ export function phoneHref(raw?: string | null): string | null {
 
 export function normalizeGrade(
   value: unknown
-): "8" | "9" | "10" | "11" | null {
+): "7" | "8" | "9" | "10" | "11" | null {
   if (value == null || value === "") return null;
   const s = String(value).trim();
-  if (s === "8" || s === "9" || s === "10" || s === "11") return s;
+  if (s === "7" || s === "8" || s === "9" || s === "10" || s === "11") return s;
   return null;
 }

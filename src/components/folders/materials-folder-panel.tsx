@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 
 import {
   FolderExplorer,
@@ -17,9 +18,18 @@ import {
   type MaterialFolderKind,
   type MaterialsSection,
 } from "@/lib/folders/material-folders";
+import { isSystemFolderKey } from "@/lib/folders/system-kb-structure";
 import { MIXED_MATERIAL_KINDS } from "@/lib/folders/material-routes";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { isCatalogHomeworkPurpose } from "@/lib/homework/source-kind";
+
+const FOLDER_CLIPBOARD_KEY = "neodin.kb.folderClipboard";
+
+type FolderClipboard = {
+  folderId: string;
+  ownerScope: "school" | "teacher";
+  teacherId: string | null;
+};
 
 export type MaterialsFolderPanelProps = {
   /** По умолчанию — смешанный список всех типов. */
@@ -89,7 +99,22 @@ export function MaterialsFolderPanel({
     deleteMaterialFolder,
     moveMaterialFolder,
     moveMaterialToFolder,
+    pasteMaterialFolder,
+    reload,
   } = useDemoStore();
+
+  const [clipboard, setClipboard] = useState<FolderClipboard | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(FOLDER_CLIPBOARD_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as FolderClipboard;
+      if (parsed?.folderId) setClipboard(parsed);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const resolvedTeacherId =
     ownerScope === "school"
@@ -369,6 +394,10 @@ export function MaterialsFolderPanel({
         }}
         onRenameFolder={async (id, title) => {
           const existing = folders.find((f) => f.id === id);
+          if (isSystemFolderKey(existing?.systemKey)) {
+            toast.error("Системную папку нельзя переименовать");
+            return;
+          }
           await withBusy(() =>
             upsertMaterialFolder({
               id,
@@ -382,6 +411,11 @@ export function MaterialsFolderPanel({
           );
         }}
         onDeleteFolder={async (id) => {
+          const existing = folders.find((f) => f.id === id);
+          if (isSystemFolderKey(existing?.systemKey)) {
+            toast.error("Системную папку нельзя удалить");
+            return;
+          }
           await withBusy(() => deleteMaterialFolder(id, "move_to_parent"));
           if (currentFolderId === id) {
             const parent = folders.find((f) => f.id === id)?.parentId ?? null;
@@ -389,6 +423,11 @@ export function MaterialsFolderPanel({
           }
         }}
         onMoveFolder={async (id, targetParentId) => {
+          const existing = folders.find((f) => f.id === id);
+          if (isSystemFolderKey(existing?.systemKey)) {
+            toast.error("Системную папку нельзя переместить");
+            return;
+          }
           await withBusy(() => moveMaterialFolder(id, targetParentId));
         }}
         onMoveMaterial={async (kind, id, targetFolderId) => {
@@ -399,6 +438,50 @@ export function MaterialsFolderPanel({
               targetFolderId
             )
           );
+        }}
+        onCopyFolder={(id) => {
+          const existing = folders.find((f) => f.id === id);
+          if (isSystemFolderKey(existing?.systemKey)) {
+            toast.error("Системную папку нельзя копировать");
+            return;
+          }
+          const payload: FolderClipboard = {
+            folderId: id,
+            ownerScope: space.ownerScope,
+            teacherId: space.teacherId,
+          };
+          setClipboard(payload);
+          sessionStorage.setItem(FOLDER_CLIPBOARD_KEY, JSON.stringify(payload));
+          toast.success("Папка скопирована. Перейдите в нужное место и нажмите «Вставить».");
+        }}
+        canPasteFolder={Boolean(
+          clipboard &&
+            clipboard.ownerScope === space.ownerScope &&
+            clipboard.teacherId === space.teacherId
+        )}
+        onPasteFolder={async () => {
+          if (!clipboard) return;
+          if (
+            clipboard.ownerScope !== space.ownerScope ||
+            clipboard.teacherId !== space.teacherId
+          ) {
+            toast.error("Нельзя вставить папку в другое пространство");
+            return;
+          }
+          await withBusy(async () => {
+            const r = await pasteMaterialFolder({
+              sourceFolderId: clipboard.folderId,
+              targetParentId: currentFolderId,
+            });
+            if (r && r.ok === false) {
+              throw new Error(r.error ?? "Не удалось вставить");
+            }
+            // Очищаем буфер — повторное «Вставить» не дублирует.
+            setClipboard(null);
+            sessionStorage.removeItem(FOLDER_CLIPBOARD_KEY);
+            toast.success("Папка вставлена");
+            await reload();
+          });
         }}
         onOpenMaterial={onOpenMaterial}
         renderMaterialActions={renderMaterialActions}

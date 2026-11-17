@@ -323,18 +323,26 @@ export function KnowledgeWorkspace({
       {block === "school" ? (
         <div className="space-y-3">
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={openNewTheory}>
-              Новая теория
-            </Button>
-            <Button type="button" variant="outline" onClick={openNewIntensive}>
-              Новый интенсив
-            </Button>
-            <Button type="button" variant="outline" onClick={openNewTest}>
-              Новый тест
-            </Button>
-            <Button type="button" variant="outline" onClick={openNewTopic}>
-              Новая тема
-            </Button>
+            {kind === "theory" ? (
+              <Button type="button" variant="outline" onClick={openNewTheory}>
+                Новая теория
+              </Button>
+            ) : null}
+            {kind === "test" ? (
+              <Button type="button" variant="outline" onClick={openNewTest}>
+                Новый тест
+              </Button>
+            ) : null}
+            {kind === "topic" ? (
+              <Button type="button" variant="outline" onClick={openNewTopic}>
+                Новая тема
+              </Button>
+            ) : null}
+            {kind === "intensive" ? (
+              <Button type="button" variant="outline" onClick={openNewIntensive}>
+                Новый интенсив
+              </Button>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
             {(

@@ -12,6 +12,13 @@ import {
   type MaterialFolder,
   type MaterialFolderKind,
 } from "@/lib/folders/material-folders";
+import {
+  allSystemFolderSpecs,
+  isReservedGradeTitle,
+  isReservedRootSubjectTitle,
+  isSystemFolderKey,
+  parseSubjectSystemKey,
+} from "@/lib/folders/system-kb-structure";
 import { canManageSchoolKnowledgeBase } from "@/lib/auth/school-knowledge";
 import type { AuthContext } from "@/server/authz/context";
 import {
@@ -40,7 +47,17 @@ function mapFolder(row: typeof materialFolders.$inferSelect): MaterialFolder {
     title: row.title,
     sortOrder: row.sortOrder,
     contentKind: normalizeFolderContentKind(row.contentKind),
+    systemKey: row.systemKey ?? null,
   };
+}
+
+function assertNotSystemFolder(
+  folder: { systemKey?: string | null },
+  action: string
+) {
+  if (isSystemFolderKey(folder.systemKey)) {
+    throw badRequest(`Системную папку нельзя ${action}`);
+  }
 }
 
 async function loadOrgFolders(db: AppDb, organizationId: string) {
@@ -184,12 +201,123 @@ export async function legacySectionIdForFolder(
   return sec?.id ?? null;
 }
 
+/**
+ * Гарантирует 12 системных папок (2 предмета × 5 классов) в пространстве.
+ * Идемпотентно: ищет по system_key, не создаёт дубликаты.
+ */
+export async function ensureSystemKnowledgeFolders(
+  db: AppDb,
+  organizationId: string,
+  space: FolderSpace
+) {
+  if (space.ownerScope === "teacher" && !space.teacherId) return;
+  const existing = await db
+    .select()
+    .from(materialFolders)
+    .where(spaceWhere(space, organizationId));
+  const byKey = new Map(
+    existing
+      .filter((r) => r.systemKey)
+      .map((r) => [r.systemKey as string, r] as const)
+  );
+  const now = new Date();
+  const idByKey = new Map<string, string>();
+  for (const row of existing) {
+    if (row.systemKey) idByKey.set(row.systemKey, row.id);
+  }
+
+  for (const spec of allSystemFolderSpecs()) {
+    const parentId = spec.parentSystemKey
+      ? (idByKey.get(spec.parentSystemKey) ?? null)
+      : null;
+    if (spec.parentSystemKey && !parentId) {
+      // Родитель ещё не создан в этом проходе — создаём по порядку specs.
+      continue;
+    }
+    const found = byKey.get(spec.systemKey);
+    if (found) {
+      idByKey.set(spec.systemKey, found.id);
+      // Починить иерархию/название, если кто-то сломал вручную в БД.
+      if (
+        found.title !== spec.title ||
+        found.parentId !== parentId ||
+        found.contentKind !== "shared"
+      ) {
+        await db
+          .update(materialFolders)
+          .set({
+            title: spec.title,
+            parentId,
+            contentKind: "shared",
+            sortOrder: spec.sortOrder,
+            updatedAt: now,
+          })
+          .where(eq(materialFolders.id, found.id));
+      }
+      continue;
+    }
+    const id = newId("fld");
+    await db.insert(materialFolders).values({
+      id,
+      organizationId,
+      ownerScope: space.ownerScope,
+      teacherId: space.teacherId,
+      parentId,
+      title: spec.title,
+      contentKind: "shared",
+      systemKey: spec.systemKey,
+      sortOrder: spec.sortOrder,
+      createdAt: now,
+      updatedAt: now,
+    });
+    idByKey.set(spec.systemKey, id);
+    byKey.set(spec.systemKey, {
+      id,
+      organizationId,
+      ownerScope: space.ownerScope,
+      teacherId: space.teacherId,
+      parentId,
+      title: spec.title,
+      contentKind: "shared",
+      systemKey: spec.systemKey,
+      sortOrder: spec.sortOrder,
+      createdAt: now,
+      updatedAt: now,
+    } as (typeof existing)[number]);
+  }
+
+  // Второй проход на случай, если parent не успел появиться (не должно, specs упорядочены).
+  for (const spec of allSystemFolderSpecs()) {
+    if (idByKey.has(spec.systemKey)) continue;
+    const parentId = spec.parentSystemKey
+      ? (idByKey.get(spec.parentSystemKey) ?? null)
+      : null;
+    if (spec.parentSystemKey && !parentId) continue;
+    const id = newId("fld");
+    await db.insert(materialFolders).values({
+      id,
+      organizationId,
+      ownerScope: space.ownerScope,
+      teacherId: space.teacherId,
+      parentId,
+      title: spec.title,
+      contentKind: "shared",
+      systemKey: spec.systemKey,
+      sortOrder: spec.sortOrder,
+      createdAt: now,
+      updatedAt: now,
+    });
+    idByKey.set(spec.systemKey, id);
+  }
+}
+
 export async function listMaterialFolders(
   db: AppDb,
   ctx: AuthContext,
   space: FolderSpace
 ): Promise<MaterialFolder[]> {
   await assertCanReadSpace(db, ctx, space);
+  await ensureSystemKnowledgeFolders(db, ctx.organizationId, space);
   const rows = await db
     .select()
     .from(materialFolders)
@@ -231,18 +359,20 @@ export async function upsertMaterialFolder(
     teacherId: input.ownerScope === "school" ? null : input.teacherId ?? null,
   };
   await assertCanManageSpace(db, ctx, space);
+  await ensureSystemKnowledgeFolders(db, ctx.organizationId, space);
 
   const parentId = input.parentId ?? null;
   let resolvedContentKind = normalizeFolderContentKind(input.contentKind);
+  let parentRow: typeof materialFolders.$inferSelect | null = null;
   if (parentId) {
-    const parent = await getFolderOrThrow(db, ctx, parentId);
-    if (parent.ownerScope !== space.ownerScope) {
+    parentRow = await getFolderOrThrow(db, ctx, parentId);
+    if (parentRow.ownerScope !== space.ownerScope) {
       throw badRequest("Родительская папка в другом пространстве");
     }
-    if (space.ownerScope === "teacher" && parent.teacherId !== space.teacherId) {
+    if (space.ownerScope === "teacher" && parentRow.teacherId !== space.teacherId) {
       throw forbidden();
     }
-    const parentKind = normalizeFolderContentKind(parent.contentKind);
+    const parentKind = normalizeFolderContentKind(parentRow.contentKind);
     if (
       parentKind &&
       parentKind !== "shared" &&
@@ -253,8 +383,26 @@ export async function upsertMaterialFolder(
       throw badRequest("Нельзя вложить папку другого типа раздела");
     }
     if (!resolvedContentKind || resolvedContentKind === "shared") {
-      resolvedContentKind = parentKind ?? resolvedContentKind;
+      // Внутри системных subject/grade папок пользовательские папки
+      // наследуют тип раздела из UI, а не shared.
+      if (parentKind === "shared" && resolvedContentKind === "shared") {
+        resolvedContentKind = null;
+      } else if (parentKind && parentKind !== "shared") {
+        resolvedContentKind = parentKind;
+      }
     }
+    if (
+      parseSubjectSystemKey(parentRow.systemKey) &&
+      isReservedGradeTitle(title)
+    ) {
+      throw badRequest(
+        "Папки классов создаются системой и не могут дублироваться"
+      );
+    }
+  } else if (isReservedRootSubjectTitle(title)) {
+    throw badRequest(
+      "Папки «Физика» и «Математика» создаются системой и не могут дублироваться"
+    );
   }
 
   const id = input.id ?? newId("fld");
@@ -285,6 +433,20 @@ export async function upsertMaterialFolder(
       ownerScope: existing.ownerScope === "school" ? "school" : "teacher",
       teacherId: existing.teacherId,
     });
+    if (isSystemFolderKey(existing.systemKey)) {
+      if (
+        title !== existing.title ||
+        parentId !== existing.parentId ||
+        (input.contentKind != null &&
+          normalizeFolderContentKind(input.contentKind) !==
+            normalizeFolderContentKind(existing.contentKind))
+      ) {
+        throw badRequest(
+          "Системную папку нельзя переименовать, переместить или изменить"
+        );
+      }
+      return mapFolder(existing);
+    }
     const nextKind =
       resolvedContentKind ??
       normalizeFolderContentKind(existing.contentKind);
@@ -330,6 +492,7 @@ export async function moveMaterialFolder(
   targetParentId: string | null
 ) {
   const folder = await getFolderOrThrow(db, ctx, folderId);
+  assertNotSystemFolder(folder, "переместить");
   const space: FolderSpace = {
     ownerScope: folder.ownerScope === "school" ? "school" : "teacher",
     teacherId: folder.teacherId,
@@ -348,6 +511,9 @@ export async function moveMaterialFolder(
     ) {
       throw forbidden("Нельзя переместить папку в чужое пространство");
     }
+    if (parseSubjectSystemKey(parent.systemKey) && isReservedGradeTitle(folder.title)) {
+      throw badRequest("Нельзя создать дубликат системной папки класса");
+    }
     const movingKind = normalizeFolderContentKind(folder.contentKind);
     const parentKind = normalizeFolderContentKind(parent.contentKind);
     if (
@@ -359,6 +525,8 @@ export async function moveMaterialFolder(
     ) {
       throw badRequest("Нельзя переместить папку в дерево другого раздела");
     }
+  } else if (isReservedRootSubjectTitle(folder.title)) {
+    throw badRequest("Нельзя создать дубликат системной папки предмета в корне");
   }
 
   await db
@@ -426,6 +594,7 @@ export async function deleteMaterialFolder(
   mode: DeleteFolderMode = "move_to_parent"
 ) {
   const folder = await getFolderOrThrow(db, ctx, folderId);
+  assertNotSystemFolder(folder, "удалить");
   const space: FolderSpace = {
     ownerScope: folder.ownerScope === "school" ? "school" : "teacher",
     teacherId: folder.teacherId,

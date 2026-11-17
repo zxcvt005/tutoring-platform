@@ -180,7 +180,7 @@ export const students = pgTable("students", {
   ),
   check(
     "students_grade_check",
-    sql`${t.grade} is null or ${t.grade} in ('8', '9', '10', '11')`
+    sql`${t.grade} is null or ${t.grade} in ('7', '8', '9', '10', '11')`
   ),
 ]);
 
@@ -277,6 +277,11 @@ export const materialFolders = pgTable(
      * shared — наследие смешанных папок до разделения (видно во всех разделах до разборки).
      */
     contentKind: text("content_kind"),
+    /**
+     * Системные папки БЗ: subject:physics|math, grade:physics|math:7..11.
+     * Защищены от удаления / переименования / перемещения / копирования.
+     */
+    systemKey: text("system_key"),
     sortOrder: integer("sort_order").notNull().default(0),
     ...timestamps,
   },
@@ -289,6 +294,7 @@ export const materialFolders = pgTable(
     index("material_folders_parent_idx").on(t.parentId),
     index("material_folders_teacher_parent_idx").on(t.teacherId, t.parentId),
     index("material_folders_content_kind_idx").on(t.contentKind),
+    index("material_folders_system_key_idx").on(t.systemKey),
     check(
       "material_folders_scope_check",
       sql`${t.ownerScope} in ('school', 'teacher')`
@@ -496,6 +502,10 @@ export const lessonScheduleStudents = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.scheduleId, t.studentId] }),
+    /** Шаблон расписания тоже строго 1:1. */
+    uniqueIndex("lesson_schedule_students_one_per_schedule_uidx").on(
+      t.scheduleId
+    ),
     index("lesson_schedule_students_student_idx").on(t.studentId),
   ]
 );
@@ -568,6 +578,8 @@ export const lessonStudents = pgTable("lesson_students", {
     .references(() => students.id, { onDelete: "cascade" }),
 }, (t) => [
   primaryKey({ columns: [t.lessonId, t.studentId] }),
+  /** Одно занятие — один ученик (параллельные слоты = отдельные lesson_id). */
+  uniqueIndex("lesson_students_one_per_lesson_uidx").on(t.lessonId),
   index("lesson_students_student_idx").on(t.studentId),
 ]);
 

@@ -17,6 +17,8 @@ export type MaterialFolder = {
   sortOrder: number;
   /** null — до миграции / неизвестно; shared — смешанное наследие. */
   contentKind?: FolderContentKind | null;
+  /** Системный ключ (subject:… / grade:…); защищённые папки БЗ. */
+  systemKey?: string | null;
 };
 
 export type MaterialFolderKind =

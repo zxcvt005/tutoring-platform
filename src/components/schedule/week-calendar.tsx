@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/tooltip";
 import { appZonedParts, formatInAppZone } from "@/lib/app-time";
 import { formatTime, weekdayShort } from "@/lib/format";
+import { gradeLabel } from "@/lib/student-contacts";
 import type { TrialLessonPublic } from "@/lib/trial-lessons";
 import {
   DAY_END_HOUR,
@@ -198,10 +199,19 @@ export function WeekCalendar({
                               </span>
                             ) : null}
                           </div>
-                          <div className="truncate text-sm">
+                            <div className="truncate text-sm">
                             {trialById.get(l.id)?.prospectName ??
                               lessonParticipantsLabel(l, nameOf)}
                           </div>
+                          {!trialById.has(l.id) && l.studentIds[0] ? (
+                            <div className="truncate text-[0.65rem] text-muted-foreground">
+                              {gradeLabel(
+                                students.find((s) => s.id === l.studentIds[0])
+                                  ?.grade
+                              )}
+                              {l.subject ? ` · ${l.subject}` : ""}
+                            </div>
+                          ) : null}
                         </div>
                         <LessonStatusBadge status={l.status} />
                       </button>
@@ -265,6 +275,7 @@ export function WeekCalendar({
                 sameDay(new Date(l.startsAt), day)
               )}
               trialById={trialById}
+              students={students}
               nameOf={nameOf}
               gridHeight={gridHeight}
               dayStartMin={dayStartMin}
@@ -283,6 +294,7 @@ function DayColumn({
   day,
   lessons,
   trialById,
+  students,
   nameOf,
   gridHeight,
   dayStartMin,
@@ -293,6 +305,7 @@ function DayColumn({
   day: Date;
   lessons: Lesson[];
   trialById: Map<string, TrialLessonPublic>;
+  students: Student[];
   nameOf: (id: string) => string;
   gridHeight: number;
   dayStartMin: number;
@@ -379,6 +392,13 @@ function DayColumn({
                 ? trial.prospectName
                 : lessonParticipantsLabel(l, nameOf)}
             </div>
+            {!trial && l.studentIds[0] ? (
+              <div className="truncate text-[0.58rem] opacity-80">
+                {gradeLabel(
+                  students.find((s) => s.id === l.studentIds[0])?.grade
+                )}
+              </div>
+            ) : null}
             {trial ? (
               <div className="truncate text-[0.6rem] font-semibold tracking-wide uppercase opacity-80">
                 Пробный

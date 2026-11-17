@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -24,10 +23,15 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { fromAppDateTimeLocalValue } from "@/lib/app-time";
 import { attendanceStatusLabel } from "@/lib/format";
+import {
+  describeClassFilterEmpty,
+  filterMaterialsForStudentClass,
+} from "@/lib/folders/material-class-filter";
+import { gradeLabel } from "@/lib/student-contacts";
 import { lessonHasOccurred } from "@/lib/kafedra-today";
 import { LESSON_MARK_CONTENT_ERROR } from "@/lib/lesson-mark-requirements";
 import { topicsForLesson } from "@/lib/lesson-topics";
-import { lessonParticipantsLabel, uniqueStudentIds } from "@/lib/schedule";
+import { uniqueStudentIds } from "@/lib/schedule";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { AttendanceStatus, Lesson } from "@/lib/types";
 
@@ -79,31 +83,50 @@ function CompleteForm({
     sectionsForTeacher,
     publishedHomeworksForLessonCatalog,
   } = useDemoStore();
-  const topics = topicsForLessonCatalog(lesson.teacherId);
-  const participantIds = uniqueStudentIds(lesson.studentIds);
-  const [attendanceByStudent, setAttendanceByStudent] = useState<
-    Record<string, AttendanceStatus>
-  >(() => {
-    const initial: Record<string, AttendanceStatus> = {};
-    for (const id of participantIds) {
-      const att = data.attendances.find(
-        (a) => a.lessonId === lesson.id && a.studentId === id
-      );
-      if (
-        att &&
-        (att.status === "present" ||
-          att.status === "absent_excused" ||
-          att.status === "absent_unexcused")
-      ) {
-        initial[id] = att.status;
-      }
+
+  const studentId = uniqueStudentIds(lesson.studentIds)[0] ?? "";
+  const student = data.students.find((s) => s.id === studentId);
+  const subjectCtx = {
+    lessonSubject: lesson.subject,
+    directionId: lesson.directionId,
+    directions: data.learningDirections,
+  };
+
+  const allTopics = topicsForLessonCatalog(lesson.teacherId);
+  const topics = filterMaterialsForStudentClass(
+    allTopics,
+    data.materialFolders,
+    { ...subjectCtx, studentGrade: student?.grade }
+  );
+  const publishedTests = filterMaterialsForStudentClass(
+    publishedHomeworksForLessonCatalog(lesson.teacherId),
+    data.materialFolders,
+    { ...subjectCtx, studentGrade: student?.grade }
+  );
+  const emptyHint = describeClassFilterEmpty({
+    ...subjectCtx,
+    students: student ? [student] : [],
+    studentGrade: student?.grade,
+  });
+
+  const [attendance, setAttendance] = useState<AttendanceStatus | null>(() => {
+    const att = data.attendances.find(
+      (a) => a.lessonId === lesson.id && a.studentId === studentId
+    );
+    if (
+      att &&
+      (att.status === "present" ||
+        att.status === "absent_excused" ||
+        att.status === "absent_unexcused")
+    ) {
+      return att.status;
     }
-    return initial;
+    return null;
   });
   const [pickedTopics, setPickedTopics] = useState<
     { topicId?: string | null; title: string }[]
   >(() =>
-    topicsForLesson(lesson, topics).map((t) => ({
+    topicsForLesson(lesson, allTopics).map((t) => ({
       topicId: t.topicId ?? null,
       title: t.title,
     }))
@@ -112,7 +135,6 @@ function CompleteForm({
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [topicPick, setTopicPick] = useState("");
-
   const [homeworkIds, setHomeworkIds] = useState<string[]>(() =>
     data.homeworkAssignments
       .filter(
@@ -120,35 +142,19 @@ function CompleteForm({
           a.sourceKind !== "theory" &&
           a.sourceKind !== "intensive" &&
           a.lessonId === lesson.id &&
-          participantIds.includes(a.studentId)
+          a.studentId === studentId
       )
       .map((a) => a.homeworkId)
       .filter((id, i, arr) => arr.indexOf(id) === i)
   );
   const [homeworkPick, setHomeworkPick] = useState("");
   const [dueAt, setDueAt] = useState("");
-  const [assignMode, setAssignMode] = useState<"present" | "selected">(
-    "present"
-  );
-  const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const saveLock = useRef(false);
 
-  const nameOf = (id: string) =>
-    data.students.find((s) => s.id === id)?.fullName ?? "Ученик";
   const sections = sectionsForTeacher(lesson.teacherId);
-  const publishedTests = publishedHomeworksForLessonCatalog(lesson.teacherId);
-
-  const presentIds = participantIds.filter(
-    (id) => attendanceByStudent[id] === "present"
-  );
-
-  function toggleStudent(id: string) {
-    setSelectedStudents((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
-  }
+  const studentName = student?.fullName ?? "Ученик";
 
   function addPickedTopic(id: string) {
     const topic = topics.find((t) => t.id === id);
@@ -162,7 +168,7 @@ function CompleteForm({
   }
 
   function save() {
-    if (saveLock.current || saving) return;
+    if (saveLock.current || saving || !studentId) return;
     const nextTopics = [...pickedTopics];
     if (creatingTopic) {
       if (!newTitle.trim()) return;
@@ -177,14 +183,7 @@ function CompleteForm({
       nextTopics.push({ topicId: tid, title: newTitle.trim() });
     }
 
-    const studentIds =
-      assignMode === "present"
-        ? presentIds
-        : selectedStudents.filter((id) => participantIds.includes(id));
-    if (homeworkIds.length > 0 && studentIds.length === 0) return;
-
-    const marking = participantIds.filter((id) => attendanceByStudent[id]);
-    if (lessonHasOccurred(lesson) && marking.length > 0) {
+    if (lessonHasOccurred(lesson) && attendance) {
       if (nextTopics.length === 0) {
         setFormError(LESSON_MARK_CONTENT_ERROR);
         return;
@@ -192,10 +191,11 @@ function CompleteForm({
     }
     setFormError(null);
 
+    const due = dueAt ? fromAppDateTimeLocalValue(dueAt) : undefined;
     const homeworkAssigns = homeworkIds.map((homeworkId) => ({
       homeworkId,
-      studentIds: studentIds.length ? studentIds : participantIds,
-      dueAt: dueAt ? fromAppDateTimeLocalValue(dueAt) : undefined,
+      studentIds: [studentId],
+      dueAt: due,
     }));
 
     saveLock.current = true;
@@ -205,12 +205,9 @@ function CompleteForm({
         const result = await completeLesson({
           lessonId: lesson.id,
           topics: nextTopics,
-          attendances: participantIds
-            .filter((studentId) => attendanceByStudent[studentId])
-            .map((studentId) => ({
-              studentId,
-              status: attendanceByStudent[studentId]!,
-            })),
+          attendances: attendance
+            ? [{ studentId, status: attendance }]
+            : [],
           homeworkAssigns,
         });
         if (result.ok) onClose();
@@ -221,58 +218,46 @@ function CompleteForm({
     })();
   }
 
-  const canSave =
-    participantIds.length > 0 &&
-    (homeworkIds.length === 0 ||
-      (assignMode === "present"
-        ? presentIds.length > 0
-        : selectedStudents.length > 0));
+  if (!studentId) {
+    return (
+      <p className="text-sm text-destructive">
+        У занятия не указан ученик. Создайте отдельную запись расписания.
+      </p>
+    );
+  }
 
   return (
     <>
       <p className="text-sm text-muted-foreground">
-        {lessonParticipantsLabel(lesson, nameOf)}. Несколько тем и ДЗ не
-        списывают дополнительные занятия — посещение одно.
+        Индивидуальное занятие:{" "}
+        <span className="font-medium text-foreground">{studentName}</span>
+        {" · "}
+        {gradeLabel(student?.grade)}
+        . Параллельные уроки в том же слоте редактируются отдельно.
       </p>
       <div className="grid gap-3">
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           <Label>Посещаемость</Label>
-          <ul className="space-y-2 rounded-xl border border-border/80 p-2">
-            {participantIds.map((sid) => (
-              <li
-                key={sid}
-                className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <span className="text-sm font-medium">{nameOf(sid)}</span>
-                <Select
-                  value={attendanceByStudent[sid] ?? null}
-                  onValueChange={(v) =>
-                    v &&
-                    setAttendanceByStudent((prev) => ({
-                      ...prev,
-                      [sid]: v as AttendanceStatus,
-                    }))
-                  }
-                >
-                  <SelectTrigger className="w-full sm:w-44">
-                    <SelectValue placeholder="Ожидает отметки">
-                      {(v) =>
-                        attendanceStatusLabel[v as AttendanceStatus] ??
-                        "Ожидает отметки"
-                      }
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ATTENDANCE_OPTIONS.map((opt) => (
-                      <SelectItem key={opt} value={opt}>
-                        {attendanceStatusLabel[opt]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </li>
-            ))}
-          </ul>
+          <Select
+            value={attendance}
+            onValueChange={(v) => v && setAttendance(v as AttendanceStatus)}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Ожидает отметки">
+                {(v) =>
+                  attendanceStatusLabel[v as AttendanceStatus] ??
+                  "Ожидает отметки"
+                }
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {ATTENDANCE_OPTIONS.map((opt) => (
+                <SelectItem key={opt} value={opt}>
+                  {attendanceStatusLabel[opt]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="space-y-1.5">
@@ -315,19 +300,29 @@ function CompleteForm({
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {topics.map((t) => {
-                    const sec = sections.find((s) => s.id === t.sectionId);
-                    return (
-                      <SelectItem key={t.id} value={t.id}>
-                        <span className="flex flex-wrap items-center gap-x-2">
-                          <span>{sec ? `${sec.title}: ${t.title}` : t.title}</span>
-                          <span className="text-[0.65rem] text-muted-foreground">
-                            {t.libraryScope === "school" ? "Общая" : "Собственная"}
+                  {topics.length === 0 ? (
+                    <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                      {emptyHint}
+                    </div>
+                  ) : (
+                    topics.map((t) => {
+                      const sec = sections.find((s) => s.id === t.sectionId);
+                      return (
+                        <SelectItem key={t.id} value={t.id}>
+                          <span className="flex flex-wrap items-center gap-x-2">
+                            <span>
+                              {sec ? `${sec.title}: ${t.title}` : t.title}
+                            </span>
+                            <span className="text-[0.65rem] text-muted-foreground">
+                              {t.libraryScope === "school"
+                                ? "Общая"
+                                : "Собственная"}
+                            </span>
                           </span>
-                        </span>
-                      </SelectItem>
-                    );
-                  })}
+                        </SelectItem>
+                      );
+                    })
+                  )}
                 </SelectContent>
               </Select>
               <button
@@ -351,9 +346,6 @@ function CompleteForm({
                 onChange={(e) => setNewDesc(e.target.value)}
                 placeholder="Описание (необязательно)"
               />
-              <p className="text-xs text-muted-foreground">
-                Тема появится в блоке «Без раздела» — потом можно перенести.
-              </p>
               <button
                 type="button"
                 className="text-sm text-muted-foreground underline-offset-2 hover:underline"
@@ -366,10 +358,10 @@ function CompleteForm({
         </div>
 
         <div className="space-y-3 rounded-xl border border-border/80 p-3">
-          <Label>Домашние задания</Label>
+          <Label>Домашнее задание</Label>
           {homeworkIds.length === 0 ? (
             <p className="text-xs text-muted-foreground">
-              Необязательно. Если на занятии не было ДЗ, оставьте поле пустым.
+              Необязательно. Назначается только этому ученику.
             </p>
           ) : (
             <ul className="space-y-1">
@@ -379,7 +371,11 @@ function CompleteForm({
                   className="flex items-center justify-between gap-2 text-sm"
                 >
                   <span>
-                    {publishedTests.find((h) => h.id === id)?.title ?? "Тест"}
+                    {publishedTests.find((h) => h.id === id)?.title ??
+                      publishedHomeworksForLessonCatalog(lesson.teacherId).find(
+                        (h) => h.id === id
+                      )?.title ??
+                      "Тест"}
                   </span>
                   <Button
                     type="button"
@@ -397,7 +393,7 @@ function CompleteForm({
           )}
           {publishedTests.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Нет опубликованных тестов.{" "}
+              {emptyHint}{" "}
               <Link
                 href="/kafedra/tests"
                 className="font-medium underline-offset-2 hover:underline"
@@ -439,74 +435,15 @@ function CompleteForm({
               </SelectContent>
             </Select>
           )}
-
           {homeworkIds.length > 0 ? (
-            <>
-              <div className="space-y-2">
-                <Label>Кому назначить</Label>
-                <div className="flex flex-wrap gap-3 text-sm">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      checked={assignMode === "present"}
-                      onChange={() => setAssignMode("present")}
-                    />
-                    Всем присутствовавшим ({presentIds.length})
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      checked={assignMode === "selected"}
-                      onChange={() => {
-                        setAssignMode("selected");
-                        setSelectedStudents(presentIds);
-                      }}
-                    />
-                    Выбранным
-                  </label>
-                </div>
-                {assignMode === "selected" ? (
-                  <ul className="space-y-1.5 rounded-lg border border-border/70 p-2">
-                    {participantIds.map((sid) => {
-                      const present = attendanceByStudent[sid] === "present";
-                      return (
-                        <li key={sid}>
-                          <label className="flex items-center gap-2 text-sm">
-                            <Checkbox
-                              checked={selectedStudents.includes(sid)}
-                              onCheckedChange={() => toggleStudent(sid)}
-                            />
-                            <span>
-                              {nameOf(sid)}
-                              {!present ? (
-                                <span className="text-xs text-muted-foreground">
-                                  {" "}
-                                  (не отмечен как присутствующий)
-                                </span>
-                              ) : null}
-                            </span>
-                          </label>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : null}
-                {assignMode === "present" && presentIds.length === 0 ? (
-                  <p className="text-xs text-destructive">
-                    Нет присутствующих — выберите учеников вручную или отметьте
-                    посещаемость.
-                  </p>
-                ) : null}
-              </div>
-              <div className="space-y-1.5">
-                <Label>Срок (необязательно, по Москве)</Label>
-                <Input
-                  type="datetime-local"
-                  value={dueAt}
-                  onChange={(e) => setDueAt(e.target.value)}
-                />
-              </div>
-            </>
+            <div className="space-y-1.5">
+              <Label>Срок (необязательно, по Москве)</Label>
+              <Input
+                type="datetime-local"
+                value={dueAt}
+                onChange={(e) => setDueAt(e.target.value)}
+              />
+            </div>
           ) : null}
         </div>
       </div>
@@ -517,7 +454,7 @@ function CompleteForm({
         <Button type="button" variant="outline" onClick={onClose}>
           Отмена
         </Button>
-        <Button type="button" onClick={save} disabled={!canSave || saving}>
+        <Button type="button" onClick={save} disabled={saving}>
           {saving ? "Сохранение…" : "Сохранить"}
         </Button>
       </DialogFooter>

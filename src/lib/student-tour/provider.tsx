@@ -362,6 +362,7 @@ export function StudentTourProvider({
       upsertMaterialFolder: async () => blocked(noopMsg),
       deleteMaterialFolder: async () => blocked(noopMsg),
       moveMaterialFolder: async () => blocked(noopMsg),
+      pasteMaterialFolder: async () => blocked(noopMsg),
       reorderMaterialFolders: async () => blocked(noopMsg),
       moveMaterialToFolder: async () => blocked(noopMsg),
       upsertHomework: async () => blocked(noopMsg),

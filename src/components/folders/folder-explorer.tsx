@@ -82,9 +82,19 @@ export type FolderExplorerProps = {
     id: string,
     targetFolderId: string | null
   ) => Promise<void>;
+  onCopyFolder?: (id: string) => void;
+  onPasteFolder?: () => Promise<void>;
+  canPasteFolder?: boolean;
   onOpenMaterial?: (kind: string, id: string) => void;
   renderMaterialActions?: (item: FolderExplorerItem) => ReactNode;
 };
+
+function isSystemFolderItem(
+  folders: MaterialFolder[],
+  id: string
+): boolean {
+  return Boolean(folders.find((f) => f.id === id)?.systemKey);
+}
 
 const DND_MIME = "application/x-neodin-folder-item";
 
@@ -130,6 +140,9 @@ export function FolderExplorer({
   onDeleteFolder,
   onMoveFolder,
   onMoveMaterial,
+  onCopyFolder,
+  onPasteFolder,
+  canPasteFolder = false,
   onOpenMaterial,
   renderMaterialActions,
 }: FolderExplorerProps) {
@@ -187,6 +200,7 @@ export function FolderExplorer({
 
   function canDropOnFolder(targetFolderId: string | null, payload: DragPayload) {
     if (payload.kind === "folder") {
+      if (isSystemFolderItem(folders, payload.id)) return false;
       if (wouldCreateFolderCycle(folders, payload.id, targetFolderId)) {
         return false;
       }
@@ -202,6 +216,9 @@ export function FolderExplorer({
     payload: DragPayload
   ) {
     if (!canEdit) return;
+    if (payload.kind === "folder" && isSystemFolderItem(folders, payload.id)) {
+      return;
+    }
     if (!canDropOnFolder(targetFolderId, payload)) return;
     setActionBusy(true);
     try {
@@ -382,17 +399,30 @@ export function FolderExplorer({
             </nav>
 
             {canEdit ? (
-              <Button
-                type="button"
-                size="sm"
-                disabled={locked}
-                onClick={() => {
-                  setCreateTitle("");
-                  setCreateOpen(true);
-                }}
-              >
-                Новая папка
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={locked}
+                  onClick={() => {
+                    setCreateTitle("");
+                    setCreateOpen(true);
+                  }}
+                >
+                  Новая папка
+                </Button>
+                {onPasteFolder ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={locked || !canPasteFolder}
+                    onClick={() => void onPasteFolder()}
+                  >
+                    Вставить
+                  </Button>
+                ) : null}
+              </div>
             ) : null}
           </div>
 
@@ -484,6 +514,8 @@ export function FolderExplorer({
               <ul className="divide-y divide-border/60">
                 {sortedItems.map((item) => {
                   const isFolder = item.kind === "folder";
+                  const systemFolder =
+                    isFolder && isSystemFolderItem(folders, item.id);
                   const kindLabel = materialFolderKindLabel(
                     (isFolder ? "folder" : item.kind) as MaterialFolderKind
                   );
@@ -495,9 +527,9 @@ export function FolderExplorer({
                         "flex flex-wrap items-center gap-2 px-3 py-2.5 transition-colors",
                         dropHighlight === rowKey && isFolder && "bg-[#3166F0]/8"
                       )}
-                      draggable={canEdit && !locked}
+                      draggable={canEdit && !locked && !systemFolder}
                       onDragStart={(e) => {
-                        if (!canEdit) return;
+                        if (!canEdit || systemFolder) return;
                         setDrag(e, { kind: item.kind, id: item.id });
                       }}
                       onDragEnd={() => setDropHighlight(null)}
@@ -571,20 +603,35 @@ export function FolderExplorer({
                               <MoreHorizontal className="size-4" />
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="min-w-40">
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  setRenameTarget(item);
-                                  setRenameTitle(item.title);
-                                }}
-                              >
-                                Переименовать
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                onClick={() => setDeleteTarget(item)}
-                              >
-                                Удалить
-                              </DropdownMenuItem>
+                              {isSystemFolderItem(folders, item.id) ? (
+                                <DropdownMenuItem disabled>
+                                  Системная папка
+                                </DropdownMenuItem>
+                              ) : (
+                                <>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setRenameTarget(item);
+                                      setRenameTitle(item.title);
+                                    }}
+                                  >
+                                    Переименовать
+                                  </DropdownMenuItem>
+                                  {onCopyFolder ? (
+                                    <DropdownMenuItem
+                                      onClick={() => onCopyFolder(item.id)}
+                                    >
+                                      Копировать
+                                    </DropdownMenuItem>
+                                  ) : null}
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => setDeleteTarget(item)}
+                                  >
+                                    Удалить
+                                  </DropdownMenuItem>
+                                </>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         ) : null}

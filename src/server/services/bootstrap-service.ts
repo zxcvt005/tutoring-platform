@@ -568,6 +568,52 @@ export async function buildBootstrap(
     sortOrder: t.sortOrder,
   }));
 
+  // Системные папки БЗ: школа + пространства преподавателей в снимке.
+  try {
+    const { ensureSystemKnowledgeFolders } = await import(
+      "@/server/services/folder-service"
+    );
+    if (ctx.role === "director" || ctx.role === "assistant") {
+      await ensureSystemKnowledgeFolders(db, orgId, {
+        ownerScope: "school",
+        teacherId: null,
+      });
+      for (const t of teacherRows) {
+        await ensureSystemKnowledgeFolders(db, orgId, {
+          ownerScope: "teacher",
+          teacherId: t.id,
+        });
+      }
+    } else if (ctx.role === "teacher" && ctx.teacherId) {
+      await ensureSystemKnowledgeFolders(db, orgId, {
+        ownerScope: "teacher",
+        teacherId: ctx.teacherId,
+      });
+    }
+    if (ctx.role !== "press") {
+      let refreshed = await db
+        .select()
+        .from(materialFolders)
+        .where(eq(materialFolders.organizationId, orgId));
+      if (ctx.role === "teacher" && ctx.teacherId) {
+        const tid = ctx.teacherId;
+        refreshed = refreshed.filter(
+          (f) =>
+            f.ownerScope === "school" ||
+            (f.ownerScope === "teacher" && f.teacherId === tid)
+        );
+      } else if (ctx.role === "student") {
+        const myTeacherId = studentRows[0]?.primaryTeacherId ?? "";
+        refreshed = refreshed.filter(
+          (f) => f.ownerScope === "teacher" && f.teacherId === myTeacherId
+        );
+      }
+      folderRows = refreshed;
+    }
+  } catch {
+    // Колонка system_key может отсутствовать до миграции — не ломаем bootstrap.
+  }
+
   const mappedMaterialFolders = folderRows.map((f) => {
     const contentKind =
       f.contentKind === "topic" ||
@@ -588,6 +634,7 @@ export async function buildBootstrap(
         | "school"
         | "teacher",
       teacherId: f.teacherId,
+      systemKey: f.systemKey ?? null,
       parentId: f.parentId,
       title: f.title,
       sortOrder: f.sortOrder,
