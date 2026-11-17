@@ -7,7 +7,9 @@ import { notFound } from "next/navigation";
 import { EnterCabinetButton } from "@/components/admin/enter-cabinet-button";
 import { ProfileAccessPanel } from "@/components/admin/profile-access-panel";
 import { PageHeader } from "@/components/layout/page-header";
+import { StudentAvailabilityPanel } from "@/components/students/student-availability-panel";
 import { StudentBalancePanel } from "@/components/students/student-balance-panel";
+import { StudentQuestionnaireSections } from "@/components/students/student-questionnaire-sections";
 import {
   HomeworkAssignmentStatusBadge,
   LessonStatusBadge,
@@ -23,12 +25,7 @@ import {
 } from "@/components/ui/table";
 import { TariffBalanceNotice } from "@/components/tariff-balance-notice";
 import { formatDateTime, formatDueAt } from "@/lib/format";
-import {
-  gradeLabel,
-  phoneHref,
-  telegramDisplay,
-  telegramHref,
-} from "@/lib/student-contacts";
+import { gradeLabel } from "@/lib/student-contacts";
 import { getAssignmentTitle } from "@/lib/tests/helpers";
 import { useDemoStore } from "@/lib/store/demo-store";
 
@@ -140,146 +137,114 @@ export function StudentDetail({
         />
       ) : null}
 
-      <section className="grid gap-4 lg:grid-cols-3">
-        <div className="panel space-y-3 p-5 lg:col-span-1">
-          <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
-            Профиль
-          </p>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between gap-2">
-              <span className="text-muted-foreground">Статус</span>
-              <PersonStatusBadge status={student.status} />
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-muted-foreground">Класс</span>
-              <span>{gradeLabel(student.grade)}</span>
-            </div>
-            {mode === "kafedra" ? (
-              <>
-                {directionBalances.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    Баланс по направлениям появится после покупки занятий.
-                  </p>
-                ) : (
-                  <div className="space-y-1.5">
-                    <p className="text-muted-foreground">Баланс занятий</p>
-                    {directionBalances.map((b) => (
-                      <div
-                        key={b.directionId}
-                        className="flex justify-between gap-2 tabular-nums"
-                      >
-                        <span>
-                          {b.directionName ?? b.directionSlug ?? "—"}
-                        </span>
-                        <span className="font-medium">{b.balance}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <TariffBalanceNotice
-                  remaining={minBalance}
-                  packageStatus={packageStatusFromBalance(minBalance)}
-                />
-              </>
-            ) : null}
-            {telegramDisplay(student.telegram) ? (
-              <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground">Telegram</span>
-                {telegramHref(student.telegram) ? (
-                  <a
-                    href={telegramHref(student.telegram)!}
-                    className="underline-offset-2 hover:underline"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {telegramDisplay(student.telegram)}
-                  </a>
-                ) : (
-                  <span>{telegramDisplay(student.telegram)}</span>
-                )}
-              </div>
-            ) : null}
-            {student.phone?.trim() ? (
-              <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground">Телефон</span>
-                {phoneHref(student.phone) ? (
-                  <a
-                    href={phoneHref(student.phone)!}
-                    className="underline-offset-2 hover:underline"
-                  >
-                    {student.phone.trim()}
-                  </a>
-                ) : (
-                  <span>{student.phone.trim()}</span>
-                )}
-              </div>
-            ) : null}
-            {mode === "direkciya" ? (
-              <>
-                <div className="flex justify-between gap-2">
-                  <span className="text-muted-foreground">Email входа</span>
-                  <span>{student.accountEmail || "нет учётной записи"}</span>
-                </div>
-                {student.parentContacts?.trim() ? (
-                  <div>
-                    <p className="text-muted-foreground">Контакты родителей</p>
-                    <p className="mt-1 whitespace-pre-wrap">
-                      {student.parentContacts.trim()}
-                    </p>
-                  </div>
-                ) : null}
-              </>
-            ) : null}
-            {mode === "direkciya" && student.notes ? (
-              <p className="rounded-xl bg-muted/40 px-3 py-2 text-muted-foreground">
-                {student.notes}
-              </p>
-            ) : null}
+      {mode === "direkciya" ? (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-display text-xl font-semibold tracking-tight text-[#5B4A63]">
+              Анкета регистрации
+            </h2>
+            <PersonStatusBadge status={student.status} />
           </div>
+          <StudentQuestionnaireSections
+            student={student}
+            teacherName={teacher?.fullName}
+          />
+          <StudentAvailabilityPanel
+            studentId={student.id}
+            canEdit
+          />
         </div>
+      ) : (
+        <section className="grid gap-4 lg:grid-cols-3">
+          <div className="panel space-y-3 p-5 lg:col-span-1">
+            <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
+              Профиль
+            </p>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">Статус</span>
+                <PersonStatusBadge status={student.status} />
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">Класс</span>
+                <span>{gradeLabel(student.grade)}</span>
+              </div>
+              {directionBalances.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Баланс по направлениям появится после покупки занятий.
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  <p className="text-muted-foreground">Баланс занятий</p>
+                  {directionBalances.map((b) => (
+                    <div
+                      key={b.directionId}
+                      className="flex justify-between gap-2 tabular-nums"
+                    >
+                      <span>
+                        {b.directionName ?? b.directionSlug ?? "—"}
+                      </span>
+                      <span className="font-medium">{b.balance}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <TariffBalanceNotice
+                remaining={minBalance}
+                packageStatus={packageStatusFromBalance(minBalance)}
+              />
+            </div>
+          </div>
+          <div className="lg:col-span-2">
+            <StudentAvailabilityPanel
+              studentId={student.id}
+              canEdit={false}
+            />
+          </div>
+        </section>
+      )}
 
-        <div className="space-y-3 lg:col-span-2">
-          <h2 className="font-display text-xl font-semibold tracking-tight">
-            Домашние задания
-          </h2>
-          {assignments.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Пока нет назначений.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Задание</TableHead>
-                  <TableHead>Срок</TableHead>
-                  <TableHead>Статус</TableHead>
-                  <TableHead>Балл</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {assignments.map((a) => {
-                  const hw = data.homeworks.find((h) => h.id === a.homeworkId);
-                  return (
-                    <TableRow key={a.id}>
-                      <TableCell className="font-medium">
-                        {getAssignmentTitle(a, hw)}
-                      </TableCell>
-                      <TableCell>{formatDueAt(a.dueAt)}</TableCell>
-                      <TableCell>
-                        <HomeworkAssignmentStatusBadge status={a.status} />
-                      </TableCell>
-                      <TableCell className="tabular-nums">
-                        {a.score != null
-                          ? `${a.score}/${a.maxScore ?? "—"}`
-                          : a.status === "completed"
-                            ? "ждёт проверки"
-                            : "—"}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
-        </div>
+      <section className="space-y-3">
+        <h2 className="font-display text-xl font-semibold tracking-tight">
+          Домашние задания
+        </h2>
+        {assignments.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Пока нет назначений.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Задание</TableHead>
+                <TableHead>Срок</TableHead>
+                <TableHead>Статус</TableHead>
+                <TableHead>Балл</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {assignments.map((a) => {
+                const hw = data.homeworks.find((h) => h.id === a.homeworkId);
+                return (
+                  <TableRow key={a.id}>
+                    <TableCell className="font-medium">
+                      {getAssignmentTitle(a, hw)}
+                    </TableCell>
+                    <TableCell>{formatDueAt(a.dueAt)}</TableCell>
+                    <TableCell>
+                      <HomeworkAssignmentStatusBadge status={a.status} />
+                    </TableCell>
+                    <TableCell className="tabular-nums">
+                      {a.score != null
+                        ? `${a.score}/${a.maxScore ?? "—"}`
+                        : a.status === "completed"
+                          ? "ждёт проверки"
+                          : "—"}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
       </section>
 
       <section className="space-y-3">

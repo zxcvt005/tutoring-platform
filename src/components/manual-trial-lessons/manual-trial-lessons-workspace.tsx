@@ -451,6 +451,7 @@ export function ManualTrialLessonsWorkspace({
                   row.hoursPerWeek,
                   row.ratePerHourRub
                 );
+                const linked = Boolean(row.trialLessonId);
                 return (
                   <ExpandableTableRow
                     key={row.id}
@@ -461,8 +462,15 @@ export function ManualTrialLessonsWorkspace({
                       <Input
                         type="date"
                         value={row.lessonDate}
-                        className="h-7 border-transparent bg-transparent px-1 text-[0.78rem] shadow-none focus-visible:border-input focus-visible:bg-background"
+                        readOnly={linked}
+                        title={
+                          linked
+                            ? "Дата из сущности пробного урока Пресса"
+                            : undefined
+                        }
+                        className="h-7 border-transparent bg-transparent px-1 text-[0.78rem] shadow-none focus-visible:border-input focus-visible:bg-background read-only:opacity-80"
                         onChange={(e) => {
+                          if (linked) return;
                           const lessonDate = e.target.value;
                           if (!lessonDate) return;
                           applyLocal(row.id, { lessonDate });
@@ -474,8 +482,15 @@ export function ManualTrialLessonsWorkspace({
                       <Input
                         type="time"
                         value={row.lessonTime}
-                        className="h-7 border-transparent bg-transparent px-1 text-[0.78rem] shadow-none focus-visible:border-input focus-visible:bg-background"
+                        readOnly={linked}
+                        title={
+                          linked
+                            ? "Время из сущности пробного урока Пресса"
+                            : undefined
+                        }
+                        className="h-7 border-transparent bg-transparent px-1 text-[0.78rem] shadow-none focus-visible:border-input focus-visible:bg-background read-only:opacity-80"
                         onChange={(e) => {
+                          if (linked) return;
                           const lessonTime = e.target.value;
                           if (!lessonTime) return;
                           applyLocal(row.id, { lessonTime });
@@ -534,11 +549,21 @@ export function ManualTrialLessonsWorkspace({
                       <Input
                         value={row.name}
                         placeholder="Имя"
-                        className="h-7 border-transparent bg-transparent px-1 shadow-none focus-visible:border-input focus-visible:bg-background"
-                        onChange={(e) => onTextChange(row.id, "name", e)}
-                        onBlur={(e) =>
-                          queueSave(row.id, { name: e.target.value }, true)
+                        readOnly={linked}
+                        title={
+                          linked
+                            ? "Имя из сущности пробного урока Пресса"
+                            : undefined
                         }
+                        className="h-7 border-transparent bg-transparent px-1 shadow-none focus-visible:border-input focus-visible:bg-background read-only:opacity-80"
+                        onChange={(e) => {
+                          if (linked) return;
+                          onTextChange(row.id, "name", e);
+                        }}
+                        onBlur={(e) => {
+                          if (linked) return;
+                          queueSave(row.id, { name: e.target.value }, true);
+                        }}
                       />
                     </TableCell>
                     <TableCell className="p-1.5">
@@ -650,8 +675,21 @@ export function ManualTrialLessonsWorkspace({
                         size="icon-sm"
                         variant="ghost"
                         className="size-7 text-muted-foreground hover:text-destructive"
-                        aria-label="Удалить запись"
-                        onClick={() => setDeleteTarget(row)}
+                        aria-label={
+                          linked
+                            ? "Строка связана с пробным уроком"
+                            : "Удалить запись"
+                        }
+                        disabled={linked}
+                        title={
+                          linked
+                            ? "Связанная строка удаляется вместе с отменой сущности в «Пробные уроки» (CRM-данные сохраняются при SET NULL)"
+                            : undefined
+                        }
+                        onClick={() => {
+                          if (linked) return;
+                          setDeleteTarget(row);
+                        }}
                       >
                         <Trash2 className="size-3.5" />
                       </Button>

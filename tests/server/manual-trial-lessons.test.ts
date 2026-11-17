@@ -187,7 +187,7 @@ describe("manual trial lessons (Дирекция «Пробные уроки»)"
     expect(after.find((r) => r.id === created.id)?.name).toBe(first.name);
   });
 
-  it("forbids non-director roles", async () => {
+  it("forbids student role but allows press", async () => {
     const t = await createTestDb();
     close = t.close;
     const student = await asRole(t.db, "s1@demo.local");
@@ -198,8 +198,11 @@ describe("manual trial lessons (Дирекция «Пробные уроки»)"
       code: "forbidden",
     });
     const press = await asRole(t.db, "press@demo.local");
-    await expect(listManualTrialLessons(t.db, press)).rejects.toMatchObject({
-      code: "forbidden",
-    });
+    const listed = await listManualTrialLessons(t.db, press);
+    expect(Array.isArray(listed)).toBe(true);
+    const created = await createManualTrialLesson(t.db, press);
+    expect(created.id).toBeTruthy();
+    expect(created.trialLessonId).toBeNull();
   });
 });
+

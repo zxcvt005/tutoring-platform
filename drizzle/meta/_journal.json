@@ -379,6 +379,13 @@
       "when": 1797700000000,
       "tag": "0054_student_onboarding_availability",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1797800000000,
+      "tag": "0055_manual_trial_link_trial_lesson",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 
+import { appDateKey, appTimeHm } from "@/lib/app-time";
 import {
   type ManualTrialLesson,
   type ManualTrialSource,
@@ -10,7 +11,7 @@ import {
 } from "@/lib/manual-trial-lessons";
 import type { AuthContext } from "@/server/authz/context";
 import { requireRoles } from "@/server/authz/require";
-import { manualTrialLessons } from "@/server/db/schema";
+import { manualTrialLessons, trialLessons } from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
 import { conflict, notFound, validationError } from "@/server/errors";
 
@@ -25,9 +26,14 @@ function newId() {
   return `mtl_${randomBytes(6).toString("hex")}`;
 }
 
+function requireTableEditor(ctx: AuthContext) {
+  requireRoles(ctx, ["director", "press"]);
+}
+
 function toRow(row: typeof manualTrialLessons.$inferSelect): ManualTrialLesson {
   return {
     id: row.id,
+    trialLessonId: row.trialLessonId ?? null,
     lessonDate: row.lessonDate,
     lessonTime: row.lessonTime,
     source: isManualTrialSource(row.source) ? row.source : null,
@@ -42,6 +48,116 @@ function toRow(row: typeof manualTrialLessons.$inferSelect): ManualTrialLesson {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+export type TrialSyncSource = {
+  id: string;
+  organizationId: string;
+  prospectName: string;
+  startsAt: Date;
+};
+
+/** Только имя / дата / время из сущности Press; остальные CRM-поля не трогаем. */
+export async function upsertManualTrialFromTrialLesson(
+  db: AppDb,
+  trial: TrialSyncSource
+): Promise<ManualTrialLesson> {
+  const name = trial.prospectName.trim().slice(0, MAX_NAME);
+  const lessonDate = appDateKey(trial.startsAt);
+  const lessonTime = appTimeHm(trial.startsAt);
+  const now = new Date();
+
+  const [existing] = await db
+    .select()
+    .from(manualTrialLessons)
+    .where(
+      and(
+        eq(manualTrialLessons.organizationId, trial.organizationId),
+        eq(manualTrialLessons.trialLessonId, trial.id)
+      )
+    )
+    .limit(1);
+
+  if (existing) {
+    await db
+      .update(manualTrialLessons)
+      .set({
+        name,
+        lessonDate,
+        lessonTime,
+        updatedAt: now,
+      })
+      .where(eq(manualTrialLessons.id, existing.id));
+    const [row] = await db
+      .select()
+      .from(manualTrialLessons)
+      .where(eq(manualTrialLessons.id, existing.id))
+      .limit(1);
+    if (!row) throw new Error("Не удалось обновить связанную строку таблицы");
+    return toRow(row);
+  }
+
+  const id = newId();
+  await db.insert(manualTrialLessons).values({
+    id,
+    organizationId: trial.organizationId,
+    trialLessonId: trial.id,
+    lessonDate,
+    lessonTime,
+    source: null,
+    name,
+    contact: "",
+    teacher: null,
+    attended: false,
+    purchased: false,
+    hoursPerWeek: null,
+    ratePerHourRub: null,
+    comment: "",
+    createdAt: now,
+    updatedAt: now,
+  });
+  const [row] = await db
+    .select()
+    .from(manualTrialLessons)
+    .where(eq(manualTrialLessons.id, id))
+    .limit(1);
+  if (!row) throw new Error("Не удалось создать связанную строку таблицы");
+  return toRow(row);
+}
+
+/**
+ * Для пробных уроков без строки в таблице — создать недостающие
+ * (безопасный backfill без дублей по trial_lesson_id).
+ */
+export async function ensureManualTrialsLinkedForOrg(
+  db: AppDb,
+  organizationId: string
+): Promise<number> {
+  const linked = await db
+    .select({ trialLessonId: manualTrialLessons.trialLessonId })
+    .from(manualTrialLessons)
+    .where(eq(manualTrialLessons.organizationId, organizationId));
+  const linkedIds = new Set(
+    linked.map((r) => r.trialLessonId).filter((id): id is string => Boolean(id))
+  );
+
+  const trials = await db
+    .select({
+      id: trialLessons.id,
+      organizationId: trialLessons.organizationId,
+      prospectName: trialLessons.prospectName,
+      startsAt: trialLessons.startsAt,
+    })
+    .from(trialLessons)
+    .where(eq(trialLessons.organizationId, organizationId));
+
+  let created = 0;
+  for (const trial of trials) {
+    if (linkedIds.has(trial.id)) continue;
+    await upsertManualTrialFromTrialLesson(db, trial);
+    created += 1;
+  }
+  return created;
 }
 
 function parseLessonDate(value: unknown): string {
@@ -132,7 +248,12 @@ export async function listManualTrialLessons(
   db: AppDb,
   ctx: AuthContext
 ): Promise<ManualTrialLesson[]> {
-  requireRoles(ctx, ["director"]);
+  requireTableEditor(ctx);
+  try {
+    await ensureManualTrialsLinkedForOrg(db, ctx.organizationId);
+  } catch {
+    // Колонка trial_lesson_id может отсутствовать до миграции 0055.
+  }
   const rows = await db
     .select()
     .from(manualTrialLessons)
@@ -145,12 +266,13 @@ export async function createManualTrialLesson(
   db: AppDb,
   ctx: AuthContext
 ): Promise<ManualTrialLesson> {
-  requireRoles(ctx, ["director"]);
+  requireTableEditor(ctx);
   const id = newId();
   const now = new Date();
   await db.insert(manualTrialLessons).values({
     id,
     organizationId: ctx.organizationId,
+    trialLessonId: null,
     lessonDate: todayIsoDate(),
     lessonTime: defaultManualTrialTime(now),
     source: null,
@@ -195,7 +317,7 @@ export async function updateManualTrialLesson(
   ctx: AuthContext,
   input: UpdateManualTrialLessonInput
 ): Promise<ManualTrialLesson> {
-  requireRoles(ctx, ["director"]);
+  requireTableEditor(ctx);
   const id = String(input.id ?? "").trim();
   if (!id) throw validationError("Не указан идентификатор записи");
   const expectedUpdatedAt = String(input.expectedUpdatedAt ?? "").trim();
@@ -221,20 +343,22 @@ export async function updateManualTrialLesson(
     );
   }
 
+  const linked = Boolean(existing.trialLessonId);
   const patch: Partial<typeof manualTrialLessons.$inferInsert> = {
     updatedAt: new Date(),
   };
 
-  if (input.lessonDate !== undefined) {
+  // Связанные строки: имя/дата/время только из сущности Press.
+  if (!linked && input.lessonDate !== undefined) {
     patch.lessonDate = parseLessonDate(input.lessonDate);
   }
-  if (input.lessonTime !== undefined) {
+  if (!linked && input.lessonTime !== undefined) {
     patch.lessonTime = parseLessonTime(input.lessonTime);
   }
   if (input.source !== undefined) {
     patch.source = parseOptionalSource(input.source);
   }
-  if (input.name !== undefined) {
+  if (!linked && input.name !== undefined) {
     patch.name = sanitizeText(input.name, MAX_NAME, "Имя");
   }
   if (input.contact !== undefined) {
@@ -282,12 +406,15 @@ export async function deleteManualTrialLesson(
   ctx: AuthContext,
   id: string
 ): Promise<{ id: string }> {
-  requireRoles(ctx, ["director"]);
+  requireTableEditor(ctx);
   const rowId = String(id ?? "").trim();
   if (!rowId) throw validationError("Не указан идентификатор записи");
 
   const [existing] = await db
-    .select({ id: manualTrialLessons.id })
+    .select({
+      id: manualTrialLessons.id,
+      trialLessonId: manualTrialLessons.trialLessonId,
+    })
     .from(manualTrialLessons)
     .where(
       and(
@@ -297,6 +424,11 @@ export async function deleteManualTrialLesson(
     )
     .limit(1);
   if (!existing) throw notFound("Запись не найдена");
+  if (existing.trialLessonId) {
+    throw conflict(
+      "Строка связана с пробным уроком Пресса. Удалите или отмените урок в разделе «Пробные уроки», либо очистите только ручные поля."
+    );
+  }
 
   await db
     .delete(manualTrialLessons)

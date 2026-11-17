@@ -3094,8 +3094,10 @@ export const settlementDocuments = pgTable(
 );
 
 /**
- * Ручные «Пробные уроки» (Дирекция).
- * Изолировано от Press trial_lessons, base_leads, учеников и расписания.
+ * CRM-таблица «Пробные уроки» (кабинет Пресса).
+ * Может быть связана с сущностью Press `trial_lessons` через trial_lesson_id:
+ * тогда имя/дата/время синхронизируются; остальные поля — только вручную.
+ * Не создаёт обычные занятия и не влияет на баланс/зарплату.
  */
 export const manualTrialLessons = pgTable(
   "manual_trial_lessons",
@@ -3104,6 +3106,10 @@ export const manualTrialLessons = pgTable(
     organizationId: text("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Связь с Press trial_lessons; null — ручная строка без сущности. */
+    trialLessonId: text("trial_lesson_id").references(() => trialLessons.id, {
+      onDelete: "set null",
+    }),
     /** Дата пробного урока (YYYY-MM-DD). */
     lessonDate: text("lesson_date").notNull(),
     /** Время пробного урока (HH:MM). */
@@ -3128,6 +3134,8 @@ export const manualTrialLessons = pgTable(
       t.organizationId,
       t.createdAt
     ),
+    uniqueIndex("manual_trial_lessons_trial_lesson_uidx").on(t.trialLessonId),
+    index("manual_trial_lessons_trial_lesson_idx").on(t.trialLessonId),
     check(
       "manual_trial_lessons_source_check",
       sql`${t.source} is null or ${t.source} in ('Профи', 'Авито', 'Реклама', 'Сарафан', 'Блог')`

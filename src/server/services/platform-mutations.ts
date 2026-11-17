@@ -436,6 +436,10 @@ export async function upsertStudent(
     student.parentContacts != null
       ? student.parentContacts.trim() || null
       : null;
+  const parentName =
+    student.parentName != null ? student.parentName.trim() || null : null;
+  const learningGoal =
+    student.learningGoal != null ? student.learningGoal.trim() || null : null;
   const values = {
     id,
     organizationId: ctx.organizationId,
@@ -444,7 +448,9 @@ export async function upsertStudent(
     contacts: student.contacts ?? null,
     telegram,
     phone,
+    parentName,
     parentContacts,
+    learningGoal,
     status: student.status === "archived" ? "active" : student.status,
     primaryTeacherId: student.teacherId || null,
     notes: student.notes ?? null,
@@ -461,7 +467,25 @@ export async function upsertStudent(
     ) {
       throw forbidden();
     }
-    await db.update(students).set(values).where(eq(students.id, id));
+    // Не затираем анкетные поля, если клиент их не прислал (старые формы).
+    await db
+      .update(students)
+      .set({
+        ...values,
+        parentName:
+          student.parentName !== undefined
+            ? parentName
+            : existing[0].parentName,
+        learningGoal:
+          student.learningGoal !== undefined
+            ? learningGoal
+            : existing[0].learningGoal,
+        parentContacts:
+          student.parentContacts !== undefined
+            ? parentContacts
+            : existing[0].parentContacts,
+      })
+      .where(eq(students.id, id));
     if (existing[0].userId && ctx.role === "director") {
       await db
         .update(users)

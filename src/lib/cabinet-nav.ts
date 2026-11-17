@@ -10,8 +10,6 @@ export const direkciyaNavItems: CabinetNavItem[] = [
   { href: "/direkciya/salaries", label: "Зарплаты" },
   { href: "/direkciya/knowledge", label: "База знаний" },
   { href: "/direkciya/zayavki", label: "Заявки" },
-  { href: "/direkciya/baza", label: "База" },
-  { href: "/direkciya/probnye-uroki", label: "Пробные уроки" },
   { href: "/direkciya/rnp-avito", label: "РНП Авито" },
   { href: "/direkciya/rashody", label: "Расходы" },
   { href: "/direkciya/quick-access", label: "Быстрый доступ" },
@@ -62,5 +60,7 @@ export const pressaNavItems: CabinetNavItem[] = [
   { href: "/pressa/students", label: "Ученики" },
   { href: "/pressa/teachers", label: "Преподаватели" },
   { href: "/pressa/trials", label: "Пробные уроки" },
+  { href: "/pressa/baza", label: "База" },
+  { href: "/pressa/probnye-uroki", label: "Таблица пробных" },
   { href: "/pressa/analytics", label: "Аналитика" },
 ];

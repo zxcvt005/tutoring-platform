@@ -90,7 +90,9 @@ type FormState = {
   phone: string;
   status: PersonStatus;
   teacherId: string;
+  parentName: string;
   parentContacts: string;
+  learningGoal: string;
   notes: string;
 };
 
@@ -101,7 +103,9 @@ const emptyForm = (teacherId: string): FormState => ({
   phone: "",
   status: "active",
   teacherId,
+  parentName: "",
   parentContacts: "",
+  learningGoal: "",
   notes: "",
 });
 
@@ -215,7 +219,9 @@ export function StudentsByTeacher({
       phone: student.phone ?? "",
       status: student.status,
       teacherId: student.teacherId,
+      parentName: student.parentName ?? "",
       parentContacts: student.parentContacts ?? "",
+      learningGoal: student.learningGoal ?? "",
       notes: student.notes ?? "",
     });
     setOpen(true);
@@ -234,7 +240,9 @@ export function StudentsByTeacher({
       phone: form.phone.trim() || null,
       status: form.status,
       teacherId,
+      parentName: form.parentName.trim() || null,
       parentContacts: form.parentContacts.trim() || null,
+      learningGoal: form.learningGoal.trim() || null,
       notes: form.notes.trim() || undefined,
     });
     if (!saved.ok) return;
@@ -847,22 +855,43 @@ export function StudentsByTeacher({
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Контакты родителей</Label>
+              <Label>ФИО родителя</Label>
+              <Input
+                value={form.parentName}
+                onChange={(e) =>
+                  setForm({ ...form, parentName: e.target.value })
+                }
+                placeholder="Как в анкете регистрации"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Контакт родителя (Telegram или телефон)</Label>
               <Textarea
                 value={form.parentContacts}
                 onChange={(e) =>
                   setForm({ ...form, parentContacts: e.target.value })
                 }
-                placeholder="Имя, телефон, Telegram…"
-                rows={3}
+                placeholder="Telegram или телефон"
+                rows={2}
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Заметки</Label>
+              <Label>Цель подготовки</Label>
+              <Textarea
+                value={form.learningGoal}
+                onChange={(e) =>
+                  setForm({ ...form, learningGoal: e.target.value })
+                }
+                placeholder="Из анкеты ученика"
+                rows={2}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Дополнительная информация</Label>
               <Textarea
                 value={form.notes}
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                placeholder="Внутренние заметки администрации"
+                placeholder="Из анкеты / внутренние заметки"
               />
             </div>
           </div>

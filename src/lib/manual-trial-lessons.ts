@@ -1,6 +1,6 @@
 /**
- * Справочники и типы модуля «Пробные уроки» (Дирекция).
- * Изолированное хранилище: не связано с «Базой», учениками и расписанием.
+ * Справочники и типы CRM-таблицы «Пробные уроки» (кабинет Пресса).
+ * Может ссылаться на сущность Press trial_lessons через trialLessonId.
  */
 
 import {
@@ -20,6 +20,8 @@ export { todayIsoDate };
 
 export type ManualTrialLesson = {
   id: string;
+  /** Связь с Press trial_lessons; null — ручная строка. */
+  trialLessonId: string | null;
   /** ISO date YYYY-MM-DD */
   lessonDate: string;
   /** HH:MM */

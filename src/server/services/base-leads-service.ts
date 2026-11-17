@@ -126,7 +126,7 @@ export async function listBaseLeads(
   db: AppDb,
   ctx: AuthContext
 ): Promise<BaseLead[]> {
-  requireRoles(ctx, ["director"]);
+  requireRoles(ctx, ["director", "press"]);
   const rows = await db
     .select()
     .from(baseLeads)
@@ -139,7 +139,7 @@ export async function createBaseLead(
   db: AppDb,
   ctx: AuthContext
 ): Promise<BaseLead> {
-  requireRoles(ctx, ["director"]);
+  requireRoles(ctx, ["director", "press"]);
   const id = newId();
   const now = new Date();
   await db.insert(baseLeads).values({
@@ -196,7 +196,7 @@ export async function updateBaseLead(
   ctx: AuthContext,
   input: UpdateBaseLeadInput
 ): Promise<BaseLead> {
-  requireRoles(ctx, ["director"]);
+  requireRoles(ctx, ["director", "press"]);
   const id = String(input.id ?? "").trim();
   if (!id) throw validationError("Не указан идентификатор записи");
   const expectedUpdatedAt = String(input.expectedUpdatedAt ?? "").trim();
@@ -279,7 +279,7 @@ export async function deleteBaseLead(
   ctx: AuthContext,
   id: string
 ): Promise<{ id: string }> {
-  requireRoles(ctx, ["director"]);
+  requireRoles(ctx, ["director", "press"]);
   const leadId = String(id ?? "").trim();
   if (!leadId) throw validationError("Не указан идентификатор записи");
 

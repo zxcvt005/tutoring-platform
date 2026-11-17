@@ -31,6 +31,7 @@ import {
   notFound,
   validationError,
 } from "@/server/errors";
+import { upsertManualTrialFromTrialLesson } from "@/server/services/manual-trial-lessons-service";
 
 function newId(prefix: string) {
   return `${prefix}_${randomBytes(6).toString("hex")}`;
@@ -298,6 +299,17 @@ export async function createTrialLesson(
     });
   });
 
+  try {
+    await upsertManualTrialFromTrialLesson(db, {
+      id,
+      organizationId: ctx.organizationId,
+      prospectName,
+      startsAt: start,
+    });
+  } catch {
+    // Таблица CRM / колонка связи могут отсутствовать до миграции 0055.
+  }
+
   return getTrialLesson(db, ctx, id);
 }
 
@@ -430,6 +442,18 @@ export async function updateTrialLesson(
       });
     }
   });
+
+  try {
+    const refreshed = await loadTrialInOrg(db, ctx, trialId);
+    await upsertManualTrialFromTrialLesson(db, {
+      id: refreshed.id,
+      organizationId: refreshed.organizationId,
+      prospectName: refreshed.prospectName,
+      startsAt: refreshed.startsAt,
+    });
+  } catch {
+    // CRM-таблица / колонка связи могут отсутствовать до миграции 0055.
+  }
 
   return getTrialLesson(db, ctx, trialId);
 }

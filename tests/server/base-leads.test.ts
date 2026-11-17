@@ -186,7 +186,7 @@ describe("base leads (Дирекция «База»)", () => {
     ).rejects.toMatchObject({ code: "validation_error" });
   });
 
-  it("forbids non-director roles", async () => {
+  it("forbids student role but allows press", async () => {
     const t = await createTestDb();
     close = t.close;
     const student = await asRole(t.db, "s1@demo.local");
@@ -197,9 +197,10 @@ describe("base leads (Дирекция «База»)", () => {
       code: "forbidden",
     });
     const press = await asRole(t.db, "press@demo.local");
-    await expect(listBaseLeads(t.db, press)).rejects.toMatchObject({
-      code: "forbidden",
-    });
+    const listed = await listBaseLeads(t.db, press);
+    expect(Array.isArray(listed)).toBe(true);
+    const created = await createBaseLead(t.db, press);
+    expect(created.id).toBeTruthy();
   });
 
   it("edits student/parent/teacher and keeps avitoUrl after label rename", async () => {
