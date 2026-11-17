@@ -262,9 +262,18 @@ export function BaseLeadsWorkspace({
   }
 
   async function addRow() {
+    if (creating) return;
     setCreating(true);
+    const idem =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `createBaseLead-${Date.now()}`;
     try {
-      const data = await apiCall<{ lead: BaseLead }>("createBaseLead");
+      const data = await apiCall<{ lead: BaseLead }>(
+        "createBaseLead",
+        {},
+        idem
+      );
       setRows((prev) => [...prev, data.lead]);
       markSaved();
     } catch (err) {

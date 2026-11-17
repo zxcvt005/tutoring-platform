@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useRef,
   useState,
 } from "react";
 import { toast } from "sonner";
@@ -60,6 +61,7 @@ export const StudentEnrollmentInvites = forwardRef<
   const [rows, setRows] = useState<EnrollmentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const creatingRef = useRef(false);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   const [createdMeta, setCreatedMeta] = useState<{
     createdAt: string;
@@ -89,14 +91,20 @@ export const StudentEnrollmentInvites = forwardRef<
   }, [reload]);
 
   const createInvite = useCallback(async () => {
+    if (creatingRef.current) return;
+    creatingRef.current = true;
     setCreating(true);
     setCopied(false);
+    const idem =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `enrollment-invite-${Date.now()}`;
     try {
       const created = await apiPlatform<{
         inviteUrl: string;
         createdAt: string;
         statusLabel: string;
-      }>("createStudentEnrollmentInvitation", {});
+      }>("createStudentEnrollmentInvitation", {}, idem);
       const url = absoluteInviteUrl(created.inviteUrl);
       setCreatedUrl(url);
       setCreatedMeta({
@@ -110,6 +118,7 @@ export const StudentEnrollmentInvites = forwardRef<
         err instanceof Error ? err.message : "Не удалось создать приглашение"
       );
     } finally {
+      creatingRef.current = false;
       setCreating(false);
     }
   }, [reload]);

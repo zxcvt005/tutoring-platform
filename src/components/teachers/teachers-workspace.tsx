@@ -170,8 +170,15 @@ export function TeachersWorkspace() {
     }
   }
 
+  function newTeacherClientId() {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      return `t_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+    }
+    return `t_${Math.random().toString(36).slice(2, 11)}`;
+  }
+
   function openCreate() {
-    setForm(toForm());
+    setForm({ ...toForm(), id: newTeacherClientId() });
     setOpen(true);
   }
 
@@ -191,42 +198,50 @@ export function TeachersWorkspace() {
       toast.error(e instanceof Error ? e.message : "Некорректная ставка");
       return;
     }
+    const teacherId = form.id ?? newTeacherClientId();
+    if (!form.id) setForm((f) => ({ ...f, id: teacherId }));
     setSaving(true);
     try {
-      const saved = await apiPlatform<{ id: string }>("upsertTeacher", {
-        id: form.id,
-        fullName: form.fullName.trim(),
-        avatarInitials: initialsFromName(form.fullName),
-        bio: form.bio.trim() || undefined,
-        subjects: form.subjects
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
-        specializations: form.specializations
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
-        phone: form.phone.trim() || undefined,
-        email: form.email.trim() || undefined,
-        startedAt: form.startedAt
-          ? new Date(form.startedAt).toISOString()
-          : undefined,
-        status: form.status,
-        lessonPrice: form.lessonPrice ? Number(form.lessonPrice) : undefined,
-        defaultDurationMin: form.defaultDurationMin
-          ? Number(form.defaultDurationMin)
-          : 60,
-        workDays: form.workDays
-          .split(",")
-          .map((s) => Number(s.trim()))
-          .filter((n) => n >= 1 && n <= 7),
-        workIntervals: start && end ? [{ start, end }] : undefined,
-        adminNotes: form.adminNotes.trim() || undefined,
-      });
+      const saved = await apiPlatform<{ id: string }>(
+        "upsertTeacher",
+        {
+          id: teacherId,
+          fullName: form.fullName.trim(),
+          avatarInitials: initialsFromName(form.fullName),
+          bio: form.bio.trim() || undefined,
+          subjects: form.subjects
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+          specializations: form.specializations
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+          phone: form.phone.trim() || undefined,
+          email: form.email.trim() || undefined,
+          startedAt: form.startedAt
+            ? new Date(form.startedAt).toISOString()
+            : undefined,
+          status: form.status,
+          lessonPrice: form.lessonPrice ? Number(form.lessonPrice) : undefined,
+          defaultDurationMin: form.defaultDurationMin
+            ? Number(form.defaultDurationMin)
+            : 60,
+          workDays: form.workDays
+            .split(",")
+            .map((s) => Number(s.trim()))
+            .filter((n) => n >= 1 && n <= 7),
+          workIntervals: start && end ? [{ start, end }] : undefined,
+          adminNotes: form.adminNotes.trim() || undefined,
+        },
+        `upsertTeacher:${teacherId}`
+      );
       await apiPlatform(
         "setTeacherPayRates",
         { teacherId: saved.id, rates },
-        crypto.randomUUID()
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `setTeacherPayRates:${saved.id}:${Date.now()}`
       );
       await reload();
       toast.success("Преподаватель сохранён");

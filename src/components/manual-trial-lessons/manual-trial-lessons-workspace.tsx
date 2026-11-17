@@ -273,10 +273,17 @@ export function ManualTrialLessonsWorkspace({
   }
 
   async function addRow() {
+    if (creating) return;
     setCreating(true);
+    const idem =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `createManualTrialLesson-${Date.now()}`;
     try {
       const data = await apiCall<{ lesson: ManualTrialLesson }>(
-        "createManualTrialLesson"
+        "createManualTrialLesson",
+        {},
+        idem
       );
       setRows((prev) => [...prev, data.lesson]);
       markSaved();

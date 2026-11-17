@@ -277,12 +277,23 @@ export async function materializeSchedule(
   return created;
 }
 
+/** Не чаще раза в минуту на org при bootstrap — снижает шторм при частых reload. */
+const MATERIALIZE_TTL_MS = 60_000;
+const lastMaterializeAt = new Map<string, number>();
+
 /** Материализует все активные шаблоны организации (вызывается из bootstrap). */
 export async function ensureOrgSchedulesMaterialized(
   db: AppDb,
   organizationId: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  options?: { force?: boolean }
 ) {
+  const last = lastMaterializeAt.get(organizationId) ?? 0;
+  if (!options?.force && Date.now() - last < MATERIALIZE_TTL_MS) {
+    return 0;
+  }
+  lastMaterializeAt.set(organizationId, Date.now());
+
   const rows = await db
     .select({ id: lessonSchedules.id })
     .from(lessonSchedules)

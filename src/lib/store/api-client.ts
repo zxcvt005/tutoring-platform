@@ -1,4 +1,5 @@
 import { cabinetHomeForRole } from "@/lib/auth/cabinets";
+import { trackClientRequest } from "@/lib/client-perf";
 import { clearDemoSkipAutoLogin } from "@/lib/store/demo-session";
 import type { DemoData } from "@/lib/types";
 
@@ -173,8 +174,10 @@ export async function apiBootstrap(): Promise<{
   data: DemoData;
   auth: BootstrapAuth;
 }> {
-  const res = await fetch("/api/bootstrap", { credentials: "include" });
-  return parseJson(res);
+  return trackClientRequest("bootstrap", async () => {
+    const res = await fetch("/api/bootstrap", { credentials: "include" });
+    return parseJson(res);
+  });
 }
 
 export async function apiTestQuestionImageUpload(
@@ -260,16 +263,18 @@ export async function apiPlatform<T = unknown>(
   payload?: unknown,
   idempotencyKey?: string
 ): Promise<T> {
-  const headers = await mutatingHeaders(
-    idempotencyKey ? { "idempotency-key": idempotencyKey } : undefined
-  );
-  const res = await fetch("/api/platform", {
-    method: "POST",
-    headers,
-    credentials: "include",
-    body: JSON.stringify({ action, payload }),
+  return trackClientRequest(`platform:${action}`, async () => {
+    const headers = await mutatingHeaders(
+      idempotencyKey ? { "idempotency-key": idempotencyKey } : undefined
+    );
+    const res = await fetch("/api/platform", {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: JSON.stringify({ action, payload }),
+    });
+    return parseJson(res);
   });
-  return parseJson(res);
 }
 
 export type PlatformApiCall = typeof apiPlatform;

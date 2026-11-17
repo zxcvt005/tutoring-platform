@@ -11,6 +11,7 @@ import {
   readJsonBody,
   requireAuth,
 } from "@/server/http/request";
+import { withServerTiming } from "@/server/observability/timing";
 import {
   createMockExam,
   deleteMockExam,
@@ -24,6 +25,43 @@ const bodySchema = z.object({
   payload: z.record(z.string(), z.unknown()).optional(),
 });
 
+/** Критические create/mutate: требуют Idempotency-Key с клиента (иначе без защиты). */
+const IDEMPOTENT_ACTIONS = new Set([
+  "upsertStudent",
+  "upsertTeacher",
+  "createStudentEnrollmentInvitation",
+  "upsertLesson",
+  "createRecurringSchedule",
+  "upsertHomework",
+  "publishHomework",
+  "createBaseLead",
+  "createManualTrialLesson",
+  "createQuickAccessLink",
+  "setAttendance",
+  "adminRefundLessonPayment",
+  "adminAdjustLessonBalance",
+  "createMockExam",
+  "submitHomeworkAssignment",
+  "reviewHomeworkAssignment",
+  "assignHomework",
+  "assignTheory",
+  "assignIntensive",
+  "saveToSchoolLibrary",
+  "markTheoryViewed",
+  "completeLesson",
+  "resetLessonConduct",
+  "studentRequestPayment",
+  "studentStartCheckout",
+  "createLessonCheckout",
+  "refreshLessonOrderPayment",
+  "assignTariff",
+  "setStudentPurchaseTariff",
+  "adminMarkPaymentPaid",
+  "adminRejectPayment",
+  "createTeacherPayout",
+  "setTeacherPayRates",
+]);
+
 export async function POST(request: Request) {
   try {
     assertMutatingRequest(request);
@@ -31,6 +69,30 @@ export async function POST(request: Request) {
     const raw = parseBody(bodySchema, await readJsonBody(request));
     const p = (raw.payload ?? {}) as Record<string, unknown>;
     const db = getDb();
+
+    return await withServerTiming(
+      {
+        route: "POST /api/platform",
+        action: raw.action,
+        role: ctx.role,
+        organizationId: ctx.organizationId,
+      },
+      async () => handlePlatformAction(request, ctx, db, raw.action, p)
+    );
+  } catch (err) {
+    return jsonError(err);
+  }
+}
+
+async function handlePlatformAction(
+  request: Request,
+  ctx: Awaited<ReturnType<typeof requireAuth>>,
+  db: ReturnType<typeof getDb>,
+  action: string,
+  p: Record<string, unknown>
+) {
+  try {
+    const raw = { action, payload: p };
 
     const run = async () => {
       switch (raw.action) {
@@ -437,29 +499,7 @@ export async function POST(request: Request) {
       }
     };
 
-    const idempotent = new Set([
-      "submitHomeworkAssignment",
-      "reviewHomeworkAssignment",
-      "assignHomework",
-      "assignTheory",
-      "assignIntensive",
-      "saveToSchoolLibrary",
-      "markTheoryViewed",
-      "completeLesson",
-      "resetLessonConduct",
-      "studentRequestPayment",
-      "studentStartCheckout",
-      "createLessonCheckout",
-      "refreshLessonOrderPayment",
-      "assignTariff",
-      "setStudentPurchaseTariff",
-      "adminMarkPaymentPaid",
-      "adminRejectPayment",
-      "createTeacherPayout",
-      "setTeacherPayRates",
-    ]);
-
-    if (idempotent.has(raw.action)) {
+    if (IDEMPOTENT_ACTIONS.has(raw.action)) {
       const out = await withIdempotency(
         db,
         ctx,

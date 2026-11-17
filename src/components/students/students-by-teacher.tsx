@@ -122,7 +122,6 @@ export function StudentsByTeacher({
     deleteStudent,
     studentsForTeacher,
     unassignedStudents,
-    reload,
   } = useDemoStore();
 
   const [teacherFilter, setTeacherFilter] = useState<string>(
@@ -142,6 +141,8 @@ export function StudentsByTeacher({
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [restoreBusyId, setRestoreBusyId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const enrollmentRef = useRef<StudentEnrollmentInvitesHandle>(null);
   const [inviteCreating, setInviteCreating] = useState(false);
 
@@ -197,16 +198,24 @@ export function StudentsByTeacher({
 
   const editable = mode === "direkciya" || mode === "kafedra";
 
+  function newStudentClientId() {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      return `s_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+    }
+    return `s_${Math.random().toString(36).slice(2, 11)}`;
+  }
+
   function openCreate() {
-    setForm(
-      emptyForm(
+    setForm({
+      ...emptyForm(
         mode === "kafedra"
           ? data.currentTeacherId
           : teacherFilter !== "all" && teacherFilter !== "unassigned"
             ? teacherFilter
             : (data.teachers[0]?.id ?? "")
-      )
-    );
+      ),
+      id: newStudentClientId(),
+    });
     setOpen(true);
   }
 
@@ -228,37 +237,47 @@ export function StudentsByTeacher({
   }
 
   async function save() {
-    if (!form.fullName.trim()) return;
-    const id =
-      form.id ?? `s_${Math.random().toString(36).slice(2, 9)}`;
-    const teacherId = form.teacherId;
-    const saved = await upsertStudent({
-      id,
-      fullName: form.fullName.trim(),
-      grade: form.grade || null,
-      telegram: form.telegram.trim() || null,
-      phone: form.phone.trim() || null,
-      status: form.status,
-      teacherId,
-      parentName: form.parentName.trim() || null,
-      parentContacts: form.parentContacts.trim() || null,
-      learningGoal: form.learningGoal.trim() || null,
-      notes: form.notes.trim() || undefined,
-    });
-    if (!saved.ok) return;
-    // Default list filter is «Без преподавателя»; after create with a teacher
-    // switch the filter so the new student is visible in the table.
-    const nextFilter = nextTeacherFilterAfterStudentSave({
-      mode,
-      listSection,
-      savedTeacherId: teacherId,
-      currentFilter: teacherFilter,
-    });
-    if (nextFilter) setTeacherFilter(nextFilter);
+    if (!form.fullName.trim() || savingRef.current) return;
+    const id = form.id ?? newStudentClientId();
     if (!form.id) {
-      toast.success("Ученик сохранён");
+      setForm((f) => ({ ...f, id }));
     }
-    setOpen(false);
+    const teacherId = form.teacherId;
+    const isCreate = !data.students.some((s) => s.id === id);
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const saved = await upsertStudent({
+        id,
+        fullName: form.fullName.trim(),
+        grade: form.grade || null,
+        telegram: form.telegram.trim() || null,
+        phone: form.phone.trim() || null,
+        status: form.status,
+        teacherId,
+        parentName: form.parentName.trim() || null,
+        parentContacts: form.parentContacts.trim() || null,
+        learningGoal: form.learningGoal.trim() || null,
+        notes: form.notes.trim() || undefined,
+      });
+      if (!saved.ok) return;
+      // Default list filter is «Без преподавателя»; after create with a teacher
+      // switch the filter so the new student is visible in the table.
+      const nextFilter = nextTeacherFilterAfterStudentSave({
+        mode,
+        listSection,
+        savedTeacherId: teacherId,
+        currentFilter: teacherFilter,
+      });
+      if (nextFilter) setTeacherFilter(nextFilter);
+      if (isCreate) {
+        toast.success("Ученик сохранён");
+      }
+      setOpen(false);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   }
 
   const teacherName = (id: string) =>
@@ -292,7 +311,6 @@ export function StudentsByTeacher({
       toast.success("Ученик переведён в архив");
       setArchiveFor(null);
       setOpen(false);
-      await reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Не удалось архивировать");
     } finally {
@@ -309,7 +327,6 @@ export function StudentsByTeacher({
         return;
       }
       toast.success("Ученик возвращён в работу");
-      await reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Не удалось вернуть");
     } finally {
@@ -338,7 +355,6 @@ export function StudentsByTeacher({
       setDeleteFor(null);
       setDeleteConfirmName("");
       setOpen(false);
-      await reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Не удалось удалить");
     } finally {
@@ -942,11 +958,20 @@ export function StudentsByTeacher({
               <span />
             )}
             <div className="flex gap-2">
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={saving}
+                onClick={() => setOpen(false)}
+              >
                 Отмена
               </Button>
-              <Button type="button" onClick={() => void save()}>
-                Сохранить
+              <Button
+                type="button"
+                onClick={() => void save()}
+                disabled={saving || !form.fullName.trim()}
+              >
+                {saving ? "Сохранение…" : "Сохранить"}
               </Button>
             </div>
           </DialogFooter>

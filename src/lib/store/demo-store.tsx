@@ -25,6 +25,8 @@ import {
   type AuthFeatures,
   type BootstrapAuth,
 } from "@/lib/store/api-client";
+import { reportClientError } from "@/lib/client-perf";
+import { createCoalescedAsync } from "@/lib/store/coalesce-async";
 import {
   createSerialAsyncQueue,
   demoSessionBootKey,
@@ -377,6 +379,33 @@ function newClientId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+type ReloadMode = "coalesce" | "skip";
+
+/** Действия, для которых ключ строится из payload.id (создание/обновление сущности). */
+const IDEMPOTENT_ENTITY_ACTIONS = new Set([
+  "upsertStudent",
+  "upsertTeacher",
+  "upsertLesson",
+  "upsertHomework",
+  "upsertTopic",
+  "upsertTopicSection",
+  "upsertMaterialFolder",
+  "createMockExam",
+]);
+
+function idempotencyKeyFor(
+  action: string,
+  payload: unknown,
+  explicit?: string
+): string | undefined {
+  if (explicit) return explicit;
+  if (!IDEMPOTENT_ENTITY_ACTIONS.has(action)) return undefined;
+  if (!payload || typeof payload !== "object") return undefined;
+  const id = (payload as { id?: unknown }).id;
+  if (typeof id !== "string" || !id) return undefined;
+  return `${action}:${id}`;
+}
+
 function upsertAttendanceRow(
   attendances: Attendance[],
   lessonId: string,
@@ -417,12 +446,17 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
   const prevBootKeyRef = useRef(bootKey);
   const pathnameRef = useRef(pathname);
 
-  const reload = useCallback(async () => {
+  const reloadImmediate = useCallback(async () => {
     const boot = await apiBootstrap();
     setData(boot.data);
     setAuth(boot.auth);
     return boot;
   }, []);
+
+  const reload = useMemo(
+    () => createCoalescedAsync(reloadImmediate, 280),
+    [reloadImmediate]
+  );
 
   const logout = useCallback(async () => {
     rememberDemoExplicitLogout();
@@ -483,9 +517,9 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        if (!cancelled) await reload();
+        if (!cancelled) await reloadImmediate();
       } catch (e) {
-        console.error(e);
+        reportClientError("demo-boot", e);
         if (!cancelled) {
           toast.error(
             e instanceof Error
@@ -501,14 +535,15 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
     // bootKey, not pathname: переход внутри кабинета не должен заново проверять сессию.
-  }, [bootKey, enqueueBoot, reload, router]);
+  }, [bootKey, enqueueBoot, reloadImmediate, router]);
 
   const run = useCallback(
     async (
       action: string,
       payload?: unknown,
       idem?: string,
-      patch?: (prev: DemoData) => DemoData
+      patch?: (prev: DemoData) => DemoData,
+      reloadMode: ReloadMode = "coalesce"
     ): Promise<OkResult> => {
       try {
         const result = await apiPlatform<{
@@ -519,17 +554,19 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
           archived?: boolean;
           testAssignmentId?: string | null;
           status?: string;
-        }>(action, payload, idem);
+        }>(action, payload, idempotencyKeyFor(action, payload, idem));
         if (patch) {
           setData((prev) => patch(prev));
         }
-        try {
-          await reload();
-        } catch (reloadErr) {
-          console.error(reloadErr);
-          toast.warning(
-            "Изменения сохранены, но не удалось обновить данные с сервера. Обновите страницу при необходимости."
-          );
+        if (reloadMode !== "skip") {
+          try {
+            await reload();
+          } catch (reloadErr) {
+            reportClientError("demo-reload", reloadErr);
+            toast.warning(
+              "Изменения сохранены, но не удалось обновить данные с сервера. Обновите страницу при необходимости."
+            );
+          }
         }
         return {
           ok: true,
@@ -593,15 +630,43 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       deleteTeacher: (id) => {
         void run("deleteTeacher", { id });
       },
-      upsertStudent: (student) => run("upsertStudent", student),
+      upsertStudent: (student) => {
+        const id = student.id ?? newClientId("s");
+        const next = { ...student, id };
+        return run(
+          "upsertStudent",
+          next,
+          `upsertStudent:${id}`,
+          (d) => {
+            const idx = d.students.findIndex((s) => s.id === id);
+            const merged = {
+              ...(idx >= 0 ? d.students[idx] : {}),
+              ...next,
+            } as Student;
+            const students =
+              idx === -1
+                ? [...d.students, merged]
+                : d.students.map((s, i) => (i === idx ? merged : s));
+            return { ...d, students };
+          }
+        );
+      },
       deleteStudent: (input) => run("deleteStudent", input),
       archiveStudent: (input) => run("archiveStudent", input),
       restoreStudent: (id) => run("restoreStudent", { id }),
-      upsertLesson: (lesson) =>
-        run("upsertLesson", lesson, undefined, (d) => ({
-          ...d,
-          lessons: patchLessonInData(d.lessons, lesson),
-        })),
+      upsertLesson: (lesson) => {
+        const id = lesson.id ?? newClientId("les");
+        const next = { ...lesson, id };
+        return run(
+          "upsertLesson",
+          next,
+          `upsertLesson:${id}`,
+          (d) => ({
+            ...d,
+            lessons: patchLessonInData(d.lessons, next),
+          })
+        );
+      },
       createRecurringSchedule: async (input) => {
         const r = await run("createRecurringSchedule", input);
         if (r.ok) {
@@ -650,7 +715,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
           try {
             await reload();
           } catch (reloadErr) {
-            console.error(reloadErr);
+            reportClientError("demo-reload", reloadErr);
             toast.warning(
               "Изменения сохранены, но не удалось обновить данные с сервера. Обновите страницу при необходимости."
             );
@@ -768,11 +833,18 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         toast.message("Используйте сдачу или проверку задания");
       },
       saveHomeworkDraft: async (id, answers, attemptNumber = 1, options) => {
-        const r = await run("saveHomeworkDraft", {
-          id,
-          answers,
-          attemptNumber,
-        });
+        const r = await run(
+          "saveHomeworkDraft",
+          { id, answers, attemptNumber },
+          undefined,
+          (d) => ({
+            ...d,
+            homeworkAssignments: d.homeworkAssignments.map((a) =>
+              a.id === id ? { ...a, answers } : a
+            ),
+          }),
+          "skip"
+        );
         if (r.ok && !options?.silent) toast.success("Черновик сохранён");
         return r;
       },
