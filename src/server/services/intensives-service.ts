@@ -367,7 +367,8 @@ export async function upsertIntensive(
     input.folderId !== undefined
       ? input.folderId
       : (existing?.folderId ?? null);
-  // Без folderId — legacy; при указании папки — только подраздел своего типа.
+  // Без folderId — корень библиотеки / legacy; любая папка своего пространства
+  // и contentKind допустима независимо от уровня вложенности.
   if (folderId) {
     const [folder] = await db
       .select()
@@ -386,11 +387,6 @@ export async function upsertIntensive(
       folder.teacherId !== teacherId
     ) {
       throw badRequest("Папка не найдена");
-    }
-    if (!folder.parentId) {
-      throw badRequest(
-        "Интенсив можно размещать только внутри подраздела, не в корне раздела"
-      );
     }
     const { folderAcceptsMaterialKind, normalizeFolderContentKind } =
       await import("@/lib/folders/material-folders");

@@ -48,7 +48,7 @@ describe("content sections CRUD + delete integrity", () => {
     return resolveAuthContext(db, session.rawToken);
   }
 
-  it("creates topic only in subsection and hard-deletes when no linked tests", async () => {
+  it("creates topic in first-level folder or subsection and hard-deletes when no linked tests", async () => {
     const t = await createTestDb();
     close = t.close;
     const anna = await login(t.db, "anna@example.com");
@@ -58,16 +58,19 @@ describe("content sections CRUD + delete integrity", () => {
       "topic"
     );
 
-    await expect(
-      upsertTopic(t.db, anna, {
-        teacherId: "t1",
-        folderId: root.id,
-        title: "В корне",
-        subject: "Физика",
-        description: "Нельзя",
-        status: "active",
-      })
-    ).rejects.toMatchObject({ status: 400 });
+    const inRootFolder = await upsertTopic(t.db, anna, {
+      teacherId: "t1",
+      folderId: root.id,
+      title: "В папке первого уровня",
+      subject: "Физика",
+      description: "Можно",
+      status: "active",
+    });
+    expect(
+      (
+        await t.db.select().from(topics).where(eq(topics.id, inRootFolder.id))
+      )[0]?.folderId
+    ).toBe(root.id);
 
     const topic = await upsertTopic(t.db, anna, {
       teacherId: "t1",
@@ -284,7 +287,7 @@ describe("content sections CRUD + delete integrity", () => {
     expect(gone).toBeUndefined();
   });
 
-  it("creates intensive in subsection and hard-deletes without assignments", async () => {
+  it("creates intensive in first-level folder or subsection and hard-deletes without assignments", async () => {
     const t = await createTestDb();
     close = t.close;
     const anna = await login(t.db, "anna@example.com");
@@ -294,16 +297,22 @@ describe("content sections CRUD + delete integrity", () => {
       "intensive"
     );
 
-    await expect(
-      upsertIntensive(t.db, anna, {
-        teacherId: "t1",
-        libraryScope: "teacher",
-        folderId: root.id,
-        title: "В корне",
-        description: "Нельзя",
-        testIds: [],
-      })
-    ).rejects.toMatchObject({ status: 400 });
+    const inRootFolder = await upsertIntensive(t.db, anna, {
+      teacherId: "t1",
+      libraryScope: "teacher",
+      folderId: root.id,
+      title: "В папке первого уровня",
+      description: "Можно",
+      testIds: [],
+    });
+    expect(
+      (
+        await t.db
+          .select()
+          .from(intensives)
+          .where(eq(intensives.id, inRootFolder.id))
+      )[0]?.folderId
+    ).toBe(root.id);
 
     const created = await upsertIntensive(t.db, anna, {
       teacherId: "t1",

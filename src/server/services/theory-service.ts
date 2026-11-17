@@ -376,8 +376,8 @@ export async function upsertTheory(
     input.folderId !== undefined
       ? input.folderId
       : (existing?.folderId ?? null);
-  // Без folderId — legacy/неразложенные; при указании папки — только подраздел
-  // своего contentKind (не корень раздела).
+  // Без folderId — корень библиотеки / legacy; любая существующая папка своего
+  // пространства и contentKind допустима независимо от уровня вложенности.
   if (folderId) {
     const [folder] = await db
       .select()
@@ -396,11 +396,6 @@ export async function upsertTheory(
       folder.teacherId !== teacherId
     ) {
       throw badRequest("Папка не найдена");
-    }
-    if (!folder.parentId) {
-      throw badRequest(
-        "Теорию можно размещать только внутри подраздела, не в корне раздела"
-      );
     }
     const { folderAcceptsMaterialKind, normalizeFolderContentKind } =
       await import("@/lib/folders/material-folders");

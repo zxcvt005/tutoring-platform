@@ -24,11 +24,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { canManageSchoolKnowledgeBase } from "@/lib/auth/school-knowledge";
-import {
-  folderMatchesSection,
-  isSubsectionFolder,
-  type MaterialsSection,
-} from "@/lib/folders/material-folders";
 import { formatDate } from "@/lib/format";
 import { isCatalogHomeworkPurpose } from "@/lib/homework/source-kind";
 import { apiPlatform } from "@/lib/store/api-client";
@@ -142,17 +137,6 @@ export function KnowledgeWorkspace({
     ]);
   }, [data.theories, data.homeworks, data.topics]);
 
-  const schoolFolders = useMemo(
-    () =>
-      (data.materialFolders ?? []).filter(
-        (folder) =>
-          folder.ownerScope === "school" &&
-          folder.teacherId == null &&
-          folderMatchesSection(folder, kind as MaterialsSection)
-      ),
-    [data.materialFolders, kind]
-  );
-
   if (auth && !canManageSchoolKnowledgeBase(auth.role)) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -167,24 +151,14 @@ export function KnowledgeWorkspace({
     );
   }
 
-  /** Папка создания: корень, текущий подраздел, либо ошибка для корня раздела. */
-  function resolveCreateFolderId(
-    materialKind: Kind
-  ): string | null | "invalid" {
+  /** Папка создания: текущая открытая папка любого уровня или корень. */
+  function resolveCreateFolderId(materialKind: Kind): string | null {
     if (kind !== materialKind) return null;
-    if (!currentFolderId) return null;
-    if (!isSubsectionFolder(schoolFolders, currentFolderId)) return "invalid";
     return currentFolderId;
   }
 
   function openNewTest() {
     const folderId = resolveCreateFolderId("test");
-    if (folderId === "invalid") {
-      toast.error(
-        "Сначала откройте подраздел (папку внутри раздела), затем создайте тест"
-      );
-      return;
-    }
     setEditingTest(null);
     setTestFolderId(folderId);
     setTestOwner({ teacherId: "", libraryScope: "school" });
@@ -203,12 +177,6 @@ export function KnowledgeWorkspace({
 
   function openNewTopic() {
     const folderId = resolveCreateFolderId("topic");
-    if (folderId === "invalid") {
-      toast.error(
-        "Сначала откройте подраздел (папку внутри раздела), затем создайте тему"
-      );
-      return;
-    }
     setTopicForm({
       id: undefined,
       teacherId: "",
@@ -225,24 +193,12 @@ export function KnowledgeWorkspace({
 
   function openNewTheory() {
     const folderId = resolveCreateFolderId("theory");
-    if (folderId === "invalid") {
-      toast.error(
-        "Сначала откройте подраздел (папку внутри раздела), затем создайте теорию"
-      );
-      return;
-    }
     const q = folderId ? `?folderId=${encodeURIComponent(folderId)}` : "";
     router.push(`${knowledgeBasePath}/theory/new${q}`);
   }
 
   function openNewIntensive() {
     const folderId = resolveCreateFolderId("intensive");
-    if (folderId === "invalid") {
-      toast.error(
-        "Сначала откройте подраздел (папку внутри раздела), затем создайте интенсив"
-      );
-      return;
-    }
     const q = folderId ? `?folderId=${encodeURIComponent(folderId)}` : "";
     router.push(`${knowledgeBasePath}/intensives/new${q}`);
   }

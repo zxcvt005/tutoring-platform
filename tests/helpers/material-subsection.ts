@@ -3,7 +3,7 @@ import type { AuthContext } from "@/server/authz/context";
 import { upsertMaterialFolder } from "@/server/services/folder-service";
 import type { AppDb } from "@/server/db/types";
 
-/** Корневой раздел + подраздел для тестов, где сущность нельзя класть в корень. */
+/** Корневой раздел + вложенная папка для сценариев с несколькими уровнями. */
 export async function ensureTeacherSubsection(
   db: AppDb,
   ctx: AuthContext,

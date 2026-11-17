@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { MaterialsFolderPanel } from "@/components/folders/materials-folder-panel";
@@ -27,7 +27,6 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  isSubsectionFolder,
   type MaterialFolderKind,
   type MaterialsSection,
 } from "@/lib/folders/material-folders";
@@ -58,28 +57,28 @@ const SECTION_META: Record<
   topic: {
     title: "Темы",
     description:
-      "Разделы и подразделы программы. Темы создаются только внутри подраздела.",
+      "Разделы и папки программы. Темы создаются в открытой папке или в корне.",
     kinds: ["folder", "topic"],
     createLabel: "Новая тема",
   },
   theory: {
     title: "Теория",
     description:
-      "Теоретические материалы по разделам. Файлы только внутри подраздела.",
+      "Теоретические материалы по разделам. Файлы создаются в открытой папке или в корне.",
     kinds: ["folder", "theory"],
     createLabel: "Новая теория",
   },
   test: {
     title: "Домашние задания",
     description:
-      "Каталог тестов и ДЗ. Задания создаются только внутри подраздела.",
+      "Каталог тестов и ДЗ. Задания создаются в открытой папке или в корне.",
     kinds: ["folder", "test"],
     createLabel: "Новый тест",
   },
   intensive: {
     title: "Интенсивы",
     description:
-      "Видеоинтенсивы по разделам. Материалы только внутри подраздела.",
+      "Видеоинтенсивы по разделам. Материалы создаются в открытой папке или в корне.",
     kinds: ["folder", "intensive"],
     createLabel: "Новый интенсив",
   },
@@ -145,28 +144,9 @@ export function MaterialsSectionWorkspace({
   const ownerScope = libraryTab === "school" ? "school" : "teacher";
   const canEditPanel = libraryTab === "own" && !showArchived;
 
-  const folders = useMemo(
-    () =>
-      (data.materialFolders ?? []).filter(
-        (f) =>
-          f.ownerScope === ownerScope &&
-          (ownerScope === "school"
-            ? f.teacherId == null
-            : f.teacherId === teacherId)
-      ),
-    [data.materialFolders, ownerScope, teacherId]
-  );
-
-  const canCreateEntity =
-    libraryTab === "own" && isSubsectionFolder(folders, currentFolderId);
+  const canCreateEntity = libraryTab === "own";
 
   function openCreateTopic(folderId: string | null) {
-    if (!isSubsectionFolder(folders, folderId)) {
-      toast.error(
-        "Сначала откройте подраздел (папку внутри раздела), затем создайте тему"
-      );
-      return;
-    }
     setTopicForm({
       id: undefined,
       title: "",
@@ -196,11 +176,6 @@ export function MaterialsSectionWorkspace({
     const errors: { title?: string; description?: string } = {};
     if (!topicForm.title.trim()) errors.title = "Укажите название";
     if (!topicForm.description.trim()) errors.description = "Укажите описание";
-    if (!isSubsectionFolder(folders, topicForm.folderId)) {
-      errors.title =
-        errors.title ??
-        "Тема должна находиться внутри подраздела";
-    }
     setTopicErrors(errors);
     if (Object.keys(errors).length) return;
     setTopicSaving(true);
@@ -225,9 +200,7 @@ export function MaterialsSectionWorkspace({
 
   function createEntity() {
     if (!canCreateEntity) {
-      toast.error(
-        "Создайте подраздел внутри раздела, затем добавьте материал"
-      );
+      toast.error("Создание доступно только в собственной базе");
       return;
     }
     if (section === "topic") {
@@ -305,13 +278,6 @@ export function MaterialsSectionWorkspace({
         <p className="text-sm text-muted-foreground">
           Материалы дирекции: просмотр и использование на занятиях. Редактирование
           — в разделе «Дирекция».
-        </p>
-      ) : null}
-
-      {!canCreateEntity && !showArchived && libraryTab === "own" ? (
-        <p className="text-sm text-muted-foreground">
-          Откройте или создайте подраздел внутри раздела — только там можно
-          добавлять {meta.title.toLowerCase()}.
         </p>
       ) : null}
 

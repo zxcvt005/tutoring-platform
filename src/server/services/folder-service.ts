@@ -43,17 +43,6 @@ function mapFolder(row: typeof materialFolders.$inferSelect): MaterialFolder {
   };
 }
 
-function assertSubsectionPlacement(folder: {
-  id: string;
-  parentId: string | null;
-}) {
-  if (!folder.parentId) {
-    throw validationError(
-      "Материал можно размещать только внутри подраздела, не в корне раздела"
-    );
-  }
-}
-
 async function loadOrgFolders(db: AppDb, organizationId: string) {
   return db
     .select()
@@ -539,37 +528,50 @@ export async function moveMaterialToFolder(
 ) {
   requireRoles(ctx, ["teacher", "director", "assistant"]);
 
-  if (!folderId) {
-    throw validationError(
-      "Материал можно размещать только внутри подраздела, не в корне"
-    );
+  let targetSpace: FolderSpace | null = null;
+  let legacy: string | null = null;
+
+  if (folderId) {
+    const folder = await getFolderOrThrow(db, ctx, folderId);
+    if (
+      !folderAcceptsMaterialKind(
+        normalizeFolderContentKind(folder.contentKind),
+        material.kind
+      )
+    ) {
+      throw badRequest("Папка принадлежит другому типу раздела");
+    }
+    targetSpace = {
+      ownerScope: folder.ownerScope === "school" ? "school" : "teacher",
+      teacherId: folder.teacherId,
+    };
+    await assertCanManageSpace(db, ctx, targetSpace);
+    legacy = await legacySectionIdForFolder(db, folderId);
   }
 
-  const folder = await getFolderOrThrow(db, ctx, folderId);
-  assertSubsectionPlacement(folder);
-  if (
-    !folderAcceptsMaterialKind(
-      normalizeFolderContentKind(folder.contentKind),
-      material.kind
-    )
+  async function assertMoveAllowed(
+    libraryScope: string,
+    teacherId: string | null
   ) {
-    throw badRequest("Папка принадлежит другому типу раздела");
+    await assertMaterialOwner(db, ctx, libraryScope, teacherId);
+    const materialSpace: FolderSpace = {
+      ownerScope: libraryScope === "school" ? "school" : "teacher",
+      teacherId,
+    };
+    if (targetSpace) {
+      if (!scopesCompatible(libraryScope, teacherId, targetSpace)) {
+        throw forbidden("Нельзя переместить материал в это пространство");
+      }
+      return;
+    }
+    // Перенос в корень библиотеки — проверяем права на пространство материала.
+    await assertCanManageSpace(db, ctx, materialSpace);
   }
-  const space: FolderSpace = {
-    ownerScope: folder.ownerScope === "school" ? "school" : "teacher",
-    teacherId: folder.teacherId,
-  };
-  await assertCanManageSpace(db, ctx, space);
-
-  const legacy = await legacySectionIdForFolder(db, folderId);
 
   if (material.kind === "topic") {
     const [row] = await db.select().from(topics).where(eq(topics.id, material.id)).limit(1);
     if (!row || row.organizationId !== ctx.organizationId) throw notFound();
-    await assertMaterialOwner(db, ctx, row.libraryScope, row.teacherId);
-    if (space && !scopesCompatible(row.libraryScope, row.teacherId, space)) {
-      throw forbidden("Нельзя переместить материал в это пространство");
-    }
+    await assertMoveAllowed(row.libraryScope, row.teacherId);
     await db
       .update(topics)
       .set({ folderId, sectionId: legacy, updatedAt: new Date() })
@@ -577,10 +579,7 @@ export async function moveMaterialToFolder(
   } else if (material.kind === "test") {
     const [row] = await db.select().from(tests).where(eq(tests.id, material.id)).limit(1);
     if (!row || row.organizationId !== ctx.organizationId) throw notFound();
-    await assertMaterialOwner(db, ctx, row.libraryScope, row.teacherId);
-    if (space && !scopesCompatible(row.libraryScope, row.teacherId, space)) {
-      throw forbidden("Нельзя переместить материал в это пространство");
-    }
+    await assertMoveAllowed(row.libraryScope, row.teacherId);
     await db
       .update(tests)
       .set({ folderId, sectionId: legacy, updatedAt: new Date() })
@@ -592,10 +591,7 @@ export async function moveMaterialToFolder(
       .where(eq(theoryMaterials.id, material.id))
       .limit(1);
     if (!row || row.organizationId !== ctx.organizationId) throw notFound();
-    await assertMaterialOwner(db, ctx, row.libraryScope, row.teacherId);
-    if (space && !scopesCompatible(row.libraryScope, row.teacherId, space)) {
-      throw forbidden("Нельзя переместить материал в это пространство");
-    }
+    await assertMoveAllowed(row.libraryScope, row.teacherId);
     await db
       .update(theoryMaterials)
       .set({ folderId, updatedAt: new Date() })
@@ -607,10 +603,7 @@ export async function moveMaterialToFolder(
       .where(eq(intensives.id, material.id))
       .limit(1);
     if (!row || row.organizationId !== ctx.organizationId) throw notFound();
-    await assertMaterialOwner(db, ctx, row.libraryScope, row.teacherId);
-    if (space && !scopesCompatible(row.libraryScope, row.teacherId, space)) {
-      throw forbidden("Нельзя переместить материал в это пространство");
-    }
+    await assertMoveAllowed(row.libraryScope, row.teacherId);
     await db
       .update(intensives)
       .set({ folderId, updatedAt: new Date() })

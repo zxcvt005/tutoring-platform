@@ -33,7 +33,7 @@ export type FolderSpace = {
 
 export type MaterialsSection = Exclude<FolderContentKind, "shared">;
 
-/** Сущности только внутри подраздела (папка с родителем), не в корне раздела. */
+/** Папка с родителем (не верхний уровень дерева). */
 export function isSubsectionFolder(
   folders: readonly MaterialFolder[],
   folderId: string | null

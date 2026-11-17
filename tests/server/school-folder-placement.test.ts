@@ -155,19 +155,35 @@ describe("school knowledge base folder placement", () => {
     ).toBe(intensiveTree.folderId);
   });
 
-  it("rejects placing a school topic into a section root folder", async () => {
+  it("allows placing a school topic into a first-level folder and moving to library root", async () => {
     const { db, ctx } = await asDirector();
     const tree = await ensureSchoolSubsection(db, ctx, "topic");
-    await expect(
-      upsertTopic(db, ctx, {
-        teacherId: "",
-        libraryScope: "school",
-        folderId: tree.root.id,
-        title: "В корне раздела",
-        subject: "Математика",
-        description: "Нельзя",
-        status: "active",
-      })
-    ).rejects.toMatchObject({ status: 400 });
+    const topic = await upsertTopic(db, ctx, {
+      teacherId: "",
+      libraryScope: "school",
+      folderId: tree.root.id,
+      title: "В папке первого уровня",
+      subject: "Математика",
+      description: "Можно",
+      status: "active",
+    });
+    expect(
+      (await db.select().from(topics).where(eq(topics.id, topic.id)))[0]
+        ?.folderId
+    ).toBe(tree.root.id);
+
+    const { moveMaterialToFolder } = await import(
+      "@/server/services/folder-service"
+    );
+    await moveMaterialToFolder(
+      db,
+      ctx,
+      { kind: "topic", id: topic.id },
+      null
+    );
+    expect(
+      (await db.select().from(topics).where(eq(topics.id, topic.id)))[0]
+        ?.folderId
+    ).toBeNull();
   });
 });

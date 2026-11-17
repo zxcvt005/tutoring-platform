@@ -1497,8 +1497,6 @@ export async function upsertTopic(
     libraryScope: owner.libraryScope,
     teacherId: owner.teacherId,
     materialKind: "topic",
-    rootDeniedMessage:
-      "Тему можно размещать только внутри подраздела, не в корне раздела",
   });
   const { legacySectionIdForFolder } = await import(
     "@/server/services/folder-service"
@@ -1691,11 +1689,9 @@ async function assertMaterialFolderPlacement(
     libraryScope: LibraryScope;
     teacherId: string | null;
     materialKind: "topic" | "test";
-    rootDeniedMessage: string;
   }
 ): Promise<string | null> {
-  const { folderId, libraryScope, teacherId, materialKind, rootDeniedMessage } =
-    args;
+  const { folderId, libraryScope, teacherId, materialKind } = args;
   if (!folderId) return null;
   const [folder] = await db
     .select()
@@ -1714,9 +1710,6 @@ async function assertMaterialFolderPlacement(
     folder.teacherId !== teacherId
   ) {
     throw badRequest("Папка не найдена");
-  }
-  if (!folder.parentId) {
-    throw badRequest(rootDeniedMessage);
   }
   const { folderAcceptsMaterialKind, normalizeFolderContentKind } =
     await import("@/lib/folders/material-folders");
@@ -1759,8 +1752,6 @@ export async function upsertHomework(
       libraryScope: owner.libraryScope,
       teacherId: owner.teacherId,
       materialKind: "test",
-      rootDeniedMessage:
-        "Домашнее задание можно размещать только внутри подраздела, не в корне раздела",
     });
   }
   const { legacySectionIdForFolder } = await import(
