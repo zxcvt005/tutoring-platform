@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { TopicSuggestField } from "@/components/kafedra/topic-suggest-field";
+import { TheoryAssignDialog } from "@/components/theory/theory-assign-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -116,6 +117,7 @@ export function LessonContentEditor({
   const [busy, setBusy] = useState(false);
   const [dupHint, setDupHint] = useState<string | null>(null);
   const [requiredHint, setRequiredHint] = useState<string | null>(null);
+  const [theoryOpen, setTheoryOpen] = useState(false);
 
   // Подтянуть сохранённые назначения после reload, не затирая несохранённый черновик.
   useEffect(() => {
@@ -327,15 +329,35 @@ export function LessonContentEditor({
           назначать.
         </p>
       ) : null}
-      <Button
-        type="button"
-        size="sm"
-        className="h-8"
-        disabled={busy}
-        onClick={() => void save()}
-      >
-        Сохранить темы и ДЗ
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          size="sm"
+          className="h-8"
+          disabled={busy}
+          onClick={() => void save()}
+        >
+          Сохранить темы и ДЗ
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8"
+          disabled={busy}
+          onClick={() => setTheoryOpen(true)}
+        >
+          Назначить теорию
+        </Button>
+      </div>
+
+      <TheoryAssignDialog
+        studentId={studentId}
+        lessonSubject={lesson.subject}
+        directionId={lesson.directionId}
+        open={theoryOpen}
+        onOpenChange={setTheoryOpen}
+      />
     </div>
   );
 }
