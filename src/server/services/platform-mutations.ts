@@ -440,7 +440,7 @@ export async function upsertStudent(
     return { id: sid };
   }
 
-  requireRoles(ctx, ["director", "teacher"]);
+  requireRoles(ctx, ["director", "teacher", "press"]);
   const id = student.id ?? newId("s");
   if (ctx.role === "teacher") {
     const tid = await requireTeacherProfile(ctx);
@@ -502,7 +502,10 @@ export async function upsertStudent(
             : existing[0].parentContacts,
       })
       .where(eq(students.id, id));
-    if (existing[0].userId && ctx.role === "director") {
+    if (
+      existing[0].userId &&
+      (ctx.role === "director" || ctx.role === "press")
+    ) {
       await db
         .update(users)
         .set({ fullName: student.fullName, updatedAt: new Date() })
@@ -2535,6 +2538,42 @@ export async function deleteManualTrialLessonAction(
   return deleteManualTrialLesson(db, ctx, String(payload.id ?? ""));
 }
 
+export async function listGraphicsTabletsAction(db: AppDb, ctx: AuthContext) {
+  const { listGraphicsTablets } = await import(
+    "@/server/services/graphics-tablets-service"
+  );
+  return { rows: await listGraphicsTablets(db, ctx) };
+}
+
+export async function updateGraphicsTabletAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { updateGraphicsTablet } = await import(
+    "@/server/services/graphics-tablets-service"
+  );
+  return {
+    row: await updateGraphicsTablet(db, ctx, {
+      studentId: String(payload.studentId ?? ""),
+      expectedUpdatedAt:
+        payload.expectedUpdatedAt == null || payload.expectedUpdatedAt === ""
+          ? null
+          : String(payload.expectedUpdatedAt),
+      trialCompleted:
+        payload.trialCompleted === undefined
+          ? undefined
+          : Boolean(payload.trialCompleted),
+      address:
+        payload.address === undefined ? undefined : String(payload.address),
+      tabletStatus:
+        payload.tabletStatus === undefined
+          ? undefined
+          : String(payload.tabletStatus),
+    }),
+  };
+}
+
 export async function getRnpAvitoMonthAction(
   db: AppDb,
   ctx: AuthContext,
@@ -3369,6 +3408,8 @@ export const platformActions = {
   createManualTrialLesson: createManualTrialLessonAction,
   updateManualTrialLesson: updateManualTrialLessonAction,
   deleteManualTrialLesson: deleteManualTrialLessonAction,
+  listGraphicsTablets: listGraphicsTabletsAction,
+  updateGraphicsTablet: updateGraphicsTabletAction,
   getRnpAvitoMonth: getRnpAvitoMonthAction,
   upsertRnpAvitoManualDay: upsertRnpAvitoManualDayAction,
   clearRnpAvitoTrialOverride: clearRnpAvitoTrialOverrideAction,

@@ -388,6 +388,10 @@ async function handlePlatformAction(
           return m.updateManualTrialLessonAction(db, ctx, p);
         case "deleteManualTrialLesson":
           return m.deleteManualTrialLessonAction(db, ctx, p);
+        case "listGraphicsTablets":
+          return m.listGraphicsTabletsAction(db, ctx);
+        case "updateGraphicsTablet":
+          return m.updateGraphicsTabletAction(db, ctx, p);
         case "getRnpAvitoMonth":
           return m.getRnpAvitoMonthAction(db, ctx, p);
         case "upsertRnpAvitoManualDay":

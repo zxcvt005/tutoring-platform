@@ -104,7 +104,7 @@ async function loadStudentForStaff(
   ctx: AuthContext,
   studentId: string
 ) {
-  requireRoles(ctx, ["director", "teacher", "assistant"]);
+  requireRoles(ctx, ["director", "teacher", "assistant", "press"]);
   const [row] = await db
     .select()
     .from(students)
@@ -500,7 +500,7 @@ export async function updateStudentAvailabilityByStaff(
   studentId: string,
   slots: StudentAvailabilitySlot[]
 ) {
-  requireRoles(ctx, ["director", "assistant"]);
+  requireRoles(ctx, ["director", "assistant", "press"]);
   const row = await loadStudentForStaff(db, ctx, studentId);
   const saved = await replaceAvailabilitySlots(
     db,

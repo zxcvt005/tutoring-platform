@@ -1,33 +1,37 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { notFound } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/layout/page-header";
-import { PersonStatusBadge } from "@/components/status-badge";
+import { StudentAvailabilityPanel } from "@/components/students/student-availability-panel";
+import { StudentQuestionnaireSections } from "@/components/students/student-questionnaire-sections";
+import { StudentProfileEditDialog } from "@/components/students/student-profile-edit-dialog";
+import {
+  HomeworkAssignmentStatusBadge,
+  LessonStatusBadge,
+  PersonStatusBadge,
+} from "@/components/status-badge";
+import { TariffBalanceNotice } from "@/components/tariff-balance-notice";
 import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatDueAt } from "@/lib/format";
 import { pressStudentBucketLabel } from "@/lib/press-students";
 import { apiPress, apiPressGet } from "@/lib/store/api-client";
-import { gradeLabel } from "@/lib/student-contacts";
+import { useDemoStore } from "@/lib/store/demo-store";
+import { getAssignmentTitle } from "@/lib/tests/helpers";
 
-type Card = {
-  student: {
-    id: string;
-    fullName: string;
-    status: "active" | "paused" | "archived";
-    bucket: "new" | "active" | "archived";
-    grade: string | null;
-    telegram: string | null;
-    phone: string | null;
-    parentContacts: string | null;
-    teacherName: string | null;
-    createdAt: string;
-    tariffName: string | null;
-    tariffStatus: string | null;
-  };
+type SalesCard = {
   currentInfo: string;
   notes: {
     id: string;
@@ -37,31 +41,70 @@ type Card = {
   }[];
 };
 
+function packageStatusFromBalance(
+  balance: number | null
+): "active" | "exhausted" | "debt" | "none" {
+  if (balance == null) return "none";
+  if (balance <= -1) return "debt";
+  if (balance <= 0) return "exhausted";
+  return "active";
+}
+
 export function PressStudentCard({ studentId }: { studentId: string }) {
-  const [card, setCard] = useState<Card | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { data, upsertStudent, assignmentsForStudent, ready, reload } =
+    useDemoStore();
+  const [editOpen, setEditOpen] = useState(false);
+  const [sales, setSales] = useState<SalesCard | null>(null);
+  const [salesError, setSalesError] = useState<string | null>(null);
   const [info, setInfo] = useState("");
-  const [infoState, setInfoState] = useState<"idle" | "saving" | "saved" | "error">(
-    "idle"
-  );
+  const [infoState, setInfoState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
   const [noteBody, setNoteBody] = useState("");
   const [noteBusy, setNoteBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    setError(null);
+  const student = data.students.find((s) => s.id === studentId);
+  const teacher = student
+    ? data.teachers.find((t) => t.id === student.teacherId) ??
+      data.teachers.find((t) => t.id === (student.previousTeacherId ?? ""))
+    : undefined;
+  const directionBalances = student?.directionBalances ?? [];
+  const minBalance = directionBalances.length
+    ? Math.min(...directionBalances.map((b) => b.balance))
+    : null;
+
+  const lessons = useMemo(
+    () =>
+      data.lessons
+        .filter((l) => l.studentIds.includes(studentId))
+        .sort(
+          (a, b) =>
+            new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime()
+        ),
+    [data.lessons, studentId]
+  );
+  const assignments = assignmentsForStudent(studentId);
+
+  const loadSales = useCallback(async () => {
+    setSalesError(null);
     try {
-      const data = await apiPressGet<Card>("student", { id: studentId });
-      setCard(data);
-      setInfo(data.currentInfo);
+      const card = await apiPressGet<SalesCard & { student: unknown }>(
+        "student",
+        { id: studentId }
+      );
+      setSales({ currentInfo: card.currentInfo, notes: card.notes });
+      setInfo(card.currentInfo);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось загрузить карточку");
+      setSalesError(
+        e instanceof Error ? e.message : "Не удалось загрузить продажи"
+      );
     }
   }, [studentId]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
+    const timer = window.setTimeout(() => void loadSales(), 0);
     return () => window.clearTimeout(timer);
-  }, [load]);
+  }, [loadSales]);
 
   async function saveInfo() {
     setInfoState("saving");
@@ -88,67 +131,110 @@ export function PressStudentCard({ studentId }: { studentId: string }) {
       });
       setNoteBody("");
       toast.success("Заметка добавлена");
-      await load();
+      await loadSales();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Не удалось добавить заметку");
+      toast.error(
+        e instanceof Error ? e.message : "Не удалось добавить заметку"
+      );
     } finally {
       setNoteBusy(false);
     }
   }
 
-  if (error) {
-    return (
-      <div className="space-y-3">
-        <p className="text-sm text-destructive">{error}</p>
-        <Link href="/pressa/students" className="text-sm underline">
-          К списку
-        </Link>
-      </div>
-    );
+  if (ready && !student) {
+    notFound();
   }
-  if (!card) {
+  if (!student) {
     return <p className="text-sm text-muted-foreground">Загрузка…</p>;
   }
 
-  const s = card.student;
+  const bucket =
+    student.status === "archived"
+      ? "archived"
+      : !student.teacherId
+        ? "new"
+        : "active";
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title={s.fullName}
-        description={`${pressStudentBucketLabel[s.bucket]}${
-          s.teacherName ? ` · ${s.teacherName}` : " · преподаватель не назначен"
+        title={student.fullName}
+        description={`${pressStudentBucketLabel[bucket]}${
+          teacher
+            ? ` · ${teacher.fullName}`
+            : " · преподаватель не назначен"
         }`}
         actions={
-          <Link
-            href="/pressa/students"
-            className="text-sm font-medium underline-offset-4 hover:underline"
-          >
-            ← К списку
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            {student.status !== "archived" ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-full"
+                onClick={() => setEditOpen(true)}
+              >
+                Редактировать
+              </Button>
+            ) : null}
+            <Link
+              href="/pressa/students"
+              className="text-sm font-medium underline-offset-4 hover:underline"
+            >
+              ← К списку
+            </Link>
+          </div>
         }
       />
 
-      <section className="grid gap-4 lg:grid-cols-3">
-        <div className="panel space-y-3 p-5">
-          <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
-            Профиль
-          </p>
-          <Row label="Статус">
-            <PersonStatusBadge status={s.status} />
-          </Row>
-          <Row label="Класс">{gradeLabel(s.grade as never)}</Row>
-          <Row label="Преподаватель">{s.teacherName ?? "Не назначен"}</Row>
-          <Row label="Тариф">{s.tariffName ?? "Нет тарифа"}</Row>
-          <Row label="Телефон">{s.phone || "—"}</Row>
-          <Row label="Telegram">{s.telegram || "—"}</Row>
-          <Row label="Родители">{s.parentContacts || "—"}</Row>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-display text-xl font-semibold tracking-tight text-[#5B4A63]">
+            Анкета регистрации
+          </h2>
+          <PersonStatusBadge status={student.status} />
         </div>
+        <StudentQuestionnaireSections
+          student={student}
+          teacherName={teacher?.fullName}
+        />
+        <StudentAvailabilityPanel studentId={student.id} canEdit />
+      </div>
 
-        <div className="panel space-y-3 p-5 lg:col-span-2">
+      <section className="panel space-y-3 p-5">
+        <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
+          Баланс по направлениям
+        </p>
+        {directionBalances.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Баланс по направлениям появится после покупки занятий.
+          </p>
+        ) : (
+          <div className="space-y-1.5 text-sm">
+            {directionBalances.map((b) => (
+              <div
+                key={b.directionId}
+                className="flex justify-between gap-2 tabular-nums"
+              >
+                <span>{b.directionName ?? b.directionSlug ?? "—"}</span>
+                <span className="font-medium">{b.balance}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <TariffBalanceNotice
+          remaining={minBalance}
+          packageStatus={packageStatusFromBalance(minBalance)}
+        />
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-3">
+        <div className="panel space-y-3 p-5 lg:col-span-3">
           <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
             Актуальная информация
           </p>
+          {salesError ? (
+            <p className="text-sm text-destructive">{salesError}</p>
+          ) : null}
           <Textarea
             value={info}
             onChange={(e) => {
@@ -159,7 +245,11 @@ export function PressStudentCard({ studentId }: { studentId: string }) {
             placeholder="Текущие важные сведения об ученике для продажника"
           />
           <div className="flex flex-wrap items-center gap-3">
-            <Button type="button" onClick={() => void saveInfo()} disabled={infoState === "saving"}>
+            <Button
+              type="button"
+              onClick={() => void saveInfo()}
+              disabled={infoState === "saving"}
+            >
               {infoState === "saving" ? "Сохранение…" : "Сохранить"}
             </Button>
             {infoState === "saved" ? (
@@ -189,11 +279,13 @@ export function PressStudentCard({ studentId }: { studentId: string }) {
         >
           {noteBusy ? "Добавление…" : "Добавить запись"}
         </Button>
-        {card.notes.length === 0 ? (
+        {!sales ? (
+          <p className="text-sm text-muted-foreground">Загрузка заметок…</p>
+        ) : sales.notes.length === 0 ? (
           <p className="text-sm text-muted-foreground">Записей пока нет.</p>
         ) : (
           <ul className="space-y-3">
-            {card.notes.map((n) => (
+            {sales.notes.map((n) => (
               <li key={n.id} className="rounded-lg bg-muted/40 px-3 py-2">
                 <p className="text-xs text-muted-foreground">
                   {n.authorName ?? "Сотрудник"} · {formatDateTime(n.createdAt)}
@@ -204,21 +296,111 @@ export function PressStudentCard({ studentId }: { studentId: string }) {
           </ul>
         )}
       </section>
-    </div>
-  );
-}
 
-function Row({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex justify-between gap-2 text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-right">{children}</span>
+      <section className="space-y-3">
+        <h2 className="font-display text-xl font-semibold tracking-tight">
+          Домашние задания
+        </h2>
+        {assignments.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Пока нет назначений.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Задание</TableHead>
+                <TableHead>Срок</TableHead>
+                <TableHead>Статус</TableHead>
+                <TableHead>Балл</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {assignments.map((a) => {
+                const hw = data.homeworks.find((h) => h.id === a.homeworkId);
+                return (
+                  <TableRow key={a.id}>
+                    <TableCell className="font-medium">
+                      {getAssignmentTitle(a, hw)}
+                    </TableCell>
+                    <TableCell>{formatDueAt(a.dueAt)}</TableCell>
+                    <TableCell>
+                      <HomeworkAssignmentStatusBadge status={a.status} />
+                    </TableCell>
+                    <TableCell className="tabular-nums">
+                      {a.score != null
+                        ? `${a.score}/${a.maxScore ?? "—"}`
+                        : a.status === "completed"
+                          ? "ждёт проверки"
+                          : "—"}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="font-display text-xl font-semibold tracking-tight">
+          История занятий
+        </h2>
+        {lessons.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Занятий пока нет.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Когда</TableHead>
+                <TableHead>Предмет</TableHead>
+                <TableHead>Тема</TableHead>
+                <TableHead>Статус</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {lessons.map((l) => {
+                const topic = data.topics.find((t) => t.id === l.topicId);
+                return (
+                  <TableRow key={l.id}>
+                    <TableCell>{formatDateTime(l.startsAt)}</TableCell>
+                    <TableCell>{l.subject || "—"}</TableCell>
+                    <TableCell>{topic?.title ?? "—"}</TableCell>
+                    <TableCell>
+                      <LessonStatusBadge status={l.status} />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </section>
+
+      <StudentProfileEditDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        student={student}
+        teachers={data.teachers}
+        onSave={async (values) => {
+          const saved = await upsertStudent({
+            id: values.id,
+            fullName: values.fullName,
+            grade: values.grade || null,
+            telegram: values.telegram || null,
+            phone: values.phone || null,
+            status: values.status,
+            teacherId: values.teacherId,
+            parentName: values.parentName || null,
+            parentContacts: values.parentContacts || null,
+            learningGoal: values.learningGoal || null,
+            notes: values.notes || undefined,
+          });
+          if (saved.ok) {
+            await reload();
+            return true;
+          }
+          return false;
+        }}
+      />
     </div>
   );
 }

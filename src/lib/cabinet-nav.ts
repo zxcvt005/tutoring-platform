@@ -65,5 +65,6 @@ export const pressaNavItems: CabinetNavItem[] = [
   { href: "/pressa/trials", label: "Пробные уроки" },
   { href: "/pressa/baza", label: "База" },
   { href: "/pressa/probnye-uroki", label: "Таблица пробных" },
+  { href: "/pressa/planchety", label: "Графические планшеты" },
   { href: "/pressa/analytics", label: "Аналитика" },
 ];

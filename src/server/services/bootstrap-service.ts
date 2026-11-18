@@ -561,12 +561,7 @@ export async function buildBootstrap(
         learningGoal: s.learningGoal ?? null,
       };
     }
-    if (ctx.role === "press") {
-      return {
-        ...base,
-        parentContacts: s.parentContacts ?? null,
-      };
-    }
+    // Пресса и дирекция работают с одной карточкой: полная анкета.
     return {
       ...base,
       parentName: s.parentName ?? null,
@@ -934,7 +929,7 @@ export async function buildBootstrap(
 
   const relevantStudentIds = studentRows.map((s) => s.id);
   let studentDirectionBalances: StudentDirectionBalanceRow[] = [];
-  if (relevantStudentIds.length > 0 && ctx.role !== "press") {
+  if (relevantStudentIds.length > 0) {
     const balanceRows = await db
       .select({
         studentId: studentLessonLedger.studentId,

@@ -3094,6 +3094,39 @@ export const settlementDocuments = pgTable(
 );
 
 /**
+ * Рабочая таблица «Графические планшеты» (кабинет Пресса).
+ * Одна строка на ученика (FK → students). Список строится из students LEFT JOIN;
+ * ручные поля (пробный / адрес / планшет) не перезаписываются при правке ФИО.
+ */
+export const studentGraphicsTablets = pgTable(
+  "student_graphics_tablets",
+  {
+    studentId: text("student_id")
+      .primaryKey()
+      .references(() => students.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    trialCompleted: boolean("trial_completed").notNull().default(false),
+    address: text("address").notNull().default(""),
+    /** not_needed | ordered */
+    tabletStatus: text("tablet_status").notNull().default("not_needed"),
+    ...timestamps,
+  },
+  (t) => [
+    index("student_graphics_tablets_org_idx").on(t.organizationId),
+    index("student_graphics_tablets_org_updated_idx").on(
+      t.organizationId,
+      t.updatedAt
+    ),
+    check(
+      "student_graphics_tablets_status_check",
+      sql`${t.tabletStatus} in ('not_needed', 'ordered')`
+    ),
+  ]
+);
+
+/**
  * CRM-таблица «Пробные уроки» (кабинет Пресса).
  * Может быть связана с сущностью Press `trial_lessons` через trial_lesson_id:
  * тогда имя/дата/время синхронизируются; остальные поля — только вручную.
@@ -3411,6 +3444,7 @@ export const schema = {
   settlementDocumentCounters,
   settlementDocuments,
   manualTrialLessons,
+  studentGraphicsTablets,
   directorExpenses,
   quickAccessLinks,
   rnpAvitoDailyStats,
