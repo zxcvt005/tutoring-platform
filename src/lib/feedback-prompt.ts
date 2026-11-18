@@ -106,11 +106,11 @@ export function formatFeedbackMetricsForPrompt(
 
   if (!theory.available) {
     lines.push(
-      "Теория: недостаточно данных за этот месяц (назначенных теоретических материалов не найдено)."
+      "Теория: недостаточно данных за этот месяц (ученик ещё не открывал теорию)."
     );
   } else {
     lines.push(
-      `Теория: завершено ${theory.completed} из ${theory.assigned} назначенных материалов.`
+      `Теория: завершено ${theory.completed} из ${theory.assigned} начатых материалов.`
     );
   }
 

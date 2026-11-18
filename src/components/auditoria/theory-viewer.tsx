@@ -28,12 +28,37 @@ import {
 import { LearningLockedBanner } from "@/components/tariff-balance-notice";
 import { studentLearningLock } from "@/lib/learning-lock";
 import { useDemoStore } from "@/lib/store/demo-store";
+import {
+  buildStudentTheoryCatalogItems,
+  resolveStudentTheoryItem,
+  studentSystemSubjects,
+} from "@/lib/theory/student-catalog";
 
-export function StudentTheoryViewer({ assignmentId }: { assignmentId: string }) {
+export function StudentTheoryViewer({
+  materialId,
+}: {
+  /** materialId или legacy theory_assignments.id */
+  materialId: string;
+}) {
   const { data, theoryAssignmentsForStudent, markTheoryViewed } = useDemoStore();
-  const item = theoryAssignmentsForStudent(data.currentStudentId).find(
-    (a) => a.id === assignmentId
-  );
+  const studentId = data.currentStudentId;
+  const student = data.students.find((s) => s.id === studentId);
+  const subjects = studentSystemSubjects({
+    directionBalances: student?.directionBalances,
+    balanceRows: data.studentDirectionBalances.filter(
+      (b) => b.studentId === studentId
+    ),
+    directions: data.learningDirections,
+  });
+  const catalog = buildStudentTheoryCatalogItems({
+    theories: data.theories,
+    assignments: theoryAssignmentsForStudent(studentId),
+    studentId,
+    folders: data.materialFolders,
+    studentGrade: student?.grade,
+    subjects,
+  });
+  const item = resolveStudentTheoryItem(catalog, materialId);
   const [busy, setBusy] = useState(false);
   const [showTest, setShowTest] = useState(false);
   const inflight = useRef(false);
@@ -41,7 +66,9 @@ export function StudentTheoryViewer({ assignmentId }: { assignmentId: string }) 
   if (!item) {
     return (
       <div className="space-y-3 rounded-2xl border border-border/70 bg-auditoria-surface p-4">
-        <p className="text-sm">Теория не найдена или назначена другому ученику.</p>
+        <p className="text-sm">
+          Теория не найдена или недоступна для вашего класса.
+        </p>
         <Link
           href="/auditoria/theory"
           className="inline-flex h-8 items-center rounded-full border border-border bg-auditoria-surface px-3 text-sm"
@@ -93,7 +120,7 @@ export function StudentTheoryViewer({ assignmentId }: { assignmentId: string }) 
     if (!claimTheoryAction(inflight)) return;
     setBusy(true);
     try {
-      const result = await markTheoryViewed(current.id);
+      const result = await markTheoryViewed(current.materialId);
       afterTheoryVideoWatchSaved(result.ok);
     } finally {
       releaseTheoryAction(inflight);
@@ -107,7 +134,7 @@ export function StudentTheoryViewer({ assignmentId }: { assignmentId: string }) 
     if (!claimTheoryAction(inflight)) return;
     setBusy(true);
     try {
-      const result = await markTheoryViewed(current.id);
+      const result = await markTheoryViewed(current.materialId);
       if (result.ok && current.hasTest) setShowTest(true);
     } finally {
       releaseTheoryAction(inflight);
@@ -320,9 +347,9 @@ export function StudentTheoryViewer({ assignmentId }: { assignmentId: string }) 
       {showHomework ? (
         <HomeworkTake
           assignmentId={item.testAssignmentId!}
-          backHref={`/auditoria/theory/${item.id}`}
+          backHref={`/auditoria/theory/${item.materialId}`}
           backLabel="К теории"
-          takeBasePath={`/auditoria/theory/${item.id}`}
+          takeBasePath={`/auditoria/theory/${item.materialId}`}
         />
       ) : null}
     </div>

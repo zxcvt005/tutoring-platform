@@ -637,6 +637,12 @@ export async function buildBootstrap(
         ownerScope: "teacher",
         teacherId: ctx.teacherId,
       });
+    } else if (ctx.role === "student") {
+      // Каталог теории ученика строится по школьным папкам классов.
+      await ensureSystemKnowledgeFolders(db, orgId, {
+        ownerScope: "school",
+        teacherId: null,
+      });
     }
     if (ctx.role !== "press") {
       let refreshed = await db
@@ -653,7 +659,9 @@ export async function buildBootstrap(
       } else if (ctx.role === "student") {
         const myTeacherId = studentRows[0]?.primaryTeacherId ?? "";
         refreshed = refreshed.filter(
-          (f) => f.ownerScope === "teacher" && f.teacherId === myTeacherId
+          (f) =>
+            f.ownerScope === "school" ||
+            (f.ownerScope === "teacher" && f.teacherId === myTeacherId)
         );
       }
       folderRows = refreshed;

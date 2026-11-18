@@ -162,9 +162,19 @@ export function TheoryEditor({
             : "Видео, конспект и тест независимы: нужен хотя бы один. Черновик не виден ученикам. После публикации изменения сохраняются новой версией."
         }
         actions={
-          <Link href={listHref} className={buttonVariants({ variant: "outline" })}>
-            К списку
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            {existing && editorBase.startsWith("/kafedra") ? (
+              <Link
+                href={`/kafedra/theory/${existing.id}/results`}
+                className={buttonVariants({ variant: "outline" })}
+              >
+                Прогресс учеников
+              </Link>
+            ) : null}
+            <Link href={listHref} className={buttonVariants({ variant: "outline" })}>
+              К списку
+            </Link>
+          </div>
         }
       />
 

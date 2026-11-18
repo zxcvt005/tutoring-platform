@@ -17,6 +17,10 @@ import { TheoryNewMark } from "@/components/theory/theory-new-mark";
 import { homeworkAssignedDateInfo, sortHomeworkForStudent } from "@/lib/homework-list";
 import { getAssignmentTitle } from "@/lib/tests/helpers";
 import { incompleteTheoryCount, newestIncompleteTheory } from "@/lib/theory/list";
+import {
+  buildStudentTheoryCatalogItems,
+  studentSystemSubjects,
+} from "@/lib/theory/student-catalog";
 import { LearningLockedBanner } from "@/components/tariff-balance-notice";
 import { studentLearningLock } from "@/lib/learning-lock";
 import { apiLessonRatingsGet } from "@/lib/store/api-client";
@@ -71,7 +75,32 @@ export function AuditoriaHomePanel() {
     [assignments, lessons]
   );
   const attention = [...missed, ...incomplete];
-  const theoryItems = theoryAssignmentsForStudent(studentId);
+  const theoryItems = useMemo(() => {
+    const subjects = studentSystemSubjects({
+      directionBalances: student?.directionBalances,
+      balanceRows: data.studentDirectionBalances.filter(
+        (b) => b.studentId === studentId
+      ),
+      directions: data.learningDirections,
+    });
+    return buildStudentTheoryCatalogItems({
+      theories: data.theories,
+      assignments: theoryAssignmentsForStudent(studentId),
+      studentId,
+      folders: data.materialFolders,
+      studentGrade: student?.grade,
+      subjects,
+    });
+  }, [
+    data.theories,
+    data.materialFolders,
+    data.studentDirectionBalances,
+    data.learningDirections,
+    student?.directionBalances,
+    student?.grade,
+    studentId,
+    theoryAssignmentsForStudent,
+  ]);
   const theoryOpen = incompleteTheoryCount(theoryItems);
   const latestTheory = newestIncompleteTheory(theoryItems);
 
@@ -116,7 +145,7 @@ export function AuditoriaHomePanel() {
               </p>
             </div>
             <Link
-              href={href(`/theory/${latestTheory.id}`)}
+              href={href(`/theory/${latestTheory.materialId}`)}
               className="shrink-0 text-sm text-foreground/80 hover:text-foreground hover:underline"
             >
               Открыть →

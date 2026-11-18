@@ -351,6 +351,8 @@ export function computeMonthlyFeedbackMetrics(
     topicTitles.push(title);
   }
 
+  // theory[] — строки прогресса, созданные в месяце (первое открытие материала).
+  // assigned = начато в периоде; completed = доведено до status=completed.
   const theoryAssigned = source.theory.length;
   const theoryCompleted = source.theory.filter(
     (row) => row.status === "completed"

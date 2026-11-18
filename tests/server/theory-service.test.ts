@@ -3,11 +3,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { THEORY_NEED_COMPONENT_MESSAGE } from "@/lib/theory/components";
 import { resolveAuthContext } from "@/server/authz/context";
 import {
+  materialFolders,
+  students,
   testAssignments,
   theoryAssignments,
   theoryMaterialVersions,
@@ -22,6 +24,7 @@ import {
   upsertHomework,
 } from "@/server/services/platform-mutations";
 import { confirmPaidFromBank } from "@/server/services/lesson-orders-service";
+import { ensureSystemKnowledgeFolders } from "@/server/services/folder-service";
 import {
   assignTheory,
   getTheoryFileForViewer,
@@ -737,5 +740,256 @@ describe("theory materials", () => {
       .where(eq(theoryAssignments.materialId, created.id));
     expect(row.teacherId).toBe("t1");
     expect(row.studentId).toBe("s1");
+  });
+
+  async function publishSchoolTheoryInGrade(
+    db: Awaited<ReturnType<typeof createTestDb>>["db"],
+    director: Awaited<ReturnType<typeof login>>,
+    input: {
+      title: string;
+      grade: string;
+      subject?: "physics" | "math";
+      videoUrl?: string;
+      testId?: string;
+    }
+  ) {
+    await ensureSystemKnowledgeFolders(db, director.organizationId, {
+      ownerScope: "school",
+      teacherId: null,
+    });
+    const subject = input.subject ?? "physics";
+    const [folder] = await db
+      .select()
+      .from(materialFolders)
+      .where(
+        and(
+          eq(materialFolders.organizationId, director.organizationId),
+          eq(materialFolders.systemKey, `grade:${subject}:${input.grade}`)
+        )
+      )
+      .limit(1);
+    expect(folder).toBeTruthy();
+    return upsertTheory(db, director, {
+      teacherId: "",
+      libraryScope: "school",
+      folderId: folder!.id,
+      title: input.title,
+      videoUrl: input.videoUrl ?? "https://vk.com/video-1_2",
+      testId: input.testId,
+      publish: true,
+    });
+  }
+
+  it("shows class catalog without manual assignment and hides teacher library", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await login(t.db, "director@demo.local");
+    const anna = await login(t.db, "anna@example.com");
+    const school = await publishSchoolTheoryInGrade(t.db, director, {
+      title: "Кинематика 11",
+      grade: "11",
+    });
+    const otherGrade = await publishSchoolTheoryInGrade(t.db, director, {
+      title: "Кинематика 9",
+      grade: "9",
+    });
+    const personal = await upsertTheory(t.db, anna, {
+      teacherId: "t1",
+      title: "Личная теория",
+      videoUrl: "https://vk.com/video-9_9",
+      publish: true,
+    });
+
+    const s1 = await login(t.db, "s1@demo.local");
+    const boot = await buildBootstrap(t.db, s1);
+    const titles = boot.theories.map((row) => row.title);
+    expect(titles).toContain("Кинематика 11");
+    expect(titles).not.toContain("Кинематика 9");
+    expect(titles).not.toContain("Личная теория");
+    expect(boot.theoryAssignments).toHaveLength(0);
+
+    const viewed = await markTheoryViewed(t.db, s1, school.id);
+    expect(viewed.status).toBe("completed");
+    expect(viewed.materialId).toBe(school.id);
+    const after = await buildBootstrap(t.db, s1);
+    expect(after.theoryAssignments.some((a) => a.materialId === school.id)).toBe(
+      true
+    );
+
+    await expect(markTheoryViewed(t.db, s1, personal.id)).rejects.toMatchObject({
+      status: 403,
+    });
+    await expect(
+      markTheoryViewed(t.db, s1, otherGrade.id)
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("updates catalog when student grade changes and keeps old progress history", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await login(t.db, "director@demo.local");
+    const in11 = await publishSchoolTheoryInGrade(t.db, director, {
+      title: "Теория 11",
+      grade: "11",
+    });
+    const in10 = await publishSchoolTheoryInGrade(t.db, director, {
+      title: "Теория 10",
+      grade: "10",
+    });
+    const s1 = await login(t.db, "s1@demo.local");
+    await markTheoryViewed(t.db, s1, in11.id);
+
+    await t.db
+      .update(students)
+      .set({ grade: "10", updatedAt: new Date() })
+      .where(eq(students.id, "s1"));
+
+    const boot = await buildBootstrap(t.db, s1);
+    const titles = boot.theories.map((row) => row.title);
+    expect(titles).toContain("Теория 10");
+    expect(titles).toContain("Теория 11");
+    expect(
+      boot.theoryAssignments.some(
+        (a) => a.materialId === in11.id && a.status === "completed"
+      )
+    ).toBe(true);
+    expect(boot.theoryAssignments.some((a) => a.materialId === in10.id)).toBe(
+      false
+    );
+
+    const opened = await markTheoryViewed(t.db, s1, in10.id);
+    expect(opened.status).toBe("completed");
+  });
+
+  it("opens theory test from class catalog without prior assignment", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await login(t.db, "director@demo.local");
+    const anna = await login(t.db, "anna@example.com");
+    await upsertHomework(t.db, director, {
+      id: "hw_theory_school",
+      teacherId: "",
+      libraryScope: "school",
+      title: "Тест школьной теории",
+      status: "draft",
+      purpose: "theory",
+      questions: [
+        {
+          id: "q1",
+          type: "single_choice",
+          prompt: "2+2",
+          maxScore: 1,
+          options: [
+            { id: "oa", text: "4" },
+            { id: "ob", text: "5" },
+          ],
+          correctOptionIds: ["oa"],
+        },
+        {
+          id: "q2",
+          type: "essay",
+          prompt: "Объясните",
+          maxScore: 1,
+        },
+      ],
+    });
+    await publishHomework(t.db, director, "hw_theory_school");
+    const created = await publishSchoolTheoryInGrade(t.db, director, {
+      title: "Поле с тестом",
+      grade: "11",
+      testId: "hw_theory_school",
+    });
+    const s1 = await login(t.db, "s1@demo.local");
+    const viewed = await markTheoryViewed(t.db, s1, created.id);
+    expect(viewed.status).toBe("viewed");
+    expect(viewed.testAssignmentId).toBeTruthy();
+
+    await submitHomeworkAction(t.db, s1, viewed.testAssignmentId!, [
+      { questionId: "q1", selectedOptionIds: ["oa"] },
+      { questionId: "q2", textAnswer: "поле" },
+    ]);
+    await reviewHomeworkAction(t.db, anna, viewed.testAssignmentId!, [
+      { questionId: "q2", manualScore: 1 },
+    ]);
+    const [done] = await t.db
+      .select()
+      .from(theoryAssignments)
+      .where(eq(theoryAssignments.materialId, created.id));
+    expect(done.status).toBe("completed");
+  });
+
+  it("reopening catalog theory reuses one progress row and keeps status", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await login(t.db, "director@demo.local");
+    const created = await publishSchoolTheoryInGrade(t.db, director, {
+      title: "Идемпотентный просмотр",
+      grade: "11",
+    });
+    const s1 = await login(t.db, "s1@demo.local");
+    const first = await markTheoryViewed(t.db, s1, created.id);
+    expect(first.status).toBe("completed");
+    expect(first.alreadyViewed).toBe(false);
+
+    const second = await markTheoryViewed(t.db, s1, created.id);
+    expect(second.alreadyViewed).toBe(true);
+    expect(second.status).toBe("completed");
+    expect(second.assignmentId).toBe(first.assignmentId);
+
+    const third = await markTheoryViewed(t.db, s1, first.assignmentId!);
+    expect(third.alreadyViewed).toBe(true);
+    expect(third.assignmentId).toBe(first.assignmentId);
+
+    const rows = await t.db
+      .select()
+      .from(theoryAssignments)
+      .where(eq(theoryAssignments.materialId, created.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.status).toBe("completed");
+    expect(rows[0]?.completedAt).toBeTruthy();
+  });
+
+  it("serves theory files from catalog by current version before progress exists", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await login(t.db, "director@demo.local");
+    const draft = await upsertTheory(t.db, director, {
+      teacherId: "",
+      libraryScope: "school",
+      title: "Конспект класса",
+    });
+    await ensureSystemKnowledgeFolders(t.db, director.organizationId, {
+      ownerScope: "school",
+      teacherId: null,
+    });
+    const [folder] = await t.db
+      .select()
+      .from(materialFolders)
+      .where(
+        and(
+          eq(materialFolders.organizationId, director.organizationId),
+          eq(materialFolders.systemKey, "grade:physics:11")
+        )
+      )
+      .limit(1);
+    await uploadTheoryFile(t.db, director, draft.id, {
+      bytes: Buffer.from("%PDF-1.4 class"),
+      filename: "class.pdf",
+    });
+    await upsertTheory(t.db, director, {
+      id: draft.id,
+      teacherId: "",
+      libraryScope: "school",
+      folderId: folder!.id,
+      title: "Конспект класса",
+      publish: true,
+    });
+    const s1 = await login(t.db, "s1@demo.local");
+    const boot = await buildBootstrap(t.db, s1);
+    const material = boot.theories.find((row) => row.id === draft.id);
+    expect(material?.files?.length).toBe(1);
+    const fileId = material!.files![0]!.id;
+    const downloaded = await getTheoryFileForViewer(t.db, s1, fileId);
+    expect(downloaded.originalName).toBe("class.pdf");
   });
 });

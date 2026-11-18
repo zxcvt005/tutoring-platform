@@ -305,6 +305,7 @@ export async function seedDemoOrganization(
       userId: uid,
       primaryTeacherId: student.teacherId || null,
       fullName: student.fullName,
+      grade: "11",
       contacts: student.contacts,
       status: student.status,
       notes: student.notes,

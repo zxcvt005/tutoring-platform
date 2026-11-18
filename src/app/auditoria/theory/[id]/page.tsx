@@ -7,7 +7,7 @@ import { StudentTheoryViewer } from "@/components/auditoria/theory-viewer";
 
 function Inner() {
   const params = useParams<{ id: string }>();
-  return <StudentTheoryViewer assignmentId={String(params.id ?? "")} />;
+  return <StudentTheoryViewer materialId={String(params.id ?? "")} />;
 }
 
 export default function Page() {

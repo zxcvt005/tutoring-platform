@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo } from "react";
 
 import { EmptyState } from "@/components/empty-state";
 import { TheoryAssignmentStatusBadge } from "@/components/status-badge";
@@ -12,6 +13,11 @@ import {
   useStudentCabinetHref,
   useStudentTour,
 } from "@/lib/student-tour/paths";
+import {
+  buildStudentTheoryCatalogItems,
+  studentSystemSubjects,
+  studentTheoryCatalogEmptyHint,
+} from "@/lib/theory/student-catalog";
 import {
   groupStudentTheories,
   studentTheoryMaterialChips,
@@ -29,9 +35,49 @@ const chipTone = {
 
 export function StudentTheoryWorkspace() {
   const { data, theoryAssignmentsForStudent } = useDemoStore();
-  const items = theoryAssignmentsForStudent(data.currentStudentId);
+  const studentId = data.currentStudentId;
+  const student = data.students.find((s) => s.id === studentId);
+  const subjects = useMemo(
+    () =>
+      studentSystemSubjects({
+        directionBalances: student?.directionBalances,
+        balanceRows: data.studentDirectionBalances.filter(
+          (b) => b.studentId === studentId
+        ),
+        directions: data.learningDirections,
+      }),
+    [
+      student?.directionBalances,
+      data.studentDirectionBalances,
+      data.learningDirections,
+      studentId,
+    ]
+  );
+  const items = useMemo(
+    () =>
+      buildStudentTheoryCatalogItems({
+        theories: data.theories,
+        assignments: theoryAssignmentsForStudent(studentId),
+        studentId,
+        folders: data.materialFolders,
+        studentGrade: student?.grade,
+        subjects,
+      }),
+    [
+      data.theories,
+      data.materialFolders,
+      theoryAssignmentsForStudent,
+      studentId,
+      student?.grade,
+      subjects,
+    ]
+  );
   const ordered = groupStudentTheories(items).flatMap((section) => section.items);
-  const learning = studentLearningLock(data, data.currentStudentId);
+  const learning = studentLearningLock(data, studentId);
+  const emptyHint = studentTheoryCatalogEmptyHint({
+    studentGrade: student?.grade,
+    subjects,
+  });
 
   return (
     <div className="space-y-5">
@@ -41,7 +87,7 @@ export function StudentTheoryWorkspace() {
 
       <section className="auditoria-home-card flex flex-wrap items-center gap-3 py-3">
         <h2 className="font-display text-lg font-semibold tracking-tight">
-          Ваши материалы
+          Теория вашего класса
         </h2>
         <span className="rounded-full bg-pastel-blue px-2.5 py-1 text-sm text-foreground/80">
           {theoryPackageCountLabel(items.length)}
@@ -49,14 +95,11 @@ export function StudentTheoryWorkspace() {
       </section>
 
       {ordered.length === 0 ? (
-        <EmptyState
-          title="Теории пока нет"
-          description="Когда преподаватель отправит материал, он появится здесь."
-        />
+        <EmptyState title="Теории пока нет" description={emptyHint} />
       ) : (
         <ul className="space-y-4">
           {ordered.map((item) => (
-            <li key={item.id}>
+            <li key={`${item.materialId}:${item.id}`}>
               <TheoryPackageCard
                 item={item}
                 questionCount={questionCountFor(data.homeworkAssignments, item)}
@@ -129,8 +172,10 @@ function TheoryPackageCard({
           {item.title}
         </h3>
         <p className="mt-2 text-sm text-muted-foreground">
-          Назначено {formatDate(item.assignedAt)}
-          {tour.active ? ` · ${teacherName}` : ""}
+          {item.id === item.materialId
+            ? "Доступно по классу"
+            : `В каталоге с ${formatDate(item.assignedAt)}`}
+          {tour.active && item.teacherId ? ` · ${teacherName}` : ""}
           {locked ? " · недоступно до продления тарифа" : ""}
         </p>
         {item.description ? (
@@ -174,7 +219,7 @@ function TheoryPackageCard({
   }
 
   return (
-    <Link href={href(`/theory/${item.id}`)} className={className}>
+    <Link href={href(`/theory/${item.materialId}`)} className={className}>
       {body}
     </Link>
   );

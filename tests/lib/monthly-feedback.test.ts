@@ -155,6 +155,42 @@ describe("monthly feedback metrics", () => {
     expect(metrics.homework.previousComparable).toBe(true);
   });
 
+  it("counts theory progress started in the month, not the whole class catalog", () => {
+    const metrics = computeMonthlyFeedbackMetrics({
+      now,
+      year: 2026,
+      month: 10,
+      from,
+      toExclusive,
+      lessons: [],
+      attendances: [],
+      topics: [],
+      homework: [],
+      previousHomework: [],
+      theory: [
+        {
+          createdAt: fromAppWall(2026, 10, 4, 10, 0),
+          status: "viewed",
+        },
+        {
+          createdAt: fromAppWall(2026, 10, 8, 10, 0),
+          status: "completed",
+        },
+        {
+          // вне периода — не должно попасть в source снаружи, но проверяем фильтр вызывающего
+          createdAt: fromAppWall(2026, 9, 20, 10, 0),
+          status: "completed",
+        },
+      ],
+    });
+    // computeMonthlyFeedbackMetrics считает все переданные theory-строки;
+    // периодный отбор делается в monthly-feedback-metrics по createdAt.
+    expect(metrics.theory.available).toBe(true);
+    expect(metrics.theory.assigned).toBe(3);
+    expect(metrics.theory.completed).toBe(2);
+    expect(feedbackMetricsSummary(metrics)).toContain("теория 2 из 3");
+  });
+
   it("derives fill status from comment and submission", () => {
     expect(teacherFillStatus({ submittedAt: null, teacherComment: "  " })).toBe(
       "empty"

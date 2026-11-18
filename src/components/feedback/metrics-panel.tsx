@@ -132,12 +132,11 @@ export function FeedbackMetricsPanel({
           {metrics.theory.available ? (
             <p>
               Завершено {metrics.theory.completed} из {metrics.theory.assigned}{" "}
-              назначенных материалов.
+              начатых материалов.
             </p>
           ) : (
             <p>
-              Недостаточно данных за этот месяц: теоретические материалы не
-              назначались.
+              Недостаточно данных за этот месяц: ученик ещё не открывал теорию.
             </p>
           )}
         </MetricBlock>

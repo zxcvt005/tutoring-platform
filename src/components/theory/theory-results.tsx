@@ -61,7 +61,7 @@ export function TheoryResults({ materialId }: { materialId: string }) {
     <div className="space-y-4">
       <PageHeader
         title={material.title}
-        description="Кому отправлена теория и кто её прошёл."
+        description="Прогресс учеников по этому материалу."
         actions={
           <Link href="/kafedra/theory" className={buttonVariants({ variant: "outline" })}>
             К списку
@@ -70,8 +70,8 @@ export function TheoryResults({ materialId }: { materialId: string }) {
       />
       {rows.length === 0 ? (
         <EmptyState
-          title="Ещё никому не отправлена"
-          description="Назначьте материал ученикам из списка теорий."
+          title="Пока нет прогресса"
+          description="Когда ученики откроют материал из каталога своего класса, здесь появится их прогресс."
         />
       ) : (
         <ul className="space-y-2">
@@ -80,9 +80,9 @@ export function TheoryResults({ materialId }: { materialId: string }) {
               <div>
                 <p className="font-medium">{student?.fullName ?? "Ученик"}</p>
                 <p className="text-xs text-muted-foreground">
-                  Отправлена {formatDate(assignment.assignedAt)}
+                  Начато {formatDate(assignment.assignedAt)}
                   {assignment.completedAt
-                    ? ` · завершена ${formatDate(assignment.completedAt)}`
+                    ? ` · завершено ${formatDate(assignment.completedAt)}`
                     : ""}
                 </p>
               </div>

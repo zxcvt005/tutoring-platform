@@ -1,12 +1,18 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 
+import type { MaterialFolder } from "@/lib/folders/material-folders";
 import {
   hasTheoryComponent,
   THEORY_NEED_COMPONENT_MESSAGE,
 } from "@/lib/theory/components";
 import { THEORY_MAX_FILES } from "@/lib/theory/constants";
 import { sniffTheoryFile } from "@/lib/theory/file-sniff";
+import {
+  filterPublishedSchoolTheoryForStudent,
+  isPublishedSchoolTheoryForStudent,
+  studentSystemSubjects,
+} from "@/lib/theory/student-catalog";
 import { parseVideoLink, type TheoryVideoProvider } from "@/lib/theory/video";
 import type {
   HomeworkAssignmentStatus,
@@ -31,7 +37,10 @@ import {
   requireTeacherProfile,
 } from "@/server/authz/require";
 import {
+  learningDirections,
   materialFolders,
+  studentLessonLedger,
+  students,
   testAssignments,
   tests,
   theoryAssignments,
@@ -520,6 +529,240 @@ export async function deleteTheory(db: AppDb, ctx: AuthContext, id: string) {
   return { ok: true as const, archived: false };
 }
 
+function mapFolderRow(
+  row: typeof materialFolders.$inferSelect
+): MaterialFolder {
+  return {
+    id: row.id,
+    ownerScope: row.ownerScope === "school" ? "school" : "teacher",
+    teacherId: row.teacherId,
+    parentId: row.parentId,
+    title: row.title,
+    sortOrder: row.sortOrder,
+    contentKind:
+      row.contentKind === "topic" ||
+      row.contentKind === "theory" ||
+      row.contentKind === "test" ||
+      row.contentKind === "intensive" ||
+      row.contentKind === "shared"
+        ? row.contentKind
+        : null,
+    systemKey: row.systemKey ?? null,
+  };
+}
+
+async function loadSchoolFolders(
+  db: AppDb,
+  organizationId: string
+): Promise<MaterialFolder[]> {
+  const { ensureSystemKnowledgeFolders } = await import(
+    "@/server/services/folder-service"
+  );
+  await ensureSystemKnowledgeFolders(db, organizationId, {
+    ownerScope: "school",
+    teacherId: null,
+  });
+  const rows = await db
+    .select()
+    .from(materialFolders)
+    .where(
+      and(
+        eq(materialFolders.organizationId, organizationId),
+        eq(materialFolders.ownerScope, "school"),
+        isNull(materialFolders.teacherId)
+      )
+    );
+  return rows.map(mapFolderRow);
+}
+
+async function loadStudentTheorySubjects(
+  db: AppDb,
+  organizationId: string,
+  studentId: string
+) {
+  const directionRows = await db
+    .select()
+    .from(learningDirections)
+    .where(eq(learningDirections.organizationId, organizationId));
+  const balanceRows = await db
+    .select({
+      studentId: studentLessonLedger.studentId,
+      directionId: studentLessonLedger.directionId,
+      remaining: sql<number>`coalesce(sum(${studentLessonLedger.delta}), 0)`,
+      used: sql<number>`coalesce(sum(case when ${studentLessonLedger.delta} < 0 then -${studentLessonLedger.delta} else 0 end), 0)`,
+    })
+    .from(studentLessonLedger)
+    .where(
+      and(
+        eq(studentLessonLedger.organizationId, organizationId),
+        eq(studentLessonLedger.studentId, studentId)
+      )
+    )
+    .groupBy(studentLessonLedger.studentId, studentLessonLedger.directionId);
+  return studentSystemSubjects({
+    balanceRows: balanceRows.map((r) => ({
+      studentId: r.studentId,
+      directionId: r.directionId,
+      remaining: Number(r.remaining ?? 0),
+      used: Number(r.used ?? 0),
+    })),
+    directions: directionRows.map((d) => ({
+      id: d.id,
+      slug: d.slug,
+      name: d.name,
+    })),
+  });
+}
+
+async function loadStudentProgressRow(
+  db: AppDb,
+  organizationId: string,
+  studentId: string,
+  materialId: string
+) {
+  const [row] = await db
+    .select()
+    .from(theoryAssignments)
+    .where(
+      and(
+        eq(theoryAssignments.organizationId, organizationId),
+        eq(theoryAssignments.studentId, studentId),
+        eq(theoryAssignments.materialId, materialId)
+      )
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Доступ ученика к материалу: школьный каталог класса/предмета
+ * или уже существующий прогресс (история / старые назначения).
+ */
+export async function studentCanAccessTheoryMaterial(
+  db: AppDb,
+  ctx: AuthContext,
+  material: {
+    id: string;
+    libraryScope: string;
+    status: string;
+    folderId: string | null;
+  },
+  studentId: string
+): Promise<boolean> {
+  const existing = await loadStudentProgressRow(
+    db,
+    ctx.organizationId,
+    studentId,
+    material.id
+  );
+  if (existing) return true;
+
+  if (material.libraryScope !== "school" || material.status !== "published") {
+    return false;
+  }
+  const [student] = await db
+    .select({ grade: students.grade })
+    .from(students)
+    .where(
+      and(
+        eq(students.id, studentId),
+        eq(students.organizationId, ctx.organizationId)
+      )
+    )
+    .limit(1);
+  if (!student) return false;
+  const folders = await loadSchoolFolders(db, ctx.organizationId);
+  const subjects = await loadStudentTheorySubjects(
+    db,
+    ctx.organizationId,
+    studentId
+  );
+  return isPublishedSchoolTheoryForStudent(
+    {
+      libraryScope: material.libraryScope as LibraryScope,
+      status: material.status as TheoryStatus,
+      folderId: material.folderId,
+    },
+    folders,
+    { studentGrade: student.grade, subjects }
+  );
+}
+
+/**
+ * Создаёт или возвращает строку прогресса. Не выдаёт доступ сама по себе —
+ * вызывающий код обязан проверить studentCanAccessTheoryMaterial.
+ */
+export async function ensureTheoryProgress(
+  db: AppDb,
+  ctx: AuthContext,
+  materialId: string,
+  studentId: string
+) {
+  const existing = await loadStudentProgressRow(
+    db,
+    ctx.organizationId,
+    studentId,
+    materialId
+  );
+  if (existing) return existing;
+
+  const material = await loadMaterialInOrg(db, ctx, materialId);
+  if (material.status !== "published" || !material.currentVersionId) {
+    throw badRequest("Теория ещё не опубликована");
+  }
+  const version = await loadVersion(db, material.currentVersionId);
+  const versionFiles = await filesForVersion(db, version.id);
+  if (
+    !hasTheoryComponent({
+      videoUrl: version.videoUrl,
+      testId: version.testId,
+      fileCount: versionFiles.length,
+    })
+  ) {
+    throw badRequest(THEORY_NEED_COMPONENT_MESSAGE);
+  }
+
+  const [student] = await db
+    .select({
+      primaryTeacherId: students.primaryTeacherId,
+    })
+    .from(students)
+    .where(
+      and(
+        eq(students.id, studentId),
+        eq(students.organizationId, ctx.organizationId)
+      )
+    )
+    .limit(1);
+  const teacherId = student?.primaryTeacherId;
+  if (!teacherId) {
+    throw badRequest("У ученика не указан преподаватель — прогресс недоступен");
+  }
+
+  const assignmentId = newId("tha");
+  await db.insert(theoryAssignments).values({
+    id: assignmentId,
+    organizationId: ctx.organizationId,
+    materialId: material.id,
+    versionId: version.id,
+    teacherId,
+    studentId,
+    assignedByUserId: ctx.userId,
+    status: "assigned",
+  });
+  const [created] = await db
+    .select()
+    .from(theoryAssignments)
+    .where(eq(theoryAssignments.id, assignmentId))
+    .limit(1);
+  if (!created) throw notFound("Не удалось создать прогресс по теории");
+  return created;
+}
+
+/**
+ * @deprecated Ручное назначение больше не используется в продукте.
+ * Оставлено для совместимости тестов и миграции истории: создаёт строки прогресса.
+ */
 export async function assignTheory(
   db: AppDb,
   ctx: AuthContext,
@@ -619,25 +862,59 @@ async function ensureTheoryTestAssignment(
 export async function markTheoryViewed(
   db: AppDb,
   ctx: AuthContext,
-  assignmentId: string
+  id: string
 ) {
   const studentId = await requireStudentProfile(ctx);
-  const [assignment] = await db
-    .select()
-    .from(theoryAssignments)
-    .where(
-      and(
-        eq(theoryAssignments.id, assignmentId),
-        eq(theoryAssignments.organizationId, ctx.organizationId)
-      )
-    )
-    .limit(1);
-  if (!assignment) throw notFound("Назначение не найдено");
-  if (assignment.studentId !== studentId) throw forbidden();
   const { assertStudentLearningAccess } = await import(
     "@/server/services/learning-access"
   );
   await assertStudentLearningAccess(db, ctx, studentId, "homework");
+
+  let assignment = (
+    await db
+      .select()
+      .from(theoryAssignments)
+      .where(
+        and(
+          eq(theoryAssignments.id, id),
+          eq(theoryAssignments.organizationId, ctx.organizationId)
+        )
+      )
+      .limit(1)
+  )[0];
+
+  if (!assignment) {
+    const byMaterial = await loadStudentProgressRow(
+      db,
+      ctx.organizationId,
+      studentId,
+      id
+    );
+    if (byMaterial) {
+      assignment = byMaterial;
+    } else {
+      const material = await loadMaterialInOrg(db, ctx, id);
+      const allowed = await studentCanAccessTheoryMaterial(
+        db,
+        ctx,
+        material,
+        studentId
+      );
+      if (!allowed) throw forbidden();
+      assignment = await ensureTheoryProgress(db, ctx, material.id, studentId);
+    }
+  }
+
+  if (assignment.studentId !== studentId) throw forbidden();
+
+  const material = await loadMaterialInOrg(db, ctx, assignment.materialId);
+  const allowed = await studentCanAccessTheoryMaterial(
+    db,
+    ctx,
+    material,
+    studentId
+  );
+  if (!allowed) throw forbidden();
 
   const version = await loadVersion(db, assignment.versionId);
   const now = new Date();
@@ -693,6 +970,8 @@ export async function markTheoryViewed(
     status,
     testAssignmentId: testAssignmentId ?? null,
     alreadyViewed,
+    assignmentId: assignment.id,
+    materialId: assignment.materialId,
   };
 }
 
@@ -841,21 +1120,25 @@ export async function getTheoryFileForViewer(
     await assertCanManageTheory(db, ctx, material);
   } else if (ctx.role === "student") {
     if (!ctx.studentId) throw forbidden();
-    const [assignment] = await db
-      .select()
-      .from(theoryAssignments)
-      .where(
-        and(
-          eq(theoryAssignments.materialId, material.id),
-          eq(theoryAssignments.studentId, ctx.studentId)
-        )
-      )
-      .limit(1);
-    if (!assignment) throw forbidden();
-    if (file.versionId && file.versionId !== assignment.versionId) {
+    const allowed = await studentCanAccessTheoryMaterial(
+      db,
+      ctx,
+      material,
+      ctx.studentId
+    );
+    if (!allowed) throw forbidden();
+    if (!file.versionId) throw forbidden();
+    const progress = await loadStudentProgressRow(
+      db,
+      ctx.organizationId,
+      ctx.studentId,
+      material.id
+    );
+    const allowedVersionId =
+      progress?.versionId ?? material.currentVersionId ?? null;
+    if (!allowedVersionId || file.versionId !== allowedVersionId) {
       throw forbidden();
     }
-    if (!file.versionId) throw forbidden();
     const { assertStudentLearningAccess } = await import(
       "@/server/services/learning-access"
     );
@@ -919,7 +1202,7 @@ export async function listTheoryMaterialsForBootstrap(
     .select()
     .from(theoryMaterials)
     .where(eq(theoryMaterials.organizationId, ctx.organizationId));
-  if (!canManageSchoolKnowledgeBase(ctx.role) && ctx.role !== "teacher") {
+  if (!canManageSchoolKnowledgeBase(ctx.role) && ctx.role !== "teacher" && ctx.role !== "student") {
     materialRows = materialRows.filter((m) => m.libraryScope !== "school");
   }
 
@@ -934,12 +1217,49 @@ export async function listTheoryMaterialsForBootstrap(
     );
     assignmentRows = assignmentRows.filter((a) => a.teacherId === ctx.teacherId);
   }
+
+  let studentCatalogMaterialIds: Set<string> | null = null;
   if (ctx.role === "student" && ctx.studentId) {
     assignmentRows = assignmentRows.filter((a) => a.studentId === ctx.studentId);
-    const materialIds = new Set(assignmentRows.map((a) => a.materialId));
-    materialRows = materialRows.filter(
-      (m) => materialIds.has(m.id) && m.status !== "draft"
+    const progressMaterialIds = new Set(assignmentRows.map((a) => a.materialId));
+    const folders = await loadSchoolFolders(db, ctx.organizationId);
+    const [student] = await db
+      .select({ grade: students.grade })
+      .from(students)
+      .where(
+        and(
+          eq(students.id, ctx.studentId),
+          eq(students.organizationId, ctx.organizationId)
+        )
+      )
+      .limit(1);
+    const subjects = await loadStudentTheorySubjects(
+      db,
+      ctx.organizationId,
+      ctx.studentId
     );
+    const schoolCatalog = filterPublishedSchoolTheoryForStudent(
+      materialRows.map((m) => ({
+        id: m.id,
+        libraryScope: m.libraryScope as LibraryScope,
+        status: m.status as TheoryStatus,
+        folderId: m.folderId,
+      })),
+      folders,
+      { studentGrade: student?.grade, subjects }
+    );
+    studentCatalogMaterialIds = new Set([
+      ...schoolCatalog.map((m) => m.id),
+      ...progressMaterialIds,
+    ]);
+    materialRows = materialRows.filter((m) => {
+      if (!studentCatalogMaterialIds!.has(m.id)) return false;
+      if (m.status === "draft") return false;
+      if (m.status === "archived" && !progressMaterialIds.has(m.id)) {
+        return false;
+      }
+      return true;
+    });
   }
 
   const materialIds = materialRows.map((m) => m.id);
@@ -998,19 +1318,42 @@ export async function listTheoryMaterialsForBootstrap(
   }
 
   const theories: TheoryMaterial[] = materialRows.map((m) => {
-    const files = fileRows.filter(
+    const draftFiles = fileRows.filter(
       (f) => f.materialId === m.id && f.versionId == null
     );
-    return mapMaterial(m, {
-      fileCount: files.length,
+    const versionFiles = m.currentVersionId
+      ? fileRows.filter((f) => f.versionId === m.currentVersionId)
+      : [];
+    const version = m.currentVersionId
+      ? versionById.get(m.currentVersionId)
+      : null;
+    const studentView = ctx.role === "student";
+    const mapped = mapMaterial(m, {
+      fileCount: studentView ? versionFiles.length : draftFiles.length,
       assignedCount: assignedCount.get(m.id) ?? 0,
       completedCount: completedCount.get(m.id) ?? 0,
       awaitingReviewCount: awaitingCount.get(m.id) ?? 0,
       files:
         ctx.role === "teacher" || isOrgKnowledgeStaff(ctx.role)
-          ? files.map(toFileView)
-          : undefined,
+          ? draftFiles.map(toFileView)
+          : studentView
+            ? versionFiles.map(toFileView)
+            : undefined,
     });
+    if (studentView && version) {
+      mapped.title = version.title;
+      mapped.description = version.description ?? undefined;
+      mapped.videoUrl = version.videoUrl;
+      mapped.videoProvider =
+        (version.videoProvider as TheoryMaterial["videoProvider"]) ?? null;
+      mapped.videoEmbedUrl = version.videoEmbedUrl;
+      mapped.embedAllowed = version.embedAllowed;
+      mapped.videoWarning = version.videoWarning;
+      mapped.testId = version.testId;
+      mapped.hasTest = Boolean(version.testId);
+      mapped.hasVideo = Boolean(version.videoUrl);
+    }
+    return mapped;
   });
 
   const theoryAssignmentsMapped: TheoryAssignment[] = assignmentRows.map((a) => {

@@ -1538,6 +1538,28 @@ async function insertTheory(
     now: Date;
   }
 ) {
+  const { ensureSystemKnowledgeFolders } = await import(
+    "@/server/services/folder-service"
+  );
+  await ensureSystemKnowledgeFolders(db, ORG, {
+    ownerScope: "school",
+    teacherId: null,
+  });
+  const [gradeFolder] = await db
+    .select({ id: t.materialFolders.id })
+    .from(t.materialFolders)
+    .where(
+      and(
+        eq(t.materialFolders.organizationId, ORG),
+        eq(t.materialFolders.ownerScope, "school"),
+        eq(t.materialFolders.systemKey, "grade:physics:11")
+      )
+    )
+    .limit(1);
+  if (!gradeFolder) {
+    throw new Error("Не найдена системная папка grade:physics:11 для демо-теории");
+  }
+
   for (const spec of THEORY) {
     const materialId = `demo_alex_th_${spec.n}`;
     const versionId = `demo_alex_thv_${spec.n}`;
@@ -1553,8 +1575,8 @@ async function insertTheory(
       await db.insert(t.tests).values({
         id: theoryTestId,
         organizationId: ORG,
-        teacherId: input.teacherId,
-        libraryScope: "teacher",
+        teacherId: null,
+        libraryScope: "school",
         title: `Мини-тест. ${spec.title}`,
         description: "Короткий тест к теоретическому материалу.",
         status: "published",
@@ -1641,8 +1663,9 @@ async function insertTheory(
     await db.insert(t.theoryMaterials).values({
       id: materialId,
       organizationId: ORG,
-      teacherId: input.teacherId,
-      libraryScope: "teacher",
+      teacherId: null,
+      libraryScope: "school",
+      folderId: gradeFolder.id,
       title: spec.title,
       description: spec.description,
       videoUrl: video?.watchUrl ?? null,
