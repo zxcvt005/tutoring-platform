@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 
 import type { MaterialFolder } from "@/lib/folders/material-folders";
+import { resolveFolderClassPath } from "@/lib/folders/system-kb-structure";
 import {
   hasTheoryComponent,
   THEORY_NEED_COMPONENT_MESSAGE,
@@ -9,9 +10,14 @@ import {
 import { THEORY_MAX_FILES } from "@/lib/theory/constants";
 import { sniffTheoryFile } from "@/lib/theory/file-sniff";
 import {
+  assertTheoryPreviewGrade,
+  normalizeTheoryCatalogOrderIds,
+} from "@/lib/theory/grade-catalog-order";
+import {
   filterPublishedSchoolTheoryForStudent,
   isPublishedSchoolTheoryForStudent,
   studentSystemSubjects,
+  type TheoryCatalogOrderEntry,
 } from "@/lib/theory/student-catalog";
 import { parseVideoLink, type TheoryVideoProvider } from "@/lib/theory/video";
 import type {
@@ -45,6 +51,7 @@ import {
   tests,
   theoryAssignments,
   theoryFiles,
+  theoryGradeCatalogOrder,
   theoryMaterialVersions,
   theoryMaterials,
 } from "@/server/db/schema";
@@ -1197,6 +1204,7 @@ export async function listTheoryMaterialsForBootstrap(
 ): Promise<{
   theories: TheoryMaterial[];
   theoryAssignments: TheoryAssignment[];
+  theoryCatalogOrder: TheoryCatalogOrderEntry[];
 }> {
   let materialRows = await db
     .select()
@@ -1402,5 +1410,98 @@ export async function listTheoryMaterialsForBootstrap(
     }
   }
 
-  return { theories, theoryAssignments: theoryAssignmentsMapped };
+  const orderRows = await db
+    .select({
+      grade: theoryGradeCatalogOrder.grade,
+      materialId: theoryGradeCatalogOrder.materialId,
+      sortOrder: theoryGradeCatalogOrder.sortOrder,
+    })
+    .from(theoryGradeCatalogOrder)
+    .where(eq(theoryGradeCatalogOrder.organizationId, ctx.organizationId));
+
+  const theoryCatalogOrder: TheoryCatalogOrderEntry[] = orderRows.map((row) => ({
+    grade: row.grade,
+    materialId: row.materialId,
+    sortOrder: row.sortOrder,
+  }));
+
+  return {
+    theories,
+    theoryAssignments: theoryAssignmentsMapped,
+    theoryCatalogOrder,
+  };
+}
+
+export async function reorderTheoryCatalogForGrade(
+  db: AppDb,
+  ctx: AuthContext,
+  input: { grade: string; orderedMaterialIds: string[] }
+) {
+  requireRoles(ctx, ["director", "assistant"]);
+  requireSchoolKnowledgeBase(ctx);
+  let grade: string;
+  try {
+    grade = assertTheoryPreviewGrade(input.grade);
+  } catch {
+    throw badRequest("Класс должен быть от 7 до 11");
+  }
+  const orderedIds = normalizeTheoryCatalogOrderIds(input.orderedMaterialIds);
+  if (orderedIds.length === 0) {
+    throw badRequest("Передайте упорядоченный список материалов");
+  }
+
+  const materials = await db
+    .select({
+      id: theoryMaterials.id,
+      libraryScope: theoryMaterials.libraryScope,
+      status: theoryMaterials.status,
+      folderId: theoryMaterials.folderId,
+    })
+    .from(theoryMaterials)
+    .where(
+      and(
+        eq(theoryMaterials.organizationId, ctx.organizationId),
+        inArray(theoryMaterials.id, orderedIds)
+      )
+    );
+  if (materials.length !== orderedIds.length) {
+    throw badRequest("Некоторые материалы теории не найдены");
+  }
+
+  const folders = await loadSchoolFolders(db, ctx.organizationId);
+  for (const material of materials) {
+    if (material.libraryScope !== "school" || material.status !== "published") {
+      throw badRequest("В порядок класса можно включать только опубликованную школьную теорию");
+    }
+    const path = resolveFolderClassPath(folders, material.folderId);
+    if (!path || path.grade !== grade) {
+      throw badRequest(
+        `Материал не принадлежит ${grade} классу и не может быть в его порядке`
+      );
+    }
+  }
+
+  const now = new Date();
+  for (let i = 0; i < orderedIds.length; i++) {
+    const materialId = orderedIds[i]!;
+    await db
+      .insert(theoryGradeCatalogOrder)
+      .values({
+        organizationId: ctx.organizationId,
+        grade,
+        materialId,
+        sortOrder: i,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [
+          theoryGradeCatalogOrder.organizationId,
+          theoryGradeCatalogOrder.grade,
+          theoryGradeCatalogOrder.materialId,
+        ],
+        set: { sortOrder: i, updatedAt: now },
+      });
+  }
+
+  return { ok: true as const, grade, count: orderedIds.length };
 }

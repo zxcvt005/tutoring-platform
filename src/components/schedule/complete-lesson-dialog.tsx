@@ -195,7 +195,11 @@ function CompleteForm({
           nextTopics.push({ topicId: created.id, title: newTitle.trim() });
         }
 
-        if (lessonHasOccurred(lesson) && attendance) {
+        if (lessonHasOccurred(lesson)) {
+          if (!attendance) {
+            setFormError("Укажите отметку посещаемости.");
+            return;
+          }
           if (nextTopics.length === 0) {
             setFormError(LESSON_MARK_CONTENT_ERROR);
             return;

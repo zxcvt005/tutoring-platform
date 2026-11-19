@@ -1,3 +1,7 @@
+import {
+  sortTheoryItemsByGradeOrder,
+  type TheoryCatalogOrderEntry,
+} from "@/lib/theory/student-catalog";
 import type {
   TheoryAssignment,
   TheoryAssignmentStatus,
@@ -38,7 +42,11 @@ export function studentTheorySection(
   return "in_progress";
 }
 
-export function groupStudentTheories(items: TheoryAssignment[]): {
+export function groupStudentTheories(
+  items: TheoryAssignment[],
+  studentGrade?: string | null,
+  catalogOrder?: readonly TheoryCatalogOrderEntry[]
+): {
   key: StudentTheorySectionKey;
   title: string;
   items: TheoryAssignment[];
@@ -61,9 +69,10 @@ export function groupStudentTheories(items: TheoryAssignment[]): {
   return order
     .map((section) => ({
       ...section,
-      items: [...buckets[section.key]].sort(
-        (a, b) =>
-          new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime()
+      items: sortTheoryItemsByGradeOrder(
+        buckets[section.key],
+        studentGrade,
+        catalogOrder
       ),
     }))
     .filter((section) => section.items.length > 0);

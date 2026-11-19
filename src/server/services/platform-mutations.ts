@@ -742,11 +742,31 @@ export async function createRecurringScheduleAction(
   });
 }
 
-export async function deleteLesson(db: AppDb, ctx: AuthContext, id: string) {
+export async function deleteLesson(
+  db: AppDb,
+  ctx: AuthContext,
+  id: string,
+  scope: "this" | "thisAndFollowing" = "this"
+) {
   requireRoles(ctx, ["director", "teacher"]);
   const [row] = await db.select().from(lessons).where(eq(lessons.id, id)).limit(1);
   if (!row || row.organizationId !== ctx.organizationId) throw notFound();
   if (ctx.role === "teacher" && row.teacherId !== ctx.teacherId) throw forbidden();
+
+  if (
+    scope === "thisAndFollowing" &&
+    row.scheduleId &&
+    row.scheduleOccurrenceKey
+  ) {
+    const { endRecurringScheduleFromOccurrence } = await import(
+      "@/server/services/schedule-service"
+    );
+    await endRecurringScheduleFromOccurrence(db, ctx, {
+      scheduleId: row.scheduleId,
+      fromOccurrenceKey: row.scheduleOccurrenceKey,
+    });
+    return { ok: true, seriesEnded: true };
+  }
 
   if (row.scheduleId && row.scheduleOccurrenceKey) {
     await recordScheduleException(db, {
@@ -777,6 +797,54 @@ export async function deleteLesson(db: AppDb, ctx: AuthContext, id: string) {
 
   await db.delete(lessons).where(eq(lessons.id, id));
   return { ok: true };
+}
+
+export async function updateLessonSeriesAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { rescheduleRecurringFromOccurrence } = await import(
+    "@/server/services/schedule-service"
+  );
+  return rescheduleRecurringFromOccurrence(db, ctx, {
+    scheduleId: String(payload.scheduleId ?? ""),
+    fromOccurrenceKey: String(payload.fromOccurrenceKey ?? ""),
+    startTime: String(payload.startTime ?? ""),
+    durationMin: Number(payload.durationMin ?? 60),
+    weekdays: Array.isArray(payload.weekdays)
+      ? (payload.weekdays as number[])
+      : undefined,
+    directionId:
+      payload.directionId === undefined
+        ? undefined
+        : payload.directionId === null
+          ? null
+          : String(payload.directionId),
+  });
+}
+
+export async function ensureSchedulesMaterializedAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  requireRoles(ctx, ["director", "teacher"]);
+  const { ensureOrgSchedulesMaterialized } = await import(
+    "@/server/services/schedule-service"
+  );
+  const untilRaw = payload.until;
+  const until =
+    typeof untilRaw === "string" && untilRaw.trim()
+      ? new Date(untilRaw)
+      : undefined;
+  const created = await ensureOrgSchedulesMaterialized(
+    db,
+    ctx.organizationId,
+    new Date(),
+    { force: true, until }
+  );
+  return { ok: true, created };
 }
 
 const MARKABLE_ATTENDANCE = new Set<AttendanceStatus>([
@@ -857,15 +925,19 @@ async function maybeMarkLessonDone(db: AppDb, lessonId: string): Promise<boolean
     .select()
     .from(attendances)
     .where(eq(attendances.lessonId, lessonId));
-  const marked = new Set(att.map((a) => a.studentId));
-  if (participants.every((p) => marked.has(p.studentId))) {
-    await db
-      .update(lessons)
-      .set({ status: "done", updatedAt: new Date() })
-      .where(eq(lessons.id, lessonId));
-    return true;
+  const finalByStudent = new Map(
+    att
+      .filter((a) => isFinalAttendanceStatus(a.status as AttendanceStatus))
+      .map((a) => [a.studentId, a.status as AttendanceStatus])
+  );
+  if (!participants.every((p) => finalByStudent.has(p.studentId))) {
+    return false;
   }
-  return false;
+  await db
+    .update(lessons)
+    .set({ status: "done", updatedAt: new Date() })
+    .where(eq(lessons.id, lessonId));
+  return true;
 }
 
 async function emitLessonConducted(
@@ -1095,7 +1167,39 @@ export async function completeLesson(
     }
   }
 
-  // ДЗ до отметки/списания: ошибка назначения не должна оставлять «Отмечено» без ДЗ.
+  // Сначала отметка: иначе ДЗ может сохраниться, а UI останется «Не отмечено».
+  for (const [studentId, status] of byStudent) {
+    if (attendanceDebitsLesson(status)) {
+      await applyAttendanceBalance(db, ctx, {
+        lessonId: input.lessonId,
+        studentId,
+        attendanceStatus: status,
+        lessonCancelled: false,
+      });
+    }
+    const { previous } = await writeAttendanceRow(
+      db,
+      input.lessonId,
+      studentId,
+      status
+    );
+    if (!attendanceDebitsLesson(status)) {
+      await applyAttendanceBalance(db, ctx, {
+        lessonId: input.lessonId,
+        studentId,
+        attendanceStatus: status,
+        lessonCancelled: false,
+      });
+    }
+    if (previous !== status) {
+      await emitAttendanceSaved(db, lesson, studentId, status);
+    }
+  }
+  const becameDone = await maybeMarkLessonDone(db, input.lessonId);
+  if (becameDone) {
+    await emitLessonConducted(db, lesson);
+  }
+
   let assignedCount = 0;
   const { listMaterialFolders } = await import("@/server/services/folder-service");
   const {
@@ -1188,38 +1292,6 @@ export async function completeLesson(
       );
     }
     assignedCount += result.created;
-  }
-
-  for (const [studentId, status] of byStudent) {
-    if (attendanceDebitsLesson(status)) {
-      await applyAttendanceBalance(db, ctx, {
-        lessonId: input.lessonId,
-        studentId,
-        attendanceStatus: status,
-        lessonCancelled: false,
-      });
-    }
-    const { previous } = await writeAttendanceRow(
-      db,
-      input.lessonId,
-      studentId,
-      status
-    );
-    if (!attendanceDebitsLesson(status)) {
-      await applyAttendanceBalance(db, ctx, {
-        lessonId: input.lessonId,
-        studentId,
-        attendanceStatus: status,
-        lessonCancelled: false,
-      });
-    }
-    if (previous !== status) {
-      await emitAttendanceSaved(db, lesson, studentId, status);
-    }
-  }
-  const becameDone = await maybeMarkLessonDone(db, input.lessonId);
-  if (becameDone) {
-    await emitLessonConducted(db, lesson);
   }
 
   await settleLessonPayroll(db, ctx, input.lessonId);
@@ -3211,6 +3283,22 @@ export async function upsertTheoryAction(
   });
 }
 
+export async function reorderTheoryCatalogForGradeAction(
+  db: AppDb,
+  ctx: AuthContext,
+  payload: Record<string, unknown>
+) {
+  const { reorderTheoryCatalogForGrade } = await import(
+    "@/server/services/theory-service"
+  );
+  return reorderTheoryCatalogForGrade(db, ctx, {
+    grade: String(payload.grade ?? ""),
+    orderedMaterialIds: Array.isArray(payload.orderedMaterialIds)
+      ? (payload.orderedMaterialIds as unknown[]).map((id) => String(id))
+      : [],
+  });
+}
+
 export async function saveToSchoolLibraryAction(
   db: AppDb,
   ctx: AuthContext,
@@ -3372,6 +3460,8 @@ export const platformActions = {
   upsertLesson,
   createRecurringSchedule: createRecurringScheduleAction,
   deleteLesson,
+  updateLessonSeries: updateLessonSeriesAction,
+  ensureSchedulesMaterialized: ensureSchedulesMaterializedAction,
   completeLesson,
   setAttendance,
   resetLessonConduct: resetLessonConductAction,
@@ -3446,6 +3536,7 @@ export const platformActions = {
   createTeacherPayout: createTeacherPayoutAction,
   previewPayrollBackfill: previewPayrollBackfillAction,
   upsertTheory: upsertTheoryAction,
+  reorderTheoryCatalogForGrade: reorderTheoryCatalogForGradeAction,
   deleteTheory: deleteTheoryAction,
   assignTheory: assignTheoryAction,
   markTheoryViewed: markTheoryViewedAction,

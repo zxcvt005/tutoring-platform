@@ -25,8 +25,26 @@ import {
   type DraftLessonTopic,
 } from "@/lib/lesson-topics-draft";
 import { topicsForLesson } from "@/lib/lesson-topics";
+import { attendanceStatusLabel } from "@/lib/format";
+import {
+  isFinalAttendanceStatus,
+  lessonHasOccurred,
+  studentAttendanceMarkBinary,
+  attendanceMarkBinaryLabel,
+} from "@/lib/kafedra-today";
 import { useDemoStore } from "@/lib/store/demo-store";
-import type { Homework, HomeworkAssignment, Lesson } from "@/lib/types";
+import type {
+  AttendanceStatus,
+  Homework,
+  HomeworkAssignment,
+  Lesson,
+} from "@/lib/types";
+
+const ATTENDANCE_OPTIONS: AttendanceStatus[] = [
+  "present",
+  "absent_excused",
+  "absent_unexcused",
+];
 
 type DraftHw = { homeworkId: string; assignmentId?: string };
 
@@ -116,6 +134,25 @@ export function LessonContentEditor({
   const [busy, setBusy] = useState(false);
   const [dupHint, setDupHint] = useState<string | null>(null);
   const [requiredHint, setRequiredHint] = useState<string | null>(null);
+  const existingAtt = data.attendances.find(
+    (a) => a.lessonId === lesson.id && a.studentId === studentId
+  );
+  const [attendance, setAttendance] = useState<AttendanceStatus | null>(() => {
+    if (
+      existingAtt &&
+      (existingAtt.status === "present" ||
+        existingAtt.status === "absent_excused" ||
+        existingAtt.status === "absent_unexcused")
+    ) {
+      return existingAtt.status;
+    }
+    return null;
+  });
+  const markBinary = studentAttendanceMarkBinary(
+    lesson,
+    studentId,
+    data.attendances
+  );
   // Подтянуть сохранённые назначения после reload, не затирая несохранённый черновик.
   useEffect(() => {
     setHw((prev) => {
@@ -187,6 +224,13 @@ export function LessonContentEditor({
         setRequiredHint("Укажите хотя бы одну тему занятия.");
         return;
       }
+      const needsAttendance =
+        (required || lessonHasOccurred(lesson)) &&
+        !isFinalAttendanceStatus(existingAtt?.status);
+      if (needsAttendance && !attendance) {
+        setRequiredHint("Укажите отметку посещаемости.");
+        return;
+      }
       const draftHw = [...hw];
       const homeworkIds = draftHw.map((item) => item.homeworkId);
       const result = await saveLessonContent({
@@ -194,24 +238,20 @@ export function LessonContentEditor({
         studentId,
         topics: normalized,
         homeworkIds,
+        attendanceStatus: attendance,
       });
       if (!result.ok) {
         toast.error(
           result.error ??
-            "Не удалось сохранить темы и домашние задания. Повторите."
+            "Не удалось сохранить темы, отметку и домашние задания. Повторите."
         );
         return;
       }
       const created = result.created ?? 0;
-      if (homeworkIds.length > 0 && created === 0) {
-        // Уже были в БЗ — ок, но явно говорим, что список синхронизирован.
-        toast.success("Темы и домашние задания сохранены");
-        return;
-      }
       toast.success(
         created > 0
-          ? `Сохранено. Новых ДЗ: ${created}`
-          : "Темы и домашние задания сохранены"
+          ? `Сохранено. Отметка и ДЗ обновлены (новых ДЗ: ${created})`
+          : "Темы, отметка и домашние задания сохранены"
       );
     } finally {
       setBusy(false);
@@ -220,6 +260,39 @@ export function LessonContentEditor({
 
   return (
     <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-muted/20 px-3 py-2">
+        <p className="text-xs font-medium text-muted-foreground">Отметка</p>
+        <span
+          className={
+            markBinary === "marked"
+              ? "rounded-full bg-pastel-mint px-2.5 py-1 text-xs text-[#3f6b52]"
+              : "rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+          }
+        >
+          {attendanceMarkBinaryLabel(markBinary)}
+        </span>
+        <Select
+          value={attendance}
+          onValueChange={(v) => v && setAttendance(v as AttendanceStatus)}
+        >
+          <SelectTrigger className="h-8 min-w-[200px] flex-1">
+            <SelectValue placeholder="Выбрать посещаемость">
+              {() =>
+                attendance
+                  ? attendanceStatusLabel[attendance]
+                  : "Выбрать посещаемость"
+              }
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {ATTENDANCE_OPTIONS.map((status) => (
+              <SelectItem key={status} value={status}>
+                {attendanceStatusLabel[status]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
       <div className="space-y-2 rounded-xl border border-border/70 bg-muted/20 px-3 py-2">
         {topics.map((t, index) => {
           const excludeIds = new Set(

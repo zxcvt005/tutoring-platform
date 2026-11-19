@@ -69,7 +69,17 @@ type LessonDialogProps = {
   onSaveRecurring?: (
     input: RecurringSaveInput
   ) => { ok: boolean } | Promise<{ ok: boolean }>;
-  onDelete?: (id: string) => void;
+  onDelete?: (
+    id: string,
+    scope?: "this" | "thisAndFollowing"
+  ) => void | Promise<unknown>;
+  onUpdateSeries?: (input: {
+    scheduleId: string;
+    fromOccurrenceKey: string;
+    startTime: string;
+    durationMin: number;
+    directionId?: string | null;
+  }) => { ok: boolean } | Promise<{ ok: boolean }>;
 };
 
 const WEEKDAY_OPTS = [
@@ -125,6 +135,7 @@ export function LessonDialog({
   onSave,
   onSaveRecurring,
   onDelete,
+  onUpdateSeries,
 }: LessonDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -144,6 +155,7 @@ export function LessonDialog({
             onSave={onSave}
             onSaveRecurring={onSaveRecurring}
             onDelete={onDelete}
+            onUpdateSeries={onUpdateSeries}
             onClose={() => onOpenChange(false)}
           />
         ) : null}
@@ -160,6 +172,7 @@ function LessonForm({
   onSave,
   onSaveRecurring,
   onDelete,
+  onUpdateSeries,
   onClose,
 }: {
   teacherId: string;
@@ -172,11 +185,24 @@ function LessonForm({
   onSaveRecurring?: (
     input: RecurringSaveInput
   ) => { ok: boolean } | Promise<{ ok: boolean }>;
-  onDelete?: (id: string) => void;
+  onDelete?: (
+    id: string,
+    scope?: "this" | "thisAndFollowing"
+  ) => void | Promise<unknown>;
+  onUpdateSeries?: (input: {
+    scheduleId: string;
+    fromOccurrenceKey: string;
+    startTime: string;
+    durationMin: number;
+    directionId?: string | null;
+  }) => { ok: boolean } | Promise<{ ok: boolean }>;
   onClose: () => void;
 }) {
   const defaults = buildDefaults(initial);
   const isEdit = Boolean(initial?.id);
+  const isRecurringSlot = Boolean(
+    initial?.scheduleId && initial?.scheduleOccurrenceKey
+  );
   const fromSlot = defaults.fromSlot;
   const [studentId, setStudentId] = useState(defaults.studentId);
   const [startsLocal, setStartsLocal] = useState(defaults.startsLocal);
@@ -194,6 +220,9 @@ function LessonForm({
     return m?.[1] ?? "10:00";
   });
   const [showSeriesExtras, setShowSeriesExtras] = useState(false);
+  const [seriesScope, setSeriesScope] = useState<"this" | "thisAndFollowing">(
+    "this"
+  );
   const activeDirections = useMemo(
     () => learningDirections.filter((d) => d.status === "active"),
     [learningDirections]
@@ -251,6 +280,27 @@ function LessonForm({
         if (result.ok) onClose();
         return;
       }
+      if (
+        isEdit &&
+        isRecurringSlot &&
+        seriesScope === "thisAndFollowing" &&
+        onUpdateSeries &&
+        initial?.scheduleId &&
+        initial.scheduleOccurrenceKey
+      ) {
+        const hm =
+          startsLocal.match(/T(\d{2}:\d{2})/)?.[1] ??
+          startTime;
+        const result = await onUpdateSeries({
+          scheduleId: initial.scheduleId,
+          fromOccurrenceKey: initial.scheduleOccurrenceKey,
+          startTime: hm,
+          durationMin: duration,
+          directionId,
+        });
+        if (result.ok) onClose();
+        return;
+      }
       const startsAt = fromLocalInput(
         repeat
           ? `${activeFrom}T${startTime}`
@@ -269,6 +319,8 @@ function LessonForm({
         status: initial?.status ?? "planned",
         topicId: initial?.topicId,
         subject: initial?.subject,
+        scheduleId: initial?.scheduleId,
+        scheduleOccurrenceKey: initial?.scheduleOccurrenceKey,
       });
       if (result.ok) onClose();
     })();
@@ -500,17 +552,48 @@ function LessonForm({
           </Select>
         </div>
       </div>
+      {isEdit && isRecurringSlot ? (
+        <div className="space-y-2 rounded-xl border border-border/70 bg-muted/20 px-3 py-2">
+          <p className="text-xs font-medium text-muted-foreground">
+            Регулярное занятие
+          </p>
+          <div className="flex flex-col gap-1.5 text-sm">
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="series-scope"
+                checked={seriesScope === "this"}
+                onChange={() => setSeriesScope("this")}
+              />
+              Только это занятие
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="series-scope"
+                checked={seriesScope === "thisAndFollowing"}
+                onChange={() => setSeriesScope("thisAndFollowing")}
+              />
+              Это и все последующие занятия слота
+            </label>
+          </div>
+        </div>
+      ) : null}
       <DialogFooter className="gap-2 sm:justify-between">
         {initial?.id && onDelete ? (
           <Button
             type="button"
             variant="destructive"
             onClick={() => {
-              onDelete(initial.id!);
-              onClose();
+              void (async () => {
+                await onDelete(initial.id!, seriesScope);
+                onClose();
+              })();
             }}
           >
-            Удалить слот
+            {isRecurringSlot && seriesScope === "thisAndFollowing"
+              ? "Удалить это и последующие"
+              : "Удалить слот"}
           </Button>
         ) : (
           <span />

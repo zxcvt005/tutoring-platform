@@ -624,6 +624,7 @@ export function createStudentTourSeed(): DemoData {
     homeworkAssignments,
     theories,
     theoryAssignments,
+    theoryCatalogOrder: [],
     intensives,
     intensiveAssignments,
     mockExams,

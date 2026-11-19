@@ -128,7 +128,7 @@ export function lessonHistoryAttendanceLabel(input: {
   if (input.attendanceStatus === "rescheduled") {
     return attendanceStatusLabel.rescheduled;
   }
-  return "Ожидает отметки";
+  return "Не отмечено";
 }
 
 export const MISSED_NEXT_LESSON_LABEL =

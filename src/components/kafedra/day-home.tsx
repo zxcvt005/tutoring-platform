@@ -20,13 +20,16 @@ import { formatTime } from "@/lib/format";
 import { TrialPreviewDialog } from "@/components/schedule/trial-preview-dialog";
 import type { TrialLessonPublic } from "@/lib/trial-lessons";
 import {
+  attendanceMarkBinaryLabel,
   attendanceMarkFeedback,
   groupLessonsByAppDate,
   isFinalAttendanceStatus,
+  lessonAttendanceMarkBinary,
   lessonHasOccurred,
   lessonIsAttendanceMarked,
   splitKafedraTodayLessons,
   splitTodayAttendanceColumns,
+  studentAttendanceMarkBinary,
   studentNeedsAttendanceMark,
 } from "@/lib/kafedra-today";
 import { topicsForLesson } from "@/lib/lesson-topics";
@@ -46,6 +49,7 @@ export function KafedraDayHome() {
     studentsForTeacher,
     upsertLesson,
     deleteLesson,
+    updateLessonSeries,
     setAttendance,
     resetLessonConduct,
   } = useDemoStore();
@@ -383,6 +387,7 @@ export function KafedraDayHome() {
         initial={editLesson ?? undefined}
         onSave={(lesson) => upsertLesson(lesson)}
         onDelete={deleteLesson}
+        onUpdateSeries={updateLessonSeries}
       />
       <ConfirmDialog
         open={!!resetLesson}
@@ -610,6 +615,7 @@ function LessonCard({
   const needsMark = lesson.studentIds.some((sid) =>
     studentNeedsAttendanceMark(lesson, sid, attendances, now)
   );
+  const markBinary = lessonAttendanceMarkBinary(lesson, attendances);
 
   return (
     <li
@@ -631,12 +637,17 @@ function LessonCard({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          {needsMark ? (
+          {needsMark || markBinary === "unmarked" ? (
             <span className="inline-flex h-6 items-center rounded-full bg-amber-100 px-2 text-[0.7rem] font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-              Требует отметки
+              Не отмечено
             </span>
           ) : (
-            <LessonStatusBadge status={lesson.status} />
+            <>
+              <span className="inline-flex h-6 items-center rounded-full bg-pastel-mint px-2 text-[0.7rem] font-medium text-[#3f6b52]">
+                Отмечено
+              </span>
+              <LessonStatusBadge status={lesson.status} />
+            </>
           )}
           {lesson.status !== "cancelled" ? (
             <Button
@@ -746,14 +757,23 @@ function LessonCard({
                     </p>
                   ) : waiting ? (
                     <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-400">
-                      Требует отметки
+                      {attendanceMarkBinaryLabel("unmarked")}
                     </p>
                   ) : unmarkedFuture ? (
                     <p className="mt-1 text-xs text-muted-foreground">
                       Занятие ещё не началось
                     </p>
                   ) : att ? (
-                    <div className="mt-1">
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-medium text-[#3f6b52]">
+                        {attendanceMarkBinaryLabel(
+                          studentAttendanceMarkBinary(
+                            lesson,
+                            sid,
+                            attendances
+                          )
+                        )}
+                      </span>
                       <AttendanceStatusBadge status={att.status} />
                     </div>
                   ) : null}

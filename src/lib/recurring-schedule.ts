@@ -12,8 +12,12 @@ import {
 } from "@/lib/app-time";
 
 export const AUDITORIA_UPCOMING_DAYS = 14;
-/** Горизонт материализации занятий из шаблона (недели вперёд). */
-export const SCHEDULE_HORIZON_WEEKS = 8;
+/**
+ * Горизонт материализации занятий из шаблона (недели вперёд).
+ * Шаблон действует постоянно; в БД создаются только слоты внутри горизонта,
+ * который продлевается при навигации по календарю / bootstrap.
+ */
+export const SCHEDULE_HORIZON_WEEKS = 52;
 
 export type RecurringScheduleSpec = {
   weekdays: number[];

@@ -948,6 +948,7 @@ export function createSeedData(): DemoData {
     homeworkAssignments,
     theories: [],
     theoryAssignments: [],
+    theoryCatalogOrder: [],
     intensives: [],
     intensiveAssignments: [],
     mockExams: [],

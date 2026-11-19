@@ -131,7 +131,19 @@ export type DemoStoreValue = {
     activeFrom?: string;
     activeUntil?: string;
   }) => Promise<OkResult>;
-  deleteLesson: (id: string) => void;
+  deleteLesson: (
+    id: string,
+    scope?: "this" | "thisAndFollowing"
+  ) => Promise<OkResult>;
+  updateLessonSeries: (input: {
+    scheduleId: string;
+    fromOccurrenceKey: string;
+    startTime: string;
+    durationMin: number;
+    weekdays?: number[];
+    directionId?: string | null;
+  }) => Promise<OkResult>;
+  ensureSchedulesMaterialized: (until?: string) => Promise<OkResult>;
   completeLesson: (input: CompleteLessonInput) => Promise<OkResult>;
   setAttendance: (
     lessonId: string,
@@ -272,6 +284,10 @@ export type DemoStoreValue = {
     folderId?: string | null;
   }) => Promise<OkResult & { id?: string }>;
   deleteTheory: (id: string) => Promise<OkResult>;
+  reorderTheoryCatalogForGrade: (input: {
+    grade: string;
+    orderedMaterialIds: string[];
+  }) => Promise<OkResult>;
   assignTheory: (input: {
     materialId: string;
     studentIds: string[];
@@ -357,6 +373,7 @@ const EMPTY_DATA: DemoData = {
   homeworkAssignments: [],
   theories: [],
   theoryAssignments: [],
+  theoryCatalogOrder: [],
   intensives: [],
   intensiveAssignments: [],
   mockExams: [],
@@ -678,11 +695,35 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         }
         return r;
       },
-      deleteLesson: (id) => {
-        void run("deleteLesson", { id });
-      },
+      deleteLesson: (id, scope = "this") =>
+        run("deleteLesson", { id, scope }),
+      updateLessonSeries: (input) => run("updateLessonSeries", input),
+      ensureSchedulesMaterialized: (until) =>
+        run("ensureSchedulesMaterialized", until ? { until } : {}, undefined, undefined, "skip"),
       completeLesson: async (input) => {
-        const r = await run("completeLesson", input);
+        const r = await run(
+          "completeLesson",
+          input,
+          undefined,
+          (d) => {
+            const attendances = [...d.attendances];
+            for (const row of input.attendances ?? []) {
+              const next = upsertAttendanceRow(
+                attendances,
+                input.lessonId,
+                row.studentId,
+                row.status
+              );
+              attendances.splice(0, attendances.length, ...next);
+            }
+            const lessons = d.lessons.map((l) =>
+              l.id === input.lessonId && (input.attendances?.length ?? 0) > 0
+                ? { ...l, status: "done" as const }
+                : l
+            );
+            return { ...d, attendances, lessons };
+          }
+        );
         if (r.ok) toast.success("Занятие проведено");
         return r;
       },
@@ -879,6 +920,25 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         if (r.ok) {
           toast.success(r.archived ? "Теория архивирована" : "Теория удалена");
         }
+        return r;
+      },
+      reorderTheoryCatalogForGrade: async (input) => {
+        const r = await run(
+          "reorderTheoryCatalogForGrade",
+          input,
+          undefined,
+          (d) => ({
+            ...d,
+            theoryCatalogOrder: [
+              ...d.theoryCatalogOrder.filter((row) => row.grade !== input.grade),
+              ...input.orderedMaterialIds.map((materialId, sortOrder) => ({
+                grade: input.grade,
+                materialId,
+                sortOrder,
+              })),
+            ],
+          })
+        );
         return r;
       },
       assignTheory: async (input) => {

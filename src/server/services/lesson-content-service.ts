@@ -94,14 +94,7 @@ export async function saveLessonContent(
   const firstTopicId =
     topicsResult.topics.find((t) => t.topicId)?.topicId ?? null;
 
-  const sync = await syncLessonHomework(db, ctx, {
-    lessonId,
-    studentId,
-    teacherId: lesson.teacherId,
-    topicId: firstTopicId,
-    homeworkIds,
-  });
-
+  // Отметка до ДЗ: иначе назначение ДЗ может пройти, а «Требует отметки» останется.
   let attendance: Awaited<ReturnType<typeof setAttendance>> | null = null;
   if (input.attendanceStatus) {
     attendance = await setAttendance(
@@ -112,6 +105,14 @@ export async function saveLessonContent(
       input.attendanceStatus
     );
   }
+
+  const sync = await syncLessonHomework(db, ctx, {
+    lessonId,
+    studentId,
+    teacherId: lesson.teacherId,
+    topicId: firstTopicId,
+    homeworkIds,
+  });
 
   return {
     ok: true as const,

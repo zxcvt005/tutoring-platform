@@ -123,6 +123,32 @@ export function lessonIsAttendanceMarked(
   );
 }
 
+/** Бинарный статус отметки для согласованного UI во всех кабинетах. */
+export type AttendanceMarkBinary = "marked" | "unmarked";
+
+export function studentAttendanceMarkBinary(
+  lesson: Pick<Lesson, "id" | "status">,
+  studentId: string,
+  attendances: Pick<Attendance, "lessonId" | "studentId" | "status">[]
+): AttendanceMarkBinary {
+  if (lesson.status === "cancelled") return "marked";
+  const att = attendanceForStudent(attendances, lesson.id, studentId);
+  return isFinalAttendanceStatus(att?.status) ? "marked" : "unmarked";
+}
+
+export function lessonAttendanceMarkBinary(
+  lesson: Pick<Lesson, "id" | "status" | "studentIds">,
+  attendances: Pick<Attendance, "lessonId" | "studentId" | "status">[]
+): AttendanceMarkBinary {
+  return lessonIsAttendanceMarked(lesson, attendances) ? "marked" : "unmarked";
+}
+
+export function attendanceMarkBinaryLabel(
+  state: AttendanceMarkBinary
+): "Отмечено" | "Не отмечено" {
+  return state === "marked" ? "Отмечено" : "Не отмечено";
+}
+
 export function splitTodayAttendanceColumns(
   lessons: Lesson[],
   attendances: Pick<Attendance, "lessonId" | "studentId" | "status">[]

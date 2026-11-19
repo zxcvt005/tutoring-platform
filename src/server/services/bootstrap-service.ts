@@ -582,6 +582,8 @@ export async function buildBootstrap(
     status: l.status as Lesson["status"],
     topicId: l.topicId ?? undefined,
     lessonTopics: lessonTopicMap.get(l.id) ?? [],
+    scheduleId: l.scheduleId ?? null,
+    scheduleOccurrenceKey: l.scheduleOccurrenceKey ?? null,
   }));
 
   const mappedAttendances: Attendance[] = attRows.map((a) => ({
@@ -1018,7 +1020,7 @@ export async function buildBootstrap(
   const { listTheoryMaterialsForBootstrap } = await import(
     "@/server/services/theory-service"
   );
-  const { theories, theoryAssignments } =
+  const { theories, theoryAssignments, theoryCatalogOrder } =
     await listTheoryMaterialsForBootstrap(db, ctx);
 
   const { loadMockExamsForBootstrap } = await import(
@@ -1080,6 +1082,7 @@ export async function buildBootstrap(
     homeworkAssignments: homeworkAssignmentsWithTheory,
     theories,
     theoryAssignments,
+    theoryCatalogOrder,
     intensives,
     intensiveAssignments,
     mockExams,

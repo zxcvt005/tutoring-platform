@@ -104,6 +104,7 @@ const iconsByHref: Record<string, NavItem["icon"]> = {
   "/pressa/planchety": Table2,
   "/pressa/analytics": ClipboardList,
   "/assistent/knowledge": BookOpen,
+  "/assistent/theory-preview": BookOpen,
 };
 
 function withIcons(

@@ -253,7 +253,7 @@ describe("attendance requires topic, homework is optional", () => {
     expect(await netDebit(t.db, lessonId)).toBe(-1);
   });
 
-  it("does not debit when homework assign fails before attendance", async () => {
+  it("keeps attendance when homework assign fails after mark", async () => {
     const t = await createTestDb();
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
@@ -272,8 +272,9 @@ describe("attendance requires topic, homework is optional", () => {
       })
     ).rejects.toMatchObject({ status: 404 });
 
+    // Отметка сохраняется первой: UI не остаётся «Не отмечено» из‑за ошибки ДЗ.
     expect(await homeworkCount(t.db, lessonId)).toBe(0);
-    expect(await netDebit(t.db, lessonId)).toBe(0);
+    expect(await netDebit(t.db, lessonId)).toBe(-1);
   });
 
   it("does not debit excused absence without homework", async () => {

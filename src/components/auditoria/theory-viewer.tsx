@@ -57,6 +57,7 @@ export function StudentTheoryViewer({
     folders: data.materialFolders,
     studentGrade: student?.grade,
     subjects,
+    catalogOrder: data.theoryCatalogOrder,
   });
   const item = resolveStudentTheoryItem(catalog, materialId);
   const [busy, setBusy] = useState(false);

@@ -1469,6 +1469,42 @@ export const theoryMaterials = pgTable(
 );
 
 /**
+ * Порядок школьной теории в каталоге ученика / ассистента — отдельно для каждого класса.
+ * Не меняет папку материала и не влияет на другие классы.
+ */
+export const theoryGradeCatalogOrder = pgTable(
+  "theory_grade_catalog_order",
+  {
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    grade: text("grade").notNull(),
+    materialId: text("material_id")
+      .notNull()
+      .references(() => theoryMaterials.id, { onDelete: "cascade" }),
+    sortOrder: integer("sort_order").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({
+      columns: [t.organizationId, t.grade, t.materialId],
+      name: "theory_grade_catalog_order_pk",
+    }),
+    index("theory_grade_catalog_order_org_grade_idx").on(
+      t.organizationId,
+      t.grade,
+      t.sortOrder
+    ),
+    check(
+      "theory_grade_catalog_order_grade_check",
+      sql`${t.grade} in ('7', '8', '9', '10', '11')`
+    ),
+  ]
+);
+
+/**
  * Происхождение копии. Не ссылается на оригинал внешним ключом:
  * удаление исходного материала не удаляет копию и не стирает снимок источника.
  */
@@ -3399,6 +3435,7 @@ export const schema = {
   chatPendingObjects,
   userNotes,
   theoryMaterials,
+  theoryGradeCatalogOrder,
   theoryMaterialVersions,
   theoryFiles,
   theoryAssignments,

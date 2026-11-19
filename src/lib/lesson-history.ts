@@ -161,7 +161,7 @@ export function historyStatusPresentation(
     }
     return { filter: "cancelled", title: "Отменено", detail: "преподавателем" };
   }
-  return { filter: "pending", title: "Ожидает отметки", detail: null };
+  return { filter: "pending", title: "Не отмечено", detail: null };
 }
 
 export function lessonMatchesHistoryFilter(

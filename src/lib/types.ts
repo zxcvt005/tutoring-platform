@@ -567,6 +567,10 @@ export type Lesson = {
   /** Первая тема каталога (совместимость). Полный список — lessonTopics. */
   topicId?: string;
   lessonTopics?: LessonTopicLink[];
+  /** Шаблон регулярного расписания, если слот материализован из него. */
+  scheduleId?: string | null;
+  /** YYYY-MM-DD ключ вхождения регулярного шаблона. */
+  scheduleOccurrenceKey?: string | null;
 };
 
 export type Attendance = {
@@ -782,6 +786,12 @@ export type DemoData = {
   homeworkAssignments: HomeworkAssignment[];
   theories: TheoryMaterial[];
   theoryAssignments: TheoryAssignment[];
+  /** Порядок школьной теории по классам (7–11). */
+  theoryCatalogOrder: {
+    grade: string;
+    materialId: string;
+    sortOrder: number;
+  }[];
   intensives: Intensive[];
   intensiveAssignments: IntensiveAssignment[];
   mockExams: MockExam[];

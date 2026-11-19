@@ -62,17 +62,23 @@ export function StudentTheoryWorkspace() {
         folders: data.materialFolders,
         studentGrade: student?.grade,
         subjects,
+        catalogOrder: data.theoryCatalogOrder,
       }),
     [
       data.theories,
       data.materialFolders,
+      data.theoryCatalogOrder,
       theoryAssignmentsForStudent,
       studentId,
       student?.grade,
       subjects,
     ]
   );
-  const ordered = groupStudentTheories(items).flatMap((section) => section.items);
+  const ordered = groupStudentTheories(
+    items,
+    student?.grade,
+    data.theoryCatalogOrder
+  ).flatMap((section) => section.items);
   const learning = studentLearningLock(data, studentId);
   const emptyHint = studentTheoryCatalogEmptyHint({
     studentGrade: student?.grade,

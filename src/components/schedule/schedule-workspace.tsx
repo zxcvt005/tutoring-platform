@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { LessonDialog } from "@/components/schedule/lesson-dialog";
 import { TrialPreviewDialog } from "@/components/schedule/trial-preview-dialog";
 import { WeekCalendar } from "@/components/schedule/week-calendar";
+import { addAppDateKey, appDateKey } from "@/lib/app-time";
 import type { TrialLessonPublic } from "@/lib/trial-lessons";
 import {
   Select,
@@ -30,12 +31,25 @@ export function ScheduleWorkspace({
     upsertLesson,
     createRecurringSchedule,
     deleteLesson,
+    updateLessonSeries,
+    ensureSchedulesMaterialized,
+    reload,
   } = useDemoStore();
 
   const teacherId =
     mode === "direkciya" ? data.direkciyaTeacherId : data.currentTeacherId;
 
   const [weekAnchor, setWeekAnchor] = useState(() => new Date());
+
+  useEffect(() => {
+    const untilKey = addAppDateKey(appDateKey(weekAnchor), 21);
+    void (async () => {
+      const r = await ensureSchedulesMaterialized(
+        new Date(`${untilKey}T23:59:59+03:00`).toISOString()
+      );
+      if (r.ok) await reload();
+    })();
+  }, [weekAnchor, ensureSchedulesMaterialized, reload]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [previewTrial, setPreviewTrial] = useState<TrialLessonPublic | null>(
     null
@@ -126,6 +140,7 @@ export function ScheduleWorkspace({
         onSave={(lesson) => upsertLesson(lesson)}
         onSaveRecurring={(input) => createRecurringSchedule(input)}
         onDelete={deleteLesson}
+        onUpdateSeries={updateLessonSeries}
       />
       <TrialPreviewDialog
         trial={previewTrial}

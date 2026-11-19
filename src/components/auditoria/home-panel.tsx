@@ -90,10 +90,12 @@ export function AuditoriaHomePanel() {
       folders: data.materialFolders,
       studentGrade: student?.grade,
       subjects,
+      catalogOrder: data.theoryCatalogOrder,
     });
   }, [
     data.theories,
     data.materialFolders,
+    data.theoryCatalogOrder,
     data.studentDirectionBalances,
     data.learningDirections,
     student?.directionBalances,

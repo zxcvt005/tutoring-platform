@@ -14,7 +14,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatDate, formatTime, attendanceStatusLabel } from "@/lib/format";
-import { groupLessonsByAppDate } from "@/lib/kafedra-today";
+import {
+  attendanceMarkBinaryLabel,
+  groupLessonsByAppDate,
+  studentAttendanceMarkBinary,
+} from "@/lib/kafedra-today";
 import { topicsForLesson } from "@/lib/lesson-topics";
 import { useDemoStore } from "@/lib/store/demo-store";
 import type { AttendanceStatus, Lesson } from "@/lib/types";
@@ -194,13 +198,30 @@ export function MarkHistoryWorkspace() {
                               ? "проведено"
                               : lesson.status}
                         </p>
-                        {att ? (
-                          <AttendanceStatusBadge status={att.status} />
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            Отметка не выставлена
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={
+                              studentAttendanceMarkBinary(
+                                lesson,
+                                sid ?? "",
+                                data.attendances
+                              ) === "marked"
+                                ? "text-xs font-medium text-[#3f6b52]"
+                                : "text-xs font-medium text-amber-800 dark:text-amber-300"
+                            }
+                          >
+                            {attendanceMarkBinaryLabel(
+                              studentAttendanceMarkBinary(
+                                lesson,
+                                sid ?? "",
+                                data.attendances
+                              )
+                            )}
                           </span>
-                        )}
+                          {att ? (
+                            <AttendanceStatusBadge status={att.status} />
+                          ) : null}
+                        </div>
                         {topicTitles.length > 0 ? (
                           <p className="text-sm">
                             Темы: {topicTitles.join(", ")}

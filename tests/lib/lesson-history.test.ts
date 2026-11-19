@@ -78,7 +78,7 @@ describe("lesson history helpers", () => {
 
   it("does not call a future unmarked lesson skipped", () => {
     const label = lessonHistoryStatusLabel(lessons[1]!, undefined);
-    expect(label).toBe("Ожидает отметки");
+    expect(label).toBe("Не отмечено");
   });
 
   it("separates teacher cancellation from absence", () => {

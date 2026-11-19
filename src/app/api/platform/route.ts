@@ -171,7 +171,16 @@ async function handlePlatformAction(
         case "createRecurringSchedule":
           return m.createRecurringScheduleAction(db, ctx, p);
         case "deleteLesson":
-          return m.deleteLesson(db, ctx, String(p.id));
+          return m.deleteLesson(
+            db,
+            ctx,
+            String(p.id),
+            p.scope === "thisAndFollowing" ? "thisAndFollowing" : "this"
+          );
+        case "updateLessonSeries":
+          return m.updateLessonSeriesAction(db, ctx, p);
+        case "ensureSchedulesMaterialized":
+          return m.ensureSchedulesMaterializedAction(db, ctx, p);
         case "completeLesson":
           return m.completeLesson(db, ctx, p as never);
         case "setAttendance":
@@ -460,6 +469,8 @@ async function handlePlatformAction(
           return m.getTestGradesStatsAction(db, ctx, p);
         case "upsertTheory":
           return m.upsertTheoryAction(db, ctx, p);
+        case "reorderTheoryCatalogForGrade":
+          return m.reorderTheoryCatalogForGradeAction(db, ctx, p);
         case "deleteTheory":
           return m.deleteTheoryAction(db, ctx, String(p.id));
         case "assignTheory":

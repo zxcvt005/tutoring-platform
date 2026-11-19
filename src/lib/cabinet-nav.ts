@@ -53,6 +53,7 @@ export const auditoriaNavItems: CabinetNavItem[] = [
 
 export const assistentNavItems: CabinetNavItem[] = [
   { href: "/assistent/knowledge", label: "База знаний" },
+  { href: "/assistent/theory-preview", label: "Просмотр теории" },
 ];
 
 export const pressaNavItems: CabinetNavItem[] = [

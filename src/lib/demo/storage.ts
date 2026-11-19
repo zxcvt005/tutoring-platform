@@ -254,6 +254,9 @@ export function migrateToV5(raw: unknown): DemoData | null {
     theoryAssignments: Array.isArray((blob as DemoData).theoryAssignments)
       ? (blob as DemoData).theoryAssignments
       : [],
+    theoryCatalogOrder: Array.isArray((blob as DemoData).theoryCatalogOrder)
+      ? (blob as DemoData).theoryCatalogOrder
+      : [],
     intensives: Array.isArray((blob as DemoData).intensives)
       ? (blob as DemoData).intensives
       : [],

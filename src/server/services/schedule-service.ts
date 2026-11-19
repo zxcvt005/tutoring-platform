@@ -1,7 +1,11 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, gte, inArray } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 
-import { parseAppInstant } from "@/lib/app-time";
+import {
+  addAppDateKey,
+  fromAppDateOnly,
+  parseAppInstant,
+} from "@/lib/app-time";
 import {
   listUpcomingOccurrences,
   SCHEDULE_HORIZON_WEEKS,
@@ -281,18 +285,29 @@ export async function materializeSchedule(
 const MATERIALIZE_TTL_MS = 60_000;
 const lastMaterializeAt = new Map<string, number>();
 
+function weeksUntil(from: Date, until: Date): number {
+  const ms = Math.max(0, until.getTime() - from.getTime());
+  return Math.max(1, Math.ceil(ms / (7 * 86_400_000)) + 1);
+}
+
 /** Материализует все активные шаблоны организации (вызывается из bootstrap). */
 export async function ensureOrgSchedulesMaterialized(
   db: AppDb,
   organizationId: string,
   now: Date = new Date(),
-  options?: { force?: boolean }
+  options?: { force?: boolean; until?: Date; horizonWeeks?: number }
 ) {
   const last = lastMaterializeAt.get(organizationId) ?? 0;
-  if (!options?.force && Date.now() - last < MATERIALIZE_TTL_MS) {
+  if (!options?.force && !options?.until && Date.now() - last < MATERIALIZE_TTL_MS) {
     return 0;
   }
   lastMaterializeAt.set(organizationId, Date.now());
+
+  const horizonWeeks =
+    options?.horizonWeeks ??
+    (options?.until
+      ? Math.max(SCHEDULE_HORIZON_WEEKS, weeksUntil(now, options.until))
+      : SCHEDULE_HORIZON_WEEKS);
 
   const rows = await db
     .select({ id: lessonSchedules.id })
@@ -305,9 +320,185 @@ export async function ensureOrgSchedulesMaterialized(
     );
   let total = 0;
   for (const r of rows) {
-    total += await materializeSchedule(db, organizationId, r.id, now);
+    total += await materializeSchedule(
+      db,
+      organizationId,
+      r.id,
+      now,
+      horizonWeeks
+    );
   }
   return total;
+}
+
+async function recordExceptionSafe(
+  db: AppDb,
+  scheduleId: string,
+  occurrenceKey: string,
+  reason: "deleted" | "moved" | "cancelled",
+  lessonId?: string
+) {
+  try {
+    await db
+      .insert(lessonScheduleExceptions)
+      .values({
+        scheduleId,
+        occurrenceKey,
+        reason,
+        lessonId: lessonId ?? null,
+      })
+      .onConflictDoNothing();
+  } catch {
+    // already recorded
+  }
+}
+
+/**
+ * Прекращает регулярный слот с указанного вхождения (включительно).
+ * Прошедшие занятия и отметки сохраняются.
+ */
+export async function endRecurringScheduleFromOccurrence(
+  db: AppDb,
+  ctx: AuthContext,
+  input: {
+    scheduleId: string;
+    fromOccurrenceKey: string;
+    deleteLessonIds?: string[];
+  }
+) {
+  requireRoles(ctx, ["director", "teacher"]);
+  const [sch] = await db
+    .select()
+    .from(lessonSchedules)
+    .where(
+      and(
+        eq(lessonSchedules.id, input.scheduleId),
+        eq(lessonSchedules.organizationId, ctx.organizationId)
+      )
+    )
+    .limit(1);
+  if (!sch) throw notFound("Расписание не найдено");
+  if (ctx.role === "teacher" && sch.teacherId !== ctx.teacherId) {
+    throw forbidden();
+  }
+
+  const prevDay = addAppDateKey(input.fromOccurrenceKey, -1);
+  const until = parseAppInstant(prevDay, true);
+  await db
+    .update(lessonSchedules)
+    .set({ activeUntil: until, updatedAt: new Date() })
+    .where(eq(lessonSchedules.id, sch.id));
+
+  const future = await db
+    .select()
+    .from(lessons)
+    .where(
+      and(
+        eq(lessons.scheduleId, sch.id),
+        gte(lessons.scheduleOccurrenceKey, input.fromOccurrenceKey)
+      )
+    );
+
+  const { attendances } = await import("@/server/db/schema");
+  for (const row of future) {
+    if (!row.scheduleOccurrenceKey) continue;
+    await recordExceptionSafe(
+      db,
+      sch.id,
+      row.scheduleOccurrenceKey,
+      "deleted",
+      row.id
+    );
+    const [hasAtt] = await db
+      .select({ lessonId: attendances.lessonId })
+      .from(attendances)
+      .where(eq(attendances.lessonId, row.id))
+      .limit(1);
+    if (hasAtt || row.status === "done") {
+      if (row.status !== "cancelled") {
+        await db
+          .update(lessons)
+          .set({ status: "cancelled", updatedAt: new Date() })
+          .where(eq(lessons.id, row.id));
+      }
+      continue;
+    }
+    await db.delete(lessons).where(eq(lessons.id, row.id));
+  }
+
+  return { ok: true as const };
+}
+
+/**
+ * Меняет регулярный слот с указанного вхождения: старый шаблон заканчивается,
+ * создаётся новый с обновлёнными параметрами.
+ */
+export async function rescheduleRecurringFromOccurrence(
+  db: AppDb,
+  ctx: AuthContext,
+  input: {
+    scheduleId: string;
+    fromOccurrenceKey: string;
+    startTime: string;
+    durationMin: number;
+    weekdays?: number[];
+    directionId?: string | null;
+  }
+) {
+  requireRoles(ctx, ["director", "teacher"]);
+  const [sch] = await db
+    .select()
+    .from(lessonSchedules)
+    .where(
+      and(
+        eq(lessonSchedules.id, input.scheduleId),
+        eq(lessonSchedules.organizationId, ctx.organizationId)
+      )
+    )
+    .limit(1);
+  if (!sch) throw notFound("Расписание не найдено");
+  if (ctx.role === "teacher" && sch.teacherId !== ctx.teacherId) {
+    throw forbidden();
+  }
+
+  const links = await db
+    .select()
+    .from(lessonScheduleStudents)
+    .where(eq(lessonScheduleStudents.scheduleId, sch.id));
+  const studentIds = links.map((l) => l.studentId);
+  if (studentIds.length === 0) throw badRequest("У шаблона нет ученика");
+
+  await endRecurringScheduleFromOccurrence(db, ctx, {
+    scheduleId: sch.id,
+    fromOccurrenceKey: input.fromOccurrenceKey,
+  });
+
+  const weekdays =
+    input.weekdays && input.weekdays.length > 0
+      ? [...new Set(input.weekdays)].filter((d) => d >= 1 && d <= 7)
+      : (sch.weekdays as number[]);
+
+  const created = await createLessonSchedule(
+    db,
+    ctx,
+    {
+      teacherId: sch.teacherId,
+      studentIds,
+      weekdays,
+      startTime: input.startTime,
+      durationMin: input.durationMin,
+      subject: sch.subject ?? undefined,
+      directionId:
+        input.directionId === undefined
+          ? sch.directionId ?? undefined
+          : input.directionId ?? undefined,
+      activeFrom: fromAppDateOnly(input.fromOccurrenceKey).toISOString(),
+      activeUntil: sch.activeUntil?.toISOString(),
+    },
+    fromAppDateOnly(input.fromOccurrenceKey)
+  );
+
+  return { ok: true as const, newScheduleId: created.id, created: created.created };
 }
 
 export async function createOneOffLessonRejectingPast(

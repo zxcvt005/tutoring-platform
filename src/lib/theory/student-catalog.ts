@@ -125,6 +125,41 @@ export function studentTheoryCatalogEmptyHint(input: {
   return `В школьной базе пока нет опубликованной теории для ${titles.join(" и ")} · ${grade} класс.`;
 }
 
+export type TheoryCatalogOrderEntry = {
+  grade: string;
+  materialId: string;
+  sortOrder: number;
+};
+
+export function sortTheoryItemsByGradeOrder<T extends { materialId: string; assignedAt: string }>(
+  items: readonly T[],
+  grade: string | null | undefined,
+  order: readonly TheoryCatalogOrderEntry[] | undefined
+): T[] {
+  const gradeKey = asSystemGrade(grade);
+  if (!gradeKey || !order?.length) {
+    return [...items].sort(
+      (a, b) =>
+        new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime()
+    );
+  }
+  const rank = new Map(
+    order
+      .filter((row) => row.grade === gradeKey)
+      .map((row) => [row.materialId, row.sortOrder])
+  );
+  return [...items].sort((a, b) => {
+    const ra = rank.get(a.materialId);
+    const rb = rank.get(b.materialId);
+    if (ra != null && rb != null && ra !== rb) return ra - rb;
+    if (ra != null && rb == null) return -1;
+    if (ra == null && rb != null) return 1;
+    return (
+      new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime()
+    );
+  });
+}
+
 /**
  * Каталог ученика: школьные материалы класса + материалы с уже сохранённым прогрессом
  * (старые назначения / история). Ссылка всегда по materialId.
@@ -136,6 +171,7 @@ export function buildStudentTheoryCatalogItems(input: {
   folders: readonly MaterialFolder[];
   studentGrade?: Student["grade"] | string | null;
   subjects: readonly SystemSubjectKey[];
+  catalogOrder?: readonly TheoryCatalogOrderEntry[];
 }): TheoryAssignment[] {
   const mine = input.assignments.filter((a) => a.studentId === input.studentId);
   const progressByMaterial = new Map(mine.map((a) => [a.materialId, a]));
@@ -170,10 +206,33 @@ export function buildStudentTheoryCatalogItems(input: {
     seen.add(progress.materialId);
   }
 
-  return result.sort(
-    (a, b) =>
-      new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime()
+  return sortTheoryItemsByGradeOrder(
+    result,
+    input.studentGrade,
+    input.catalogOrder
   );
+}
+
+/** Опубликованная школьная теория выбранного класса (все предметы) для предпросмотра. */
+export function buildGradeTheoryCatalogItems(input: {
+  theories: readonly StudentTheoryCatalogMaterial[];
+  folders: readonly MaterialFolder[];
+  grade: Student["grade"] | string;
+  catalogOrder?: readonly TheoryCatalogOrderEntry[];
+  studentId?: string;
+}): TheoryAssignment[] {
+  const grade = asSystemGrade(input.grade);
+  if (!grade) return [];
+  const studentId = input.studentId ?? "preview";
+  const items = input.theories
+    .filter((material) => {
+      if (material.libraryScope !== "school") return false;
+      if (material.status !== "published") return false;
+      const path = resolveFolderClassPath(input.folders, material.folderId);
+      return path?.grade === grade;
+    })
+    .map((theory) => catalogMaterialAsAssignment(theory, studentId));
+  return sortTheoryItemsByGradeOrder(items, grade, input.catalogOrder);
 }
 
 function catalogMaterialAsAssignment(
