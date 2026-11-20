@@ -29,8 +29,8 @@ import {
 } from "@/components/video-calls/call-overlay";
 import { DeviceSelect } from "@/components/video-calls/device-select";
 import { InviteStudentsDialog } from "@/components/video-calls/invite-students-dialog";
+import { GroupCallStage } from "@/components/video-calls/group-call-stage";
 import { MicLevelIndicator } from "@/components/video-calls/mic-level-indicator";
-import { RemoteGrid } from "@/components/video-calls/remote-grid";
 import {
   TeacherCallPip,
   type PipMediaEls,
@@ -65,6 +65,7 @@ import {
   cameraIsPublished,
   waitUntilCameraUnpublished,
 } from "@/lib/video/media-attach";
+import { parallelWantedRoomIds } from "@/lib/video/parallel-rooms";
 import {
   extraPublisherError,
   muteAllPublishers,
@@ -286,14 +287,14 @@ export function TeacherCallSession({
       room.on(RoomEvent.TrackSubscribed, onRemote);
       room.on(RoomEvent.TrackUnsubscribed, (track) => {
         track.detach();
+        // После unpublish/renegotiation снова цепляем оставшиеся треки,
+        // иначе UI остаётся пустым при живой подписке.
+        reattachRemoteIfActive();
         refreshOnline();
       });
       const onPresence = () => {
         refreshOnline();
-        const view = callRef.current;
-        if (view?.mode === "group" || view?.activeParticipantId === id) {
-          attachRemoteMedia(room, remoteEls(), audioEls());
-        }
+        reattachRemoteIfActive();
       };
       room.on(RoomEvent.ParticipantConnected, onPresence);
       room.on(RoomEvent.ParticipantDisconnected, onPresence);
@@ -305,9 +306,13 @@ export function TeacherCallSession({
       });
       room.on(RoomEvent.Reconnected, () => {
         reattachRemoteIfActive();
-        void republishIfActive(id, room).catch((err) => {
-          setError(deviceErrorMessage(err));
-        });
+        void republishIfActive(id, room)
+          .then(() => {
+            reattachRemoteIfActive();
+          })
+          .catch((err) => {
+            setError(deviceErrorMessage(err));
+          });
       });
       room.on(RoomEvent.LocalTrackPublished, () => {
         const view = callRef.current;
@@ -333,37 +338,46 @@ export function TeacherCallSession({
     [attachStage, audioEls, ensurePreview, remoteEls, stopPreview]
   );
 
+  const dropRoom = useCallback(async (id: string) => {
+    const room = roomsRef.current.get(id);
+    if (!room) return;
+    room.removeAllListeners();
+    try {
+      await room.disconnect();
+    } catch {
+      /* уже закрыта */
+    }
+    roomsRef.current.delete(id);
+  }, []);
+
   const syncRooms = useCallback(
     async (view: VideoCallTeacherView, tokens: VideoLivekitToken[]) => {
+      // Параллельный режим: только активная комната (или ни одной в hold).
+      // N одновременных signal/ICE у преподавателя давали ping timeout и
+      // one-way media после переключений.
       const wanted = new Set(
         view.mode === "group"
           ? ["group"]
-          : view.participants.filter((p) => p.status === "invited").map((p) => p.id)
+          : parallelWantedRoomIds(view.activeParticipantId)
       );
-      for (const [id, room] of roomsRef.current) {
+      for (const id of [...roomsRef.current.keys()]) {
         if (!wanted.has(id)) {
-          room.removeAllListeners();
-          await room.disconnect();
-          roomsRef.current.delete(id);
+          await dropRoom(id);
         }
       }
       let connectedNew = false;
       for (const token of tokens) {
         const id = view.mode === "group" ? "group" : token.participantId;
-        if (!id || roomsRef.current.has(id)) continue;
+        if (!id || !wanted.has(id) || roomsRef.current.has(id)) continue;
         connectedNew = true;
         const room = createVideoRoom();
         bindRoom(id, room);
         roomsRef.current.set(id, room);
         await connectVideoRoom(room, token.serverUrl, token.participantToken);
-        const shouldPublish =
-          view.mode === "group" || view.activeParticipantId === id;
-        if (shouldPublish) {
-          await publishLocalMedia(room, {
-            microphone: wantRef.current.mic,
-            camera: wantRef.current.camera,
-          });
-        }
+        await publishLocalMedia(room, {
+          microphone: wantRef.current.mic,
+          camera: wantRef.current.camera,
+        });
       }
       refreshOnline();
       const key = teacherStageKey(view);
@@ -372,7 +386,7 @@ export function TeacherCallSession({
         await showStage(view);
       }
     },
-    [bindRoom, refreshOnline, showStage]
+    [bindRoom, dropRoom, refreshOnline, showStage]
   );
 
   const load = useCallback(async () => {
@@ -434,6 +448,17 @@ export function TeacherCallSession({
   async function ensureConnectedRoom(participantId: string) {
     let room = roomsRef.current.get(participantId);
     if (room?.state === ConnectionState.Connected) return room;
+    // Полумёртвое соединение после ping timeout / ICE — не реанимируем,
+    // создаём чистое (иначе subscribe ученика часто не восстанавливается).
+    if (
+      room &&
+      (room.state === ConnectionState.Disconnected ||
+        room.state === ConnectionState.Reconnecting ||
+        room.state === ConnectionState.SignalReconnecting)
+    ) {
+      await dropRoom(participantId);
+      room = undefined;
+    }
     const tokens = await transportRef.current.tokens(callId);
     const token = tokens.tokens.find((item) => item.participantId === participantId);
     if (!token) {
@@ -463,22 +488,25 @@ export function TeacherCallSession({
     setError(null);
     const previousId = call.activeParticipantId;
     try {
-      const room = await ensureConnectedRoom(participantId);
       await stopPreview();
-      const controls = publisherList(roomsRef.current);
-      await muteAllPublishers(controls);
+      // Сначала глушим и полностью выходим из прочих комнат — один signal/PC.
+      await muteAllPublishers(publisherList(roomsRef.current));
       const freed = await waitUntilCameraUnpublished(roomsRef.current.values());
       if (!freed) {
         throw new Error(
           "Камера не освободилась. Повторите переключение."
         );
       }
+      for (const id of [...roomsRef.current.keys()]) {
+        if (id !== participantId) await dropRoom(id);
+      }
+      const room = await ensureConnectedRoom(participantId);
       await publishLocalMedia(room, {
         microphone: wantRef.current.mic,
         camera: wantRef.current.camera,
       });
       const leak = extraPublisherError(
-        controls.map((item) => ({
+        publisherList(roomsRef.current).map((item) => ({
           id: item.id,
           mic: item.isMicrophoneEnabled(),
           camera: item.isCameraEnabled(),
@@ -495,21 +523,25 @@ export function TeacherCallSession({
       attachLocalCamera(room, localEls());
       attachRemoteMedia(room, remoteEls(), audioEls());
       refreshMicStream(room);
+      refreshOnline();
     } catch (err) {
       setError(deviceErrorMessage(err));
       // Попытка восстановить эфир в прежней комнате, если переключение сорвалось.
       if (previousId) {
-        const prev = roomsRef.current.get(previousId);
-        if (prev) {
-          try {
-            await muteAllPublishers(publisherList(roomsRef.current));
-            await publishLocalMedia(prev, {
-              microphone: wantRef.current.mic,
-              camera: wantRef.current.camera,
-            });
-          } catch {
-            /* оставляем исходную ошибку */
+        try {
+          for (const id of [...roomsRef.current.keys()]) {
+            if (id !== previousId) await dropRoom(id);
           }
+          const prev = await ensureConnectedRoom(previousId);
+          await publishLocalMedia(prev, {
+            microphone: wantRef.current.mic,
+            camera: wantRef.current.camera,
+          });
+          attachLocalCamera(prev, localEls());
+          attachRemoteMedia(prev, remoteEls(), audioEls());
+          refreshMicStream(prev);
+        } catch {
+          /* оставляем исходную ошибку */
         }
       }
     } finally {
@@ -542,6 +574,9 @@ export function TeacherCallSession({
           "Камера ещё публикуется. Превью не открываю, чтобы не занять устройство."
         );
       }
+      for (const id of [...roomsRef.current.keys()]) {
+        await dropRoom(id);
+      }
       const data = await transportRef.current.hold(callId);
       if (!isCurrentCallOp(gen, opGenRef.current, false)) return;
       if (data.call.role === "teacher") {
@@ -551,6 +586,7 @@ export function TeacherCallSession({
       }
       attachRemoteMedia(undefined, remoteEls(), audioEls());
       setMicStream(null);
+      setOnline({});
       await ensurePreview();
     } catch (err) {
       setError(deviceErrorMessage(err));
@@ -868,7 +904,15 @@ export function TeacherCallSession({
                   </div>
                   <p className="px-3 pb-1 text-[11px] text-muted-foreground">
                     {row.presenceLabel ??
-                      (row.isActive ? "эфир" : connected ? "в сети" : "не в сети")}
+                      (row.isActive
+                        ? connected
+                          ? "эфир"
+                          : "эфир · ждём ученика"
+                        : call.mode === "parallel"
+                          ? "ожидает"
+                          : connected
+                            ? "в сети"
+                            : "не в сети")}
                     {row.connectedAt ? ` · ${connectedClock(row.connectedAt)}` : ""}
                   </p>
                 </li>
@@ -951,13 +995,19 @@ export function TeacherCallSession({
         ) : null}
         <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden overflow-x-hidden px-3 py-2 sm:p-6">
           {call.mode === "group" ? (
-            <div className="flex h-full w-full max-w-5xl flex-col gap-3">
-              <div className="mx-auto w-full max-w-xl">
-                <VideoTile label="Вы" videoRef={localVideoRef} mirror empty={localEmpty} />
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto">
-                <RemoteGrid room={activeRoom ?? null} />
-              </div>
+            <div className="mx-auto h-full w-full min-w-0 max-w-6xl">
+              <GroupCallStage
+                room={activeRoom ?? null}
+                perspective="teacher"
+                local={{
+                  label: "Вы",
+                  videoRef: localVideoRef,
+                  mirror: true,
+                  empty: localEmpty,
+                  micMuted: !wantMic,
+                  cameraOff: !wantCamera,
+                }}
+              />
             </div>
           ) : inHold ? (
             <div className="mx-auto w-full min-w-0 max-w-xl">

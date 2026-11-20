@@ -23,8 +23,8 @@ import {
   callTileFrameClass,
 } from "@/components/video-calls/call-overlay";
 import { DeviceSelect } from "@/components/video-calls/device-select";
+import { GroupCallStage } from "@/components/video-calls/group-call-stage";
 import { MicLevelIndicator } from "@/components/video-calls/mic-level-indicator";
-import { RemoteGrid } from "@/components/video-calls/remote-grid";
 import { StudentCallPip } from "@/components/video-calls/student-call-pip";
 import type { PipMediaEls } from "@/components/video-calls/teacher-call-pip";
 import { useDocumentPip } from "@/components/video-calls/use-document-pip";
@@ -163,24 +163,33 @@ export function StudentCallSession({
       const token = tokens.tokens[0];
       if (!token) throw new Error("Нет доступа к комнате");
       const room = createVideoRoom();
-      room.on(RoomEvent.TrackSubscribed, () => {
+      const reattachRemote = () => {
         if (shouldPlayRemote(callRef.current)) {
           attachRemoteMedia(room, remoteEls(), audioEls());
+        } else {
+          attachRemoteMedia(undefined, remoteEls(), audioEls());
         }
-      });
+      };
+      room.on(RoomEvent.TrackSubscribed, reattachRemote);
+      room.on(RoomEvent.ParticipantConnected, reattachRemote);
       room.on(RoomEvent.ConnectionStateChanged, (state) => {
         if (state === ConnectionState.Connected) {
-          if (shouldPlayRemote(callRef.current)) {
-            attachRemoteMedia(room, remoteEls(), audioEls());
-          }
+          reattachRemote();
         }
       });
       room.on(RoomEvent.Reconnected, () => {
-        void ensureLocalPublished(room).catch((err) => {
-          setError(deviceErrorMessage(err));
-        });
+        void ensureLocalPublished(room)
+          .then(() => {
+            reattachRemote();
+          })
+          .catch((err) => {
+            setError(deviceErrorMessage(err));
+          });
       });
-      room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach());
+      room.on(RoomEvent.TrackUnsubscribed, (track) => {
+        track.detach();
+        reattachRemote();
+      });
       room.on(RoomEvent.LocalTrackPublished, () => {
         attachLocalCamera(room, localEls());
         refreshMicStream(room);
@@ -434,18 +443,19 @@ export function StudentCallSession({
           ) : null}
           <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden overflow-x-hidden px-3 py-2 sm:p-6">
             {call.mode === "group" ? (
-              <div className="flex h-full w-full max-w-5xl flex-col gap-3">
-                <div className="mx-auto w-full max-w-xl">
-                  <VideoTile
-                    label="Вы"
-                    videoRef={localVideoRef}
-                    mirror
-                    empty={localEmpty}
-                  />
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto">
-                  <RemoteGrid room={liveRoom} />
-                </div>
+              <div className="mx-auto h-full w-full min-w-0 max-w-6xl">
+                <GroupCallStage
+                  room={liveRoom}
+                  perspective="student"
+                  local={{
+                    label: "Вы",
+                    videoRef: localVideoRef,
+                    mirror: true,
+                    empty: localEmpty,
+                    micMuted: !wantMic,
+                    cameraOff: !wantCamera,
+                  }}
+                />
               </div>
             ) : (
               <div className="grid w-full min-w-0 max-w-4xl grid-cols-1 content-center gap-2 min-[720px]:grid-cols-2 min-[720px]:gap-3">

@@ -10,6 +10,7 @@ function attachParticipant(el: HTMLVideoElement | null, participant: RemoteParti
   else el.srcObject = null;
 }
 
+/** Устаревшая простая сетка. Групповой эфир использует GroupCallStage. */
 export function RemoteGrid({ room }: { room: Room | null }) {
   const [ids, setIds] = useState<string[]>([]);
 

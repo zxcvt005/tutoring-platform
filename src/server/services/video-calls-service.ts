@@ -311,7 +311,7 @@ export async function listInviteCandidates(
   callId: string,
   query: string
 ): Promise<VideoInviteCandidate[]> {
-  const { call } = await requireOwnedCall(db, ctx, callId);
+  const { call, teacherId } = await requireOwnedCall(db, ctx, callId);
   assertCallActive(call);
 
   const already = await db
@@ -333,6 +333,8 @@ export async function listInviteCandidates(
   const filters = [
     eq(students.organizationId, ctx.organizationId),
     eq(students.status, "active"),
+    // Кафедра приглашает только закреплённых за собой учеников.
+    eq(students.primaryTeacherId, teacherId),
   ];
   if (exclude.length > 0) {
     filters.push(notInArray(students.id, exclude));
@@ -368,7 +370,7 @@ export async function inviteStudents(
   callId: string,
   studentIds: string[]
 ): Promise<VideoCallTeacherView> {
-  const { call } = await requireOwnedCall(db, ctx, callId);
+  const { call, teacherId } = await requireOwnedCall(db, ctx, callId);
   assertCallActive(call);
   const uniqueIds = [...new Set(studentIds.map((id) => id.trim()).filter(Boolean))];
   if (uniqueIds.length === 0) {
@@ -379,6 +381,7 @@ export async function inviteStudents(
     .select({
       id: students.id,
       status: students.status,
+      primaryTeacherId: students.primaryTeacherId,
     })
     .from(students)
     .where(
@@ -392,6 +395,9 @@ export async function inviteStudents(
   }
   if (found.some((row) => row.status !== "active")) {
     throw badRequest("Можно пригласить только активных учеников");
+  }
+  if (found.some((row) => row.primaryTeacherId !== teacherId)) {
+    throw forbidden("Можно приглашать только своих учеников");
   }
 
   const existing = await db

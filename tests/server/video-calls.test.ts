@@ -76,7 +76,7 @@ describe("video calls", () => {
     return resolveAuthContext(db, session.rawToken);
   }
 
-  it("creates a parallel call, invites any school student, and isolates rooms", async () => {
+  it("creates a parallel call, invites own students, and isolates rooms", async () => {
     const t = await createTestDb();
     close = t.close;
     const teacher = await asUser(t.db, "anna@example.com");
@@ -84,9 +84,13 @@ describe("video calls", () => {
     expect(created.mode).toBe("parallel");
     expect(created.participants).toEqual([]);
 
-    const call = await inviteStudents(t.db, teacher, created.id, ["s1", "s5"]);
-    expect(call.participants.map((p) => p.studentId).sort()).toEqual(["s1", "s5"]);
+    const call = await inviteStudents(t.db, teacher, created.id, ["s1", "s2"]);
+    expect(call.participants.map((p) => p.studentId).sort()).toEqual(["s1", "s2"]);
     expect(new Set(rooms.filter((name) => !name.startsWith("delete:"))).size).toBe(2);
+
+    await expect(
+      inviteStudents(t.db, teacher, created.id, ["s5"])
+    ).rejects.toMatchObject({ status: 403 });
 
     const alice = await asUser(t.db, "s1@demo.local");
     const aliceView = await getVideoCall(t.db, alice, created.id);
@@ -94,31 +98,31 @@ describe("video calls", () => {
     if (aliceView.role !== "student") return;
     expect(aliceView.teacherWithMe).toBe(false);
     expect(aliceView.members).toBeNull();
-    expect(JSON.stringify(aliceView)).not.toContain("Дарья");
-    expect(JSON.stringify(aliceView)).not.toContain("s5");
+    expect(JSON.stringify(aliceView)).not.toContain("Борис");
+    expect(JSON.stringify(aliceView)).not.toContain("s2");
 
     const aliceTokens = await issueCallTokens(t.db, alice, created.id);
     expect(aliceTokens).toHaveLength(1);
     const alicePayload = JSON.parse(
       Buffer.from(aliceTokens[0]!.participantToken.split(".")[1]!, "base64url").toString("utf8")
     ) as { video?: { room?: string } };
-    const darya = await asUser(t.db, "s5@demo.local");
-    const daryaTokens = await issueCallTokens(t.db, darya, created.id);
-    const daryaPayload = JSON.parse(
-      Buffer.from(daryaTokens[0]!.participantToken.split(".")[1]!, "base64url").toString("utf8")
+    const boris = await asUser(t.db, "s2@demo.local");
+    const borisTokens = await issueCallTokens(t.db, boris, created.id);
+    const borisPayload = JSON.parse(
+      Buffer.from(borisTokens[0]!.participantToken.split(".")[1]!, "base64url").toString("utf8")
     ) as { video?: { room?: string } };
-    expect(alicePayload.video?.room).not.toBe(daryaPayload.video?.room);
+    expect(alicePayload.video?.room).not.toBe(borisPayload.video?.room);
     expect(aliceTokens[0]!.serverUrl).toBe("wss://video.neodinschool.ru");
 
     await expect(
-      issueCallTokens(t.db, darya, created.id).then(async () => {
+      issueCallTokens(t.db, boris, created.id).then(async () => {
         const stolen = aliceTokens[0]!.roomName;
-        expect(daryaTokens[0]!.roomName).not.toBe(stolen);
+        expect(borisTokens[0]!.roomName).not.toBe(stolen);
       })
     ).resolves.toBeUndefined();
   });
 
-  it("sorts invite candidates by next lesson and searches by name", async () => {
+  it("lists only own students as invite candidates and sorts by next lesson", async () => {
     const t = await createTestDb();
     close = t.close;
     const teacher = await asUser(t.db, "anna@example.com");
@@ -134,7 +138,7 @@ describe("video calls", () => {
     await t.db.insert(lessons).values({
       id: "l_soon",
       organizationId: DEMO_ORG_ID,
-      teacherId: "t2",
+      teacherId: "t1",
       startsAt: soon,
       endsAt: new Date(soon.getTime() + 60 * 60_000),
       status: "planned",
@@ -142,7 +146,7 @@ describe("video calls", () => {
     });
     await t.db.insert(lessonStudents).values({
       lessonId: "l_soon",
-      studentId: "s5",
+      studentId: "s2",
     });
     await t.db.insert(lessons).values({
       id: "l_later",
@@ -160,11 +164,20 @@ describe("video calls", () => {
 
     const candidates = await listInviteCandidates(t.db, teacher, created.id, "");
     const ids = candidates.map((row) => row.id);
-    expect(ids.indexOf("s5")).toBeLessThan(ids.indexOf("s1"));
+    expect(ids.indexOf("s2")).toBeLessThan(ids.indexOf("s1"));
     expect(ids).not.toContain("s4");
+    expect(ids).not.toContain("s5");
+    expect(ids).not.toContain("s6");
 
     const search = await listInviteCandidates(t.db, teacher, created.id, "алис");
     expect(search.map((row) => row.id)).toEqual(["s1"]);
+    const foreignSearch = await listInviteCandidates(
+      t.db,
+      teacher,
+      created.id,
+      "дар"
+    );
+    expect(foreignSearch).toEqual([]);
 
     await inviteStudents(t.db, teacher, created.id, ["s1"]);
     const after = await listInviteCandidates(t.db, teacher, created.id, "");
