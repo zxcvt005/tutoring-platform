@@ -5,6 +5,8 @@ import {
   Track,
 } from "livekit-client";
 
+import { logMediaPath } from "@/lib/video/media-path-diag";
+
 export function publishedCameraTrack(
   room: Room | null | undefined
 ): LocalVideoTrack | undefined {
@@ -116,14 +118,56 @@ export function pickRemoteCameraAndMicTracks(room: Room): {
 export function attachRemoteMedia(
   room: Room | undefined,
   videos: Array<HTMLVideoElement | null>,
-  audios: Array<HTMLAudioElement | null>
+  audios: Array<HTMLAudioElement | null>,
+  diag?: {
+    role: "teacher" | "student";
+    callId?: string;
+    slotId?: string;
+    activeId?: string | null;
+    reason?: string;
+  }
 ) {
   if (!room) {
     for (const el of videos) if (el) el.srcObject = null;
     for (const el of audios) if (el) el.srcObject = null;
+    if (diag) {
+      logMediaPath("attach_remote_clear", {
+        role: diag.role,
+        callId: diag.callId,
+        slotId: diag.slotId,
+        activeId: diag.activeId,
+        reason: diag.reason ?? "no_room",
+        videos,
+        audios,
+      });
+    }
     return;
   }
   const { videoTrack, audioTrack } = pickRemoteCameraAndMicTracks(room);
+  const videoMounted = videos.some(Boolean);
+  const audioMounted = audios.some(Boolean);
+  if (diag) {
+    logMediaPath("attach_remote_attempt", {
+      role: diag.role,
+      callId: diag.callId,
+      slotId: diag.slotId,
+      activeId: diag.activeId,
+      reason: diag.reason,
+      room,
+      videos,
+      audios,
+      extra: {
+        pickedVideo: Boolean(videoTrack),
+        pickedAudio: Boolean(audioTrack),
+        videoMounted,
+        audioMounted,
+        skippedNoElements:
+          (Boolean(videoTrack) || Boolean(audioTrack)) &&
+          !videoMounted &&
+          !audioMounted,
+      },
+    });
+  }
   for (const el of videos) {
     if (!el) continue;
     if (videoTrack) {
@@ -141,7 +185,20 @@ export function attachRemoteMedia(
       el.volume = 1;
     } else el.srcObject = null;
   }
-  void playAttachedMedia([...videos, ...audios]);
+  void playAttachedMedia([...videos, ...audios]).then((playResult) => {
+    if (!diag) return;
+    logMediaPath("attach_remote_play", {
+      role: diag.role,
+      callId: diag.callId,
+      slotId: diag.slotId,
+      activeId: diag.activeId,
+      reason: diag.reason,
+      room,
+      videos,
+      audios,
+      extra: { playResult },
+    });
+  });
 }
 
 export function cameraIsPublished(rooms: Iterable<Room>): boolean {

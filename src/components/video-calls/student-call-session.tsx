@@ -40,6 +40,7 @@ import {
   attachLocalCamera,
   attachRemoteMedia,
 } from "@/lib/video/media-attach";
+import { logMediaPath } from "@/lib/video/media-path-diag";
 import {
   cabinetStudentTransport,
   type StudentCallTransport,
@@ -137,12 +138,24 @@ export function StudentCallSession({
     (room: Room, view: VideoCallStudentView | null) => {
       attachLocalCamera(room, localEls());
       if (!shouldPlayRemote(view)) {
-        attachRemoteMedia(undefined, remoteEls(), audioEls());
+        attachRemoteMedia(undefined, remoteEls(), audioEls(), {
+          role: "student",
+          callId,
+          slotId: view?.myParticipantId,
+          activeId: view?.teacherWithMe ? view.myParticipantId : null,
+          reason: "waiting_teacher_clear_remote",
+        });
         return;
       }
-      attachRemoteMedia(room, remoteEls(), audioEls());
+      attachRemoteMedia(room, remoteEls(), audioEls(), {
+        role: "student",
+        callId,
+        slotId: view?.myParticipantId,
+        activeId: view?.myParticipantId,
+        reason: "attach_stage",
+      });
     },
-    [audioEls, localEls, remoteEls, shouldPlayRemote]
+    [audioEls, callId, localEls, remoteEls, shouldPlayRemote]
   );
 
   const ensureLocalPublished = useCallback(async (room: Room) => {
@@ -152,7 +165,19 @@ export function StudentCallSession({
     });
     refreshMicStream(room);
     attachLocalCamera(room, localEls());
-  }, [localEls]);
+    logMediaPath("student_local_published", {
+      role: "student",
+      callId,
+      slotId: callRef.current?.myParticipantId,
+      activeId: callRef.current?.teacherWithMe
+        ? callRef.current.myParticipantId
+        : null,
+      reason: "ensure_local_published",
+      room,
+      videos: localEls(),
+      audios: [],
+    });
+  }, [callId, localEls]);
 
   const connectOnce = useCallback(
     async (view: VideoCallStudentView) => {
@@ -163,24 +188,53 @@ export function StudentCallSession({
       const token = tokens.tokens[0];
       if (!token) throw new Error("Нет доступа к комнате");
       const room = createVideoRoom();
-      const reattachRemote = () => {
+      const reattachRemote = (reason: string) => {
         if (shouldPlayRemote(callRef.current)) {
-          attachRemoteMedia(room, remoteEls(), audioEls());
+          attachRemoteMedia(room, remoteEls(), audioEls(), {
+            role: "student",
+            callId,
+            slotId: callRef.current?.myParticipantId,
+            activeId: callRef.current?.myParticipantId,
+            reason,
+          });
         } else {
-          attachRemoteMedia(undefined, remoteEls(), audioEls());
+          attachRemoteMedia(undefined, remoteEls(), audioEls(), {
+            role: "student",
+            callId,
+            slotId: callRef.current?.myParticipantId,
+            activeId: null,
+            reason: `${reason}_waiting`,
+          });
         }
       };
-      room.on(RoomEvent.TrackSubscribed, reattachRemote);
-      room.on(RoomEvent.ParticipantConnected, reattachRemote);
+      room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+        logMediaPath("track_subscribed", {
+          role: "student",
+          callId,
+          slotId: callRef.current?.myParticipantId,
+          reason: "sdk",
+          room,
+          extra: {
+            trackKind: String(track.kind),
+            trackSource: String(publication.source),
+            trackSid: publication.trackSid,
+            fromIdentity: participant.identity,
+          },
+        });
+        reattachRemote("track_subscribed");
+      });
+      room.on(RoomEvent.ParticipantConnected, () => {
+        reattachRemote("participant_connected");
+      });
       room.on(RoomEvent.ConnectionStateChanged, (state) => {
         if (state === ConnectionState.Connected) {
-          reattachRemote();
+          reattachRemote("connection_connected");
         }
       });
       room.on(RoomEvent.Reconnected, () => {
         void ensureLocalPublished(room)
           .then(() => {
-            reattachRemote();
+            reattachRemote("reconnected");
           })
           .catch((err) => {
             setError(deviceErrorMessage(err));
@@ -188,14 +242,37 @@ export function StudentCallSession({
       });
       room.on(RoomEvent.TrackUnsubscribed, (track) => {
         track.detach();
-        reattachRemote();
+        reattachRemote("track_unsubscribed");
       });
-      room.on(RoomEvent.LocalTrackPublished, () => {
+      room.on(RoomEvent.LocalTrackPublished, (publication) => {
+        logMediaPath("local_track_published", {
+          role: "student",
+          callId,
+          slotId: callRef.current?.myParticipantId,
+          reason: "sdk",
+          room,
+          extra: {
+            trackSource: String(publication.source),
+            trackSid: publication.trackSid,
+          },
+        });
         attachLocalCamera(room, localEls());
         refreshMicStream(room);
       });
       roomRef.current = room;
       setLiveRoom(room);
+      logMediaPath("student_connect_begin", {
+        role: "student",
+        callId,
+        slotId: view.myParticipantId,
+        reason: "connect_once",
+        room,
+        extra: {
+          roomNameFromToken: token.roomName,
+          identityFromToken: token.identity,
+          teacherWithMe: view.teacherWithMe,
+        },
+      });
       await connectVideoRoom(room, token.serverUrl, token.participantToken);
       if (leavingRef.current) {
         room.removeAllListeners();

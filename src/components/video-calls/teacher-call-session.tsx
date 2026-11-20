@@ -66,6 +66,11 @@ import {
   waitUntilCameraUnpublished,
 } from "@/lib/video/media-attach";
 import { parallelWantedRoomIds } from "@/lib/video/parallel-rooms";
+import { logMediaPath } from "@/lib/video/media-path-diag";
+import {
+  createRemoteAttachGate,
+  type RemoteAttachGate,
+} from "@/lib/video/remote-attach-gate";
 import {
   disconnectRoomCleanly,
   isConnectedState,
@@ -170,6 +175,8 @@ export function TeacherCallSession({
   const previewTrackRef = useRef<LocalVideoTrack | null>(null);
   const callRef = useRef<VideoCallTeacherView | null>(null);
   callRef.current = call;
+  const callIdRef = useRef(callId);
+  callIdRef.current = callId;
 
   const inHold =
     call?.mode === "parallel" && call.status === "active" && !call.activeParticipantId;
@@ -187,6 +194,54 @@ export function TeacherCallSession({
     []
   );
 
+  const remoteGateRef = useRef<RemoteAttachGate<Room> | null>(null);
+  if (!remoteGateRef.current) {
+    remoteGateRef.current = createRemoteAttachGate<Room>({
+      getVideos: () => [
+        remoteVideoRef.current,
+        pipRemoteRef.current,
+      ],
+      getAudios: () => [
+        remoteAudioRef.current,
+        pipAudioRef.current,
+      ],
+      attach: (room, videos, audios, reason) => {
+        attachRemoteMedia(room, videos, audios, {
+          role: "teacher",
+          callId: callIdRef.current,
+          slotId: callRef.current?.activeParticipantId ?? undefined,
+          activeId: callRef.current?.activeParticipantId ?? null,
+          reason,
+        });
+      },
+      clear: (videos, audios, reason) => {
+        attachRemoteMedia(undefined, videos, audios, {
+          role: "teacher",
+          callId: callIdRef.current,
+          activeId: null,
+          reason,
+        });
+      },
+      onEvent: (event, fields) => {
+        logRoomDiag(event, { callId: callIdRef.current, ...fields });
+      },
+    });
+  }
+  const remoteGate = remoteGateRef.current;
+
+  const bindRemoteVideoRef = useCallback((el: HTMLVideoElement | null) => {
+    remoteVideoRef.current = el;
+    remoteGateRef.current?.notifyElements(
+      el ? "remote_video_mount" : "remote_video_unmount"
+    );
+  }, []);
+  const bindRemoteAudioRef = useCallback((el: HTMLAudioElement | null) => {
+    remoteAudioRef.current = el;
+    remoteGateRef.current?.notifyElements(
+      el ? "remote_audio_mount" : "remote_audio_unmount"
+    );
+  }, []);
+
   const stopPreview = useCallback(async () => {
     const track = previewTrackRef.current;
     previewTrackRef.current = null;
@@ -198,6 +253,13 @@ export function TeacherCallSession({
     await waitForLocalDevicesIdle(150);
   }, [callId]);
 
+  const requestRemoteAttach = useCallback(
+    (room: Room, slotId: string, reason: string) => {
+      return remoteGate.request(room, slotId, reason);
+    },
+    [remoteGate]
+  );
+
   const attachStage = useCallback(
     (view: VideoCallTeacherView) => {
       const activeRoom =
@@ -208,14 +270,21 @@ export function TeacherCallSession({
             : undefined;
       const holding = view.mode === "parallel" && !view.activeParticipantId;
       if (holding) {
+        remoteGate.invalidate("attach_stage_hold");
         attachPreviewTrack(previewTrackRef.current, localEls());
-        attachRemoteMedia(undefined, remoteEls(), audioEls());
         return;
       }
       attachLocalCamera(activeRoom, localEls());
-      attachRemoteMedia(activeRoom, remoteEls(), audioEls());
+      // GroupCallStage сам рисует remotes — параллельный remote tile не используется.
+      if (view.mode === "group") {
+        remoteGate.invalidate("attach_stage_group");
+        return;
+      }
+      if (activeRoom && view.activeParticipantId) {
+        requestRemoteAttach(activeRoom, view.activeParticipantId, "attach_stage");
+      }
     },
-    [audioEls, localEls, remoteEls]
+    [localEls, remoteGate, requestRemoteAttach]
   );
 
   const ensurePreview = useCallback(async () => {
@@ -298,25 +367,89 @@ export function TeacherCallSession({
         identity: room.localParticipant?.identity || undefined,
         roomState: room.state,
       });
-      const reattachRemoteIfActive = () => {
+      const reattachRemoteIfActive = (reason: string) => {
         const view = callRef.current;
-        if (view?.mode === "group" || view?.activeParticipantId === id) {
-          attachRemoteMedia(room, remoteEls(), audioEls());
+        // Group remotes — в GroupCallStage, не через parallel gate.
+        if (view?.mode === "group") return;
+        const active = view?.activeParticipantId === id;
+        if (!active) {
+          logMediaPath("reattach_skipped_inactive", {
+            role: "teacher",
+            callId,
+            slotId: id,
+            activeId: view?.activeParticipantId ?? null,
+            reason,
+            room,
+            videos: remoteEls(),
+            audios: audioEls(),
+            extra: {
+              gate: "activeParticipantId_mismatch_or_hold",
+            },
+          });
+          return;
         }
+        requestRemoteAttach(room, id, reason);
       };
       const onRemote = () => {
-        reattachRemoteIfActive();
+        reattachRemoteIfActive("track_subscribed");
         refreshOnline();
       };
-      room.on(RoomEvent.TrackSubscribed, onRemote);
-      room.on(RoomEvent.TrackUnsubscribed, (track) => {
+      room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+        logMediaPath("track_subscribed", {
+          role: "teacher",
+          callId,
+          slotId: id,
+          activeId: callRef.current?.activeParticipantId ?? null,
+          reason: "sdk",
+          room,
+          extra: {
+            trackKind: String(track.kind),
+            trackSource: String(publication.source),
+            trackSid: publication.trackSid,
+            fromIdentity: participant.identity,
+            fromSid: participant.sid,
+          },
+        });
+        onRemote();
+      });
+      room.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+        logMediaPath("track_unsubscribed", {
+          role: "teacher",
+          callId,
+          slotId: id,
+          activeId: callRef.current?.activeParticipantId ?? null,
+          reason: "sdk",
+          room,
+          extra: {
+            trackKind: String(track.kind),
+            trackSource: String(publication.source),
+            fromIdentity: participant.identity,
+          },
+        });
         track.detach();
-        reattachRemoteIfActive();
+        reattachRemoteIfActive("track_unsubscribed");
         refreshOnline();
+      });
+      room.on(RoomEvent.TrackPublished, (publication, participant) => {
+        logMediaPath("remote_track_published", {
+          role: "teacher",
+          callId,
+          slotId: id,
+          activeId: callRef.current?.activeParticipantId ?? null,
+          reason: "sdk",
+          room,
+          extra: {
+            trackSource: String(publication.source),
+            trackSid: publication.trackSid,
+            subscribed: publication.isSubscribed,
+            fromIdentity: participant.identity,
+          },
+        });
+        reattachRemoteIfActive("remote_track_published");
       });
       const onPresence = () => {
         refreshOnline();
-        reattachRemoteIfActive();
+        reattachRemoteIfActive("participant_presence");
       };
       room.on(RoomEvent.ParticipantConnected, onPresence);
       room.on(RoomEvent.ParticipantDisconnected, onPresence);
@@ -328,15 +461,15 @@ export function TeacherCallSession({
         });
         refreshOnline();
         if (state === ConnectionState.Connected) {
-          reattachRemoteIfActive();
+          reattachRemoteIfActive("connection_connected");
         }
       });
       room.on(RoomEvent.Reconnected, () => {
         logRoomDiag("reconnected", { ...diagBase(), reason: "sdk" });
-        reattachRemoteIfActive();
+        reattachRemoteIfActive("reconnected");
         void republishIfActive(id, room)
           .then(() => {
-            reattachRemoteIfActive();
+            reattachRemoteIfActive("reconnected_after_republish");
           })
           .catch((err) => {
             setError(deviceErrorMessage(err));
@@ -352,7 +485,19 @@ export function TeacherCallSession({
         });
         refreshOnline();
       });
-      room.on(RoomEvent.LocalTrackPublished, () => {
+      room.on(RoomEvent.LocalTrackPublished, (publication) => {
+        logMediaPath("local_track_published", {
+          role: "teacher",
+          callId,
+          slotId: id,
+          activeId: callRef.current?.activeParticipantId ?? null,
+          reason: "sdk",
+          room,
+          extra: {
+            trackSource: String(publication.source),
+            trackSid: publication.trackSid,
+          },
+        });
         const view = callRef.current;
         if (view?.mode === "group" || view?.activeParticipantId === id) {
           attachLocalCamera(room, localEls());
@@ -360,20 +505,28 @@ export function TeacherCallSession({
         }
       });
     },
-    [audioEls, callId, localEls, refreshOnline, remoteEls, republishIfActive]
+    [
+      audioEls,
+      callId,
+      localEls,
+      refreshOnline,
+      remoteEls,
+      republishIfActive,
+      requestRemoteAttach,
+    ]
   );
 
   const showStage = useCallback(
     async (view: VideoCallTeacherView) => {
       if (view.mode === "parallel" && !view.activeParticipantId) {
-        attachRemoteMedia(undefined, remoteEls(), audioEls());
+        remoteGate.invalidate("show_stage_hold");
         await ensurePreview();
         return;
       }
       await stopPreview();
       attachStage(view);
     },
-    [attachStage, audioEls, ensurePreview, remoteEls, stopPreview]
+    [attachStage, ensurePreview, remoteGate, stopPreview]
   );
 
   const dropRoom = useCallback(
@@ -465,12 +618,60 @@ export function TeacherCallSession({
       }
       refreshOnline();
       const key = teacherStageKey(view);
-      if (connectedNew || stagedKeyRef.current !== key) {
-        stagedKeyRef.current = key;
+      const holding = view.mode === "parallel" && !view.activeParticipantId;
+      const parallelSlot =
+        view.mode === "parallel" ? view.activeParticipantId : null;
+      const parallelRoom = parallelSlot
+        ? roomsRef.current.get(parallelSlot)
+        : undefined;
+
+      // Media attach не зависит от stagedKey: pending/ранний TrackSubscribed
+      // должны дожиматься на каждом sync, пока DOM не смонтирован.
+      if (holding) {
+        remoteGate.invalidate("sync_hold");
+      } else if (parallelRoom && parallelSlot) {
+        const attachResult = requestRemoteAttach(
+          parallelRoom,
+          parallelSlot,
+          "sync_ensure_remote"
+        );
+        if (
+          attachResult === "attached" ||
+          attachResult === "skipped_duplicate"
+        ) {
+          stagedKeyRef.current = key;
+        }
+      } else if (view.mode === "group") {
+        remoteGate.invalidate("sync_group");
+      }
+
+      const needUiStage = connectedNew || stagedKeyRef.current !== key;
+      if (needUiStage) {
         await showStage(view);
+        if (holding || view.mode === "group") {
+          stagedKeyRef.current = key;
+        } else if (parallelRoom && parallelSlot) {
+          const after = requestRemoteAttach(
+            parallelRoom,
+            parallelSlot,
+            "sync_after_show_stage"
+          );
+          // stagedKey только после реального attach к DOM, иначе poll повторит.
+          if (after === "attached" || after === "skipped_duplicate") {
+            stagedKeyRef.current = key;
+          }
+        }
       }
     },
-    [bindRoom, callId, dropRoom, refreshOnline, showStage]
+    [
+      bindRoom,
+      callId,
+      dropRoom,
+      refreshOnline,
+      remoteGate,
+      requestRemoteAttach,
+      showStage,
+    ]
   );
 
   const syncRoomsRef = useRef(syncRooms);
@@ -524,6 +725,7 @@ export function TeacherCallSession({
       window.clearInterval(timer);
       pip.close();
       void stopPreview();
+      remoteGate.invalidate("effect_unmount_or_call_change");
       const rooms = [...roomsRef.current.entries()];
       roomsRef.current.clear();
       for (const [id, room] of rooms) {
@@ -610,6 +812,7 @@ export function TeacherCallSession({
     try {
       // Полностью отпускаем preview до LiveKit publish (hold → ученик).
       await stopPreview();
+      remoteGate.invalidate("activate_begin");
       await muteAllPublishers(publisherList(roomsRef.current));
       const freed = await waitUntilCameraUnpublished(roomsRef.current.values());
       if (!freed) {
@@ -646,19 +849,46 @@ export function TeacherCallSession({
       if (data.call.role === "teacher") {
         setCall(data.call);
         callRef.current = data.call;
-        stagedKeyRef.current = teacherStageKey(data.call);
+        // Не ставим stagedKey до успешного attach — иначе sync не повторит.
       }
       attachLocalCamera(room, localEls());
-      attachRemoteMedia(room, remoteEls(), audioEls());
+      const attachResult = requestRemoteAttach(
+        room,
+        participantId,
+        "activate_after_setCall"
+      );
+      if (
+        attachResult === "attached" ||
+        attachResult === "skipped_duplicate"
+      ) {
+        stagedKeyRef.current = teacherStageKey({
+          mode: "parallel",
+          activeParticipantId: participantId,
+        });
+      }
       refreshMicStream(room);
       refreshOnline();
+      logMediaPath("activate_done_media", {
+        role: "teacher",
+        callId,
+        slotId: participantId,
+        activeId: participantId,
+        reason: attachResult,
+        room,
+        videos: remoteEls(),
+        audios: audioEls(),
+        extra: {
+          pending: remoteGate.hasPending(),
+          attachedSlot: remoteGate.attachedSlotId(),
+        },
+      });
       logRoomDiag("activate_done", {
         callId,
         slotId: participantId,
         activeId: participantId,
         instance: roomInstanceTag(room),
         remoteCount: room.remoteParticipants.size,
-        reason: "ok",
+        reason: attachResult,
       });
     } catch (err) {
       setError(deviceErrorMessage(err));
@@ -679,7 +909,8 @@ export function TeacherCallSession({
             camera: wantRef.current.camera,
           });
           attachLocalCamera(prev, localEls());
-          attachRemoteMedia(prev, remoteEls(), audioEls());
+          remoteGate.invalidate("activate_rollback_reset");
+          requestRemoteAttach(prev, previousId, "activate_rollback");
           refreshMicStream(prev);
         } catch {
           /* оставляем исходную ошибку */
@@ -724,6 +955,7 @@ export function TeacherCallSession({
         await dropRoom(id, "hold_leave_livekit");
       }
       await waitForLocalDevicesIdle(180);
+      remoteGate.invalidate("hold_begin_clear");
       const data = await transportRef.current.hold(callId);
       if (!isCurrentCallOp(gen, opGenRef.current, false)) return;
       if (data.call.role === "teacher") {
@@ -731,7 +963,6 @@ export function TeacherCallSession({
         callRef.current = data.call;
         stagedKeyRef.current = teacherStageKey(data.call);
       }
-      attachRemoteMedia(undefined, remoteEls(), audioEls());
       setMicStream(null);
       setOnline({});
       await ensurePreview();
@@ -807,6 +1038,7 @@ export function TeacherCallSession({
     pipRemoteRef.current = els.remoteVideo;
     pipAudioRef.current = els.remoteAudio;
     if (callRef.current) attachStage(callRef.current);
+    remoteGate.notifyElements("pip_media_els");
   }
 
   async function openPip() {
@@ -1178,8 +1410,8 @@ export function TeacherCallSession({
               />
               <VideoTile
                 label={activeStudent?.studentName ?? "Ученик"}
-                videoRef={remoteVideoRef}
-                audioRef={remoteAudioRef}
+                videoRef={bindRemoteVideoRef}
+                audioRef={bindRemoteAudioRef}
                 empty={remoteEmpty}
                 className={callTileFrameClass}
               />
