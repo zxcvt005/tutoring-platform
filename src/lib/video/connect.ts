@@ -1,7 +1,6 @@
 import {
   ConnectionState,
   Room,
-  RoomEvent,
   type RoomConnectOptions,
   type RoomOptions,
 } from "livekit-client";
@@ -10,6 +9,11 @@ import {
   DEFAULT_CALL_AUDIO_CONSTRAINTS,
   buildAudioCaptureDefaults,
 } from "@/lib/video/noise-suppression";
+import {
+  isConnectedState,
+  isTransientConnectionState,
+  waitForRoomSettled,
+} from "@/lib/video/room-lifecycle";
 
 /**
  * Не задаём iceServers сами: SDK подставит TURN/TLS текущего сервера.
@@ -46,45 +50,30 @@ export async function connectVideoRoom(
   await room.connect(serverUrl, token, videoConnectOptions());
 }
 
+/**
+ * Дожидается Connected. На transient-состояниях не вызывает disconnect —
+ * ждёт SDK с таймаутом. При Disconnected/timeout бросает ошибку
+ * (вызывающий код может пересоздать Room).
+ */
 export async function ensureVideoRoomConnected(
   room: Room,
   serverUrl: string,
-  token: string
+  token: string,
+  settleTimeoutMs = 12_000
 ): Promise<void> {
-  if (room.state === ConnectionState.Connected) return;
-  if (
-    room.state === ConnectionState.Connecting ||
-    room.state === ConnectionState.Reconnecting ||
-    room.state === ConnectionState.SignalReconnecting
-  ) {
-    await waitUntilConnected(room);
+  if (isConnectedState(room.state)) return;
+  if (isTransientConnectionState(room.state)) {
+    const settled = await waitForRoomSettled(room, settleTimeoutMs);
+    if (settled === "connected") return;
+    throw new Error(
+      settled === "timeout"
+        ? "Восстановление сигнализации не завершилось вовремя"
+        : "Комната отключилась во время восстановления"
+    );
+  }
+  if (room.state === ConnectionState.Disconnected) {
+    await connectVideoRoom(room, serverUrl, token);
     return;
   }
   await connectVideoRoom(room, serverUrl, token);
-}
-
-function waitUntilConnected(room: Room, timeoutMs = 20_000): Promise<void> {
-  if (room.state === ConnectionState.Connected) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const finish = (err?: Error) => {
-      if (settled) return;
-      settled = true;
-      globalThis.clearTimeout(timer);
-      room.off(RoomEvent.ConnectionStateChanged, onState);
-      if (err) reject(err);
-      else resolve();
-    };
-    const timer = globalThis.setTimeout(() => {
-      finish(new Error("Комната ещё не подключена"));
-    }, timeoutMs);
-    const onState = (state: ConnectionState) => {
-      if (state === ConnectionState.Connected) finish();
-      if (state === ConnectionState.Disconnected) {
-        finish(new Error("Комната ещё не подключена"));
-      }
-    };
-    room.on(RoomEvent.ConnectionStateChanged, onState);
-    if (room.state === ConnectionState.Connected) finish();
-  });
 }

@@ -67,6 +67,18 @@ import {
 } from "@/lib/video/media-attach";
 import { parallelWantedRoomIds } from "@/lib/video/parallel-rooms";
 import {
+  disconnectRoomCleanly,
+  isConnectedState,
+  isDisconnectedState,
+  isTransientConnectionState,
+  logRoomDiag,
+  roomInstanceTag,
+  roomNeedsRecreate,
+  tagRoomInstance,
+  waitForLocalDevicesIdle,
+  waitForRoomSettled,
+} from "@/lib/video/room-lifecycle";
+import {
   extraPublisherError,
   muteAllPublishers,
   type PublishControls,
@@ -180,9 +192,11 @@ export function TeacherCallSession({
     previewTrackRef.current = null;
     setPreviewOn(false);
     if (!track) return;
+    logRoomDiag("preview_stop", { callId, reason: "stop_preview" });
     track.detach();
     await track.stop();
-  }, []);
+    await waitForLocalDevicesIdle(150);
+  }, [callId]);
 
   const attachStage = useCallback(
     (view: VideoCallTeacherView) => {
@@ -274,6 +288,16 @@ export function TeacherCallSession({
 
   const bindRoom = useCallback(
     (id: string, room: Room) => {
+      const instance = tagRoomInstance(room);
+      const diagBase = () => ({
+        callId,
+        slotId: id,
+        activeId: callRef.current?.activeParticipantId ?? null,
+        instance,
+        roomName: room.name || undefined,
+        identity: room.localParticipant?.identity || undefined,
+        roomState: room.state,
+      });
       const reattachRemoteIfActive = () => {
         const view = callRef.current;
         if (view?.mode === "group" || view?.activeParticipantId === id) {
@@ -287,8 +311,6 @@ export function TeacherCallSession({
       room.on(RoomEvent.TrackSubscribed, onRemote);
       room.on(RoomEvent.TrackUnsubscribed, (track) => {
         track.detach();
-        // После unpublish/renegotiation снова цепляем оставшиеся треки,
-        // иначе UI остаётся пустым при живой подписке.
         reattachRemoteIfActive();
         refreshOnline();
       });
@@ -299,12 +321,18 @@ export function TeacherCallSession({
       room.on(RoomEvent.ParticipantConnected, onPresence);
       room.on(RoomEvent.ParticipantDisconnected, onPresence);
       room.on(RoomEvent.ConnectionStateChanged, (state) => {
+        logRoomDiag("connection_state", {
+          ...diagBase(),
+          roomState: state,
+          reason: "sdk",
+        });
         refreshOnline();
         if (state === ConnectionState.Connected) {
           reattachRemoteIfActive();
         }
       });
       room.on(RoomEvent.Reconnected, () => {
+        logRoomDiag("reconnected", { ...diagBase(), reason: "sdk" });
         reattachRemoteIfActive();
         void republishIfActive(id, room)
           .then(() => {
@@ -314,6 +342,16 @@ export function TeacherCallSession({
             setError(deviceErrorMessage(err));
           });
       });
+      room.on(RoomEvent.Disconnected, (disconnectReason) => {
+        logRoomDiag("sdk_disconnected", {
+          ...diagBase(),
+          reason: "sdk",
+          initiator: "livekit",
+          disconnectReason:
+            disconnectReason != null ? String(disconnectReason) : undefined,
+        });
+        refreshOnline();
+      });
       room.on(RoomEvent.LocalTrackPublished, () => {
         const view = callRef.current;
         if (view?.mode === "group" || view?.activeParticipantId === id) {
@@ -322,7 +360,7 @@ export function TeacherCallSession({
         }
       });
     },
-    [audioEls, localEls, refreshOnline, remoteEls, republishIfActive]
+    [audioEls, callId, localEls, refreshOnline, remoteEls, republishIfActive]
   );
 
   const showStage = useCallback(
@@ -338,23 +376,23 @@ export function TeacherCallSession({
     [attachStage, audioEls, ensurePreview, remoteEls, stopPreview]
   );
 
-  const dropRoom = useCallback(async (id: string) => {
-    const room = roomsRef.current.get(id);
-    if (!room) return;
-    room.removeAllListeners();
-    try {
-      await room.disconnect();
-    } catch {
-      /* уже закрыта */
-    }
-    roomsRef.current.delete(id);
-  }, []);
+  const dropRoom = useCallback(
+    async (id: string, reason: string) => {
+      const room = roomsRef.current.get(id);
+      if (!room) return;
+      roomsRef.current.delete(id);
+      await disconnectRoomCleanly(room, reason, {
+        callId,
+        slotId: id,
+        activeId: callRef.current?.activeParticipantId ?? null,
+      });
+    },
+    [callId]
+  );
 
   const syncRooms = useCallback(
     async (view: VideoCallTeacherView, tokens: VideoLivekitToken[]) => {
       // Параллельный режим: только активная комната (или ни одной в hold).
-      // N одновременных signal/ICE у преподавателя давали ping timeout и
-      // one-way media после переключений.
       const wanted = new Set(
         view.mode === "group"
           ? ["group"]
@@ -362,17 +400,63 @@ export function TeacherCallSession({
       );
       for (const id of [...roomsRef.current.keys()]) {
         if (!wanted.has(id)) {
-          await dropRoom(id);
+          await dropRoom(id, "sync_unwanted");
+          continue;
+        }
+        const existing = roomsRef.current.get(id);
+        if (existing && roomNeedsRecreate(existing)) {
+          logRoomDiag("sync_recreate_disconnected", {
+            callId,
+            slotId: id,
+            activeId: view.activeParticipantId,
+            instance: roomInstanceTag(existing),
+            roomState: existing.state,
+            reason: "disconnected_stale",
+          });
+          await dropRoom(id, "sync_disconnected_stale");
         }
       }
       let connectedNew = false;
       for (const token of tokens) {
         const id = view.mode === "group" ? "group" : token.participantId;
-        if (!id || !wanted.has(id) || roomsRef.current.has(id)) continue;
+        if (!id || !wanted.has(id)) continue;
+        const existing = roomsRef.current.get(id);
+        if (existing) {
+          if (isConnectedState(existing.state)) continue;
+          if (isTransientConnectionState(existing.state)) {
+            // Не abort — ждём SDK с лимитом; при неудаче пересоздаём.
+            logRoomDiag("sync_wait_transient", {
+              callId,
+              slotId: id,
+              activeId: view.activeParticipantId,
+              instance: roomInstanceTag(existing),
+              roomState: existing.state,
+              reason: "await_sdk_reconnect",
+            });
+            const settled = await waitForRoomSettled(existing, 12_000);
+            if (settled === "connected") continue;
+            logRoomDiag("sync_transient_failed", {
+              callId,
+              slotId: id,
+              instance: roomInstanceTag(existing),
+              roomState: existing.state,
+              reason: settled,
+            });
+            await dropRoom(id, `sync_after_${settled}`);
+          }
+        }
         connectedNew = true;
         const room = createVideoRoom();
+        tagRoomInstance(room);
         bindRoom(id, room);
         roomsRef.current.set(id, room);
+        logRoomDiag("sync_connect", {
+          callId,
+          slotId: id,
+          activeId: view.activeParticipantId,
+          instance: roomInstanceTag(room),
+          reason: "sync_new",
+        });
         await connectVideoRoom(room, token.serverUrl, token.participantToken);
         await publishLocalMedia(room, {
           microphone: wantRef.current.mic,
@@ -386,8 +470,11 @@ export function TeacherCallSession({
         await showStage(view);
       }
     },
-    [bindRoom, dropRoom, refreshOnline, showStage]
+    [bindRoom, callId, dropRoom, refreshOnline, showStage]
   );
+
+  const syncRoomsRef = useRef(syncRooms);
+  syncRoomsRef.current = syncRooms;
 
   const load = useCallback(async () => {
     if (switchingRef.current) return callRef.current;
@@ -407,14 +494,15 @@ export function TeacherCallSession({
         if (!isCurrentCallOp(gen, opGenRef.current, switchingRef.current)) {
           return callRef.current;
         }
-        await syncRooms(data.call, tokens.tokens);
+        await syncRoomsRef.current(data.call, tokens.tokens);
       } catch (err) {
         if (!(err instanceof HttpStatusError && err.status === 409)) throw err;
       }
     }
     return data.call;
-  }, [callId, syncRooms]);
+  }, [callId]);
 
+  // Только callId: смена identity load/syncRooms не должна рвать активный Room.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -436,29 +524,48 @@ export function TeacherCallSession({
       window.clearInterval(timer);
       pip.close();
       void stopPreview();
-      for (const room of roomsRef.current.values()) {
-        room.removeAllListeners();
-        void room.disconnect();
-      }
+      const rooms = [...roomsRef.current.entries()];
       roomsRef.current.clear();
+      for (const [id, room] of rooms) {
+        void disconnectRoomCleanly(room, "effect_unmount_or_call_change", {
+          callId,
+          slotId: id,
+        });
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [load, stopPreview]);
+  }, [callId]);
 
   async function ensureConnectedRoom(participantId: string) {
     let room = roomsRef.current.get(participantId);
-    if (room?.state === ConnectionState.Connected) return room;
-    // Полумёртвое соединение после ping timeout / ICE — не реанимируем,
-    // создаём чистое (иначе subscribe ученика часто не восстанавливается).
-    if (
-      room &&
-      (room.state === ConnectionState.Disconnected ||
-        room.state === ConnectionState.Reconnecting ||
-        room.state === ConnectionState.SignalReconnecting)
-    ) {
-      await dropRoom(participantId);
+    if (room && isConnectedState(room.state)) return room;
+
+    // Transient: ждём SDK, не abort reconnect.
+    if (room && isTransientConnectionState(room.state)) {
+      logRoomDiag("ensure_wait_transient", {
+        callId,
+        slotId: participantId,
+        activeId: callRef.current?.activeParticipantId ?? null,
+        instance: roomInstanceTag(room),
+        roomState: room.state,
+        reason: "await_sdk_reconnect",
+      });
+      const settled = await waitForRoomSettled(room, 12_000);
+      if (settled === "connected") return room;
+      logRoomDiag("ensure_transient_failed", {
+        callId,
+        slotId: participantId,
+        instance: roomInstanceTag(room),
+        roomState: room.state,
+        reason: settled,
+      });
+      await dropRoom(participantId, `ensure_after_${settled}`);
+      room = undefined;
+    } else if (room && isDisconnectedState(room.state)) {
+      await dropRoom(participantId, "ensure_disconnected");
       room = undefined;
     }
+
     const tokens = await transportRef.current.tokens(callId);
     const token = tokens.tokens.find((item) => item.participantId === participantId);
     if (!token) {
@@ -466,8 +573,15 @@ export function TeacherCallSession({
     }
     if (!room) {
       room = createVideoRoom();
+      tagRoomInstance(room);
       bindRoom(participantId, room);
       roomsRef.current.set(participantId, room);
+      logRoomDiag("ensure_new_room", {
+        callId,
+        slotId: participantId,
+        instance: roomInstanceTag(room),
+        reason: "create",
+      });
     }
     await ensureVideoRoomConnected(room, token.serverUrl, token.participantToken);
     return room;
@@ -487,9 +601,15 @@ export function TeacherCallSession({
     setSwitching(true);
     setError(null);
     const previousId = call.activeParticipantId;
+    logRoomDiag("activate_begin", {
+      callId,
+      slotId: participantId,
+      activeId: previousId,
+      reason: "user_activate",
+    });
     try {
+      // Полностью отпускаем preview до LiveKit publish (hold → ученик).
       await stopPreview();
-      // Сначала глушим и полностью выходим из прочих комнат — один signal/PC.
       await muteAllPublishers(publisherList(roomsRef.current));
       const freed = await waitUntilCameraUnpublished(roomsRef.current.values());
       if (!freed) {
@@ -498,8 +618,16 @@ export function TeacherCallSession({
         );
       }
       for (const id of [...roomsRef.current.keys()]) {
-        if (id !== participantId) await dropRoom(id);
+        if (id !== participantId) await dropRoom(id, "activate_leave_other");
       }
+      // Повторный вход в тот же slot (hold → ученик): если в map остался
+      // Disconnected/битый Room — убираем до connect, иначе ensure пересоздаст.
+      const staleTarget = roomsRef.current.get(participantId);
+      if (staleTarget && roomNeedsRecreate(staleTarget)) {
+        await dropRoom(participantId, "activate_stale_target");
+      }
+      // Ждём завершения leave + отпускания cam/mic до нового connect (тот же identity).
+      await waitForLocalDevicesIdle(180);
       const room = await ensureConnectedRoom(participantId);
       await publishLocalMedia(room, {
         microphone: wantRef.current.mic,
@@ -524,14 +652,27 @@ export function TeacherCallSession({
       attachRemoteMedia(room, remoteEls(), audioEls());
       refreshMicStream(room);
       refreshOnline();
+      logRoomDiag("activate_done", {
+        callId,
+        slotId: participantId,
+        activeId: participantId,
+        instance: roomInstanceTag(room),
+        remoteCount: room.remoteParticipants.size,
+        reason: "ok",
+      });
     } catch (err) {
       setError(deviceErrorMessage(err));
-      // Попытка восстановить эфир в прежней комнате, если переключение сорвалось.
+      logRoomDiag("activate_error", {
+        callId,
+        slotId: participantId,
+        reason: deviceErrorMessage(err),
+      });
       if (previousId) {
         try {
           for (const id of [...roomsRef.current.keys()]) {
-            if (id !== previousId) await dropRoom(id);
+            if (id !== previousId) await dropRoom(id, "activate_rollback_other");
           }
+          await waitForLocalDevicesIdle(120);
           const prev = await ensureConnectedRoom(previousId);
           await publishLocalMedia(prev, {
             microphone: wantRef.current.mic,
@@ -558,6 +699,11 @@ export function TeacherCallSession({
     switchingRef.current = true;
     setSwitching(true);
     setError(null);
+    logRoomDiag("hold_begin", {
+      callId,
+      activeId: call.activeParticipantId,
+      reason: "user_hold",
+    });
     try {
       await muteAllPublishers(publisherList(roomsRef.current));
       const leak = extraPublisherError(
@@ -575,8 +721,9 @@ export function TeacherCallSession({
         );
       }
       for (const id of [...roomsRef.current.keys()]) {
-        await dropRoom(id);
+        await dropRoom(id, "hold_leave_livekit");
       }
+      await waitForLocalDevicesIdle(180);
       const data = await transportRef.current.hold(callId);
       if (!isCurrentCallOp(gen, opGenRef.current, false)) return;
       if (data.call.role === "teacher") {
@@ -588,6 +735,7 @@ export function TeacherCallSession({
       setMicStream(null);
       setOnline({});
       await ensurePreview();
+      logRoomDiag("hold_done", { callId, activeId: null, reason: "ok" });
     } catch (err) {
       setError(deviceErrorMessage(err));
     } finally {
@@ -710,11 +858,11 @@ export function TeacherCallSession({
       await transportRef.current.end(callId);
       pip.close();
       await stopPreview();
-      for (const room of roomsRef.current.values()) {
-        room.removeAllListeners();
-        await room.disconnect();
-      }
+      const rooms = [...roomsRef.current.entries()];
       roomsRef.current.clear();
+      for (const [id, room] of rooms) {
+        await disconnectRoomCleanly(room, "call_ended", { callId, slotId: id });
+      }
       if (onEnded) onEnded();
       else router.push(cabinetHref);
     } catch (err) {
