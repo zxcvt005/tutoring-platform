@@ -281,24 +281,44 @@ export async function materializeSchedule(
   return created;
 }
 
-/** Не чаще раза в минуту на org при bootstrap — снижает шторм при частых reload. */
+/**
+ * Не чаще раза в TTL на org без force.
+ * Раньше `until` обходил TTL и каждый сдвиг недели в UI материализовал заново.
+ */
 const MATERIALIZE_TTL_MS = 60_000;
 const lastMaterializeAt = new Map<string, number>();
+
+/** Горизонт «на ближайшие недели» для кабинета (не год вперёд). */
+export const CABINET_MATERIALIZE_HORIZON_WEEKS = 4;
 
 function weeksUntil(from: Date, until: Date): number {
   const ms = Math.max(0, until.getTime() - from.getTime());
   return Math.max(1, Math.ceil(ms / (7 * 86_400_000)) + 1);
 }
 
-/** Материализует все активные шаблоны организации (вызывается из bootstrap). */
+/**
+ * Материализует активные шаблоны организации.
+ * Не вызывать из обычного bootstrap — только явно (расписание / фоновый ensure).
+ */
 export async function ensureOrgSchedulesMaterialized(
   db: AppDb,
   organizationId: string,
   now: Date = new Date(),
   options?: { force?: boolean; until?: Date; horizonWeeks?: number }
 ) {
+  const started = Date.now();
   const last = lastMaterializeAt.get(organizationId) ?? 0;
-  if (!options?.force && !options?.until && Date.now() - last < MATERIALIZE_TTL_MS) {
+  if (!options?.force && Date.now() - last < MATERIALIZE_TTL_MS) {
+    console.info(
+      "[server-timing]",
+      JSON.stringify({
+        route: "ensureOrgSchedulesMaterialized",
+        durationMs: Date.now() - started,
+        ok: true,
+        skippedByTtl: true,
+        created: 0,
+      })
+    );
     return 0;
   }
   lastMaterializeAt.set(organizationId, Date.now());
@@ -306,8 +326,11 @@ export async function ensureOrgSchedulesMaterialized(
   const horizonWeeks =
     options?.horizonWeeks ??
     (options?.until
-      ? Math.max(SCHEDULE_HORIZON_WEEKS, weeksUntil(now, options.until))
-      : SCHEDULE_HORIZON_WEEKS);
+      ? Math.min(
+          SCHEDULE_HORIZON_WEEKS,
+          Math.max(CABINET_MATERIALIZE_HORIZON_WEEKS, weeksUntil(now, options.until))
+        )
+      : CABINET_MATERIALIZE_HORIZON_WEEKS);
 
   const rows = await db
     .select({ id: lessonSchedules.id })
@@ -328,6 +351,18 @@ export async function ensureOrgSchedulesMaterialized(
       horizonWeeks
     );
   }
+  console.info(
+    "[server-timing]",
+    JSON.stringify({
+      route: "ensureOrgSchedulesMaterialized",
+      durationMs: Date.now() - started,
+      ok: true,
+      skippedByTtl: false,
+      scheduleCount: rows.length,
+      horizonWeeks,
+      created: total,
+    })
+  );
   return total;
 }
 

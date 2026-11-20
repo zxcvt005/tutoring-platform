@@ -196,6 +196,9 @@ export function PressStudentCard({ studentId }: { studentId: string }) {
         <StudentQuestionnaireSections
           student={student}
           teacherName={teacher?.fullName}
+          assignedTariffName={
+            data.tariffs.find((t) => t.id === student.assignedTariffId)?.name
+          }
         />
         <StudentAvailabilityPanel studentId={student.id} canEdit />
       </div>
@@ -380,6 +383,8 @@ export function PressStudentCard({ studentId }: { studentId: string }) {
         onOpenChange={setEditOpen}
         student={student}
         teachers={data.teachers}
+        tariffs={data.tariffs}
+        directions={data.learningDirections ?? []}
         onSave={async (values) => {
           const saved = await upsertStudent({
             id: values.id,
@@ -393,6 +398,7 @@ export function PressStudentCard({ studentId }: { studentId: string }) {
             parentContacts: values.parentContacts || null,
             learningGoal: values.learningGoal || null,
             notes: values.notes || undefined,
+            assignedTariffId: values.assignedTariffId.trim() || null,
           });
           if (saved.ok) {
             await reload();

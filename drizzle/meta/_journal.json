@@ -400,6 +400,13 @@
       "when": 1798000000000,
       "tag": "0057_theory_grade_catalog_order",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1798100000000,
+      "tag": "0058_student_assigned_tariff",
+      "breakpoints": true
     }
   ]
 }

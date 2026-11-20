@@ -4,12 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ConnectionState,
-  LocalVideoTrack,
   Room,
   RoomEvent,
   Track,
 } from "livekit-client";
-import { supportsBackgroundProcessors } from "@livekit/track-processors";
 import {
   LogOut,
   Mic,
@@ -19,12 +17,12 @@ import {
   VideoOff,
 } from "lucide-react";
 
-import { CameraBackgroundPicker } from "@/components/video-calls/camera-background-picker";
 import {
   CallOverlay,
   callControlClass,
   callTileFrameClass,
 } from "@/components/video-calls/call-overlay";
+import { DeviceSelect } from "@/components/video-calls/device-select";
 import { MicLevelIndicator } from "@/components/video-calls/mic-level-indicator";
 import { RemoteGrid } from "@/components/video-calls/remote-grid";
 import { StudentCallPip } from "@/components/video-calls/student-call-pip";
@@ -33,29 +31,15 @@ import { useDocumentPip } from "@/components/video-calls/use-document-pip";
 import { VideoTile } from "@/components/video-calls/video-tile";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
-import { HttpStatusError, apiPlatform } from "@/lib/store/api-client";
+import { HttpStatusError } from "@/lib/store/api-client";
 import { connectVideoRoom, createVideoRoom } from "@/lib/video/connect";
 import { deviceErrorMessage } from "@/lib/video/device-error";
-import { CameraBackgroundController } from "@/lib/video/camera-background-controller";
-import {
-  prefetchCameraBackgroundAssets,
-  shouldShowCameraBackground,
-  type CameraBackgroundChoice,
-} from "@/lib/video/camera-background";
-import {
-  flushCameraBackgroundCrashReport,
-  takeCameraBackgroundCrashNotice,
-} from "@/lib/video/camera-background-report";
+import { switchCallDevice } from "@/lib/video/devices";
+import { publishLocalMedia } from "@/lib/video/local-publish";
 import {
   attachLocalCamera,
   attachRemoteMedia,
-  publishedCameraTrack,
 } from "@/lib/video/media-attach";
-import {
-  applyNoiseSuppressionInRoom,
-  applyNoiseSuppressionToTrack,
-  noiseSuppressionSupported,
-} from "@/lib/video/noise-suppression";
 import {
   cabinetStudentTransport,
   type StudentCallTransport,
@@ -99,21 +83,16 @@ export function StudentCallSession({
   const [call, setCall] = useState<VideoCallStudentView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wantMic, setWantMic] = useState(true);
-  const [noiseOn, setNoiseOn] = useState(true);
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
-  const noiseSupported = noiseSuppressionSupported();
   const [wantCamera, setWantCamera] = useState(true);
   const [blocked, setBlocked] = useState<string | null>(null);
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [liveRoom, setLiveRoom] = useState<Room | null>(null);
-  const [bgChoice, setBgChoice] = useState<CameraBackgroundChoice>({
-    type: "off",
-  });
-  const [bgSupported, setBgSupported] = useState(false);
+  const [micDeviceId, setMicDeviceId] = useState("");
+  const [cameraDeviceId, setCameraDeviceId] = useState("");
   const roomRef = useRef<Room | null>(null);
   const leavingRef = useRef(false);
-  const bgRef = useRef<CameraBackgroundController | null>(null);
   const wantRef = useRef({ mic: true, camera: true });
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -136,51 +115,17 @@ export function StudentCallSession({
     []
   );
 
-  useEffect(() => {
-    setBgSupported(
-      shouldShowCameraBackground({
-        userAgent: navigator.userAgent,
-        supportsProcessors: supportsBackgroundProcessors(),
-      })
-    );
-    prefetchCameraBackgroundAssets();
-    const controller = new CameraBackgroundController();
-    const softOff = (message: string) => {
-      setBgChoice({ type: "off" });
-      setError(message);
-    };
-    controller.onAutoOff = softOff;
-    controller.onFailure = softOff;
-    bgRef.current = controller;
-
-    const crash = takeCameraBackgroundCrashNotice();
-    if (crash) {
-      setError(crash.message);
-      void flushCameraBackgroundCrashReport(crash.snapshot, (action, payload) =>
-        apiPlatform(action, payload)
-      );
+  function refreshMicStream(room: Room | null) {
+    const track = room?.localParticipant.getTrackPublication(
+      Track.Source.Microphone
+    )?.track;
+    const media = track?.mediaStreamTrack;
+    if (media && media.readyState === "live") {
+      setMicStream(new MediaStream([media]));
+    } else {
+      setMicStream(null);
     }
-
-    return () => {
-      controller.onAutoOff = null;
-      controller.onFailure = null;
-      void controller.dispose();
-      bgRef.current = null;
-    };
-  }, []);
-
-  const applyCameraBackground = useCallback(async () => {
-    const track = publishedCameraTrack(roomRef.current) ?? null;
-    try {
-      const result = await bgRef.current?.applyTo(track);
-      if (result) setBgChoice(result.choice);
-    } catch (err) {
-      setBgChoice({ type: "off" });
-      bgRef.current?.setDesired({ type: "off" });
-      setError(deviceErrorMessage(err));
-    }
-    if (roomRef.current) attachLocalCamera(roomRef.current, localEls());
-  }, [localEls]);
+  }
 
   const shouldPlayRemote = useCallback((view: VideoCallStudentView | null) => {
     if (!view) return false;
@@ -200,6 +145,15 @@ export function StudentCallSession({
     [audioEls, localEls, remoteEls, shouldPlayRemote]
   );
 
+  const ensureLocalPublished = useCallback(async (room: Room) => {
+    await publishLocalMedia(room, {
+      microphone: wantRef.current.mic,
+      camera: wantRef.current.camera,
+    });
+    refreshMicStream(room);
+    attachLocalCamera(room, localEls());
+  }, [localEls]);
+
   const connectOnce = useCallback(
     async (view: VideoCallStudentView) => {
       if (leavingRef.current) return null;
@@ -215,22 +169,21 @@ export function StudentCallSession({
         }
       });
       room.on(RoomEvent.ConnectionStateChanged, (state) => {
-        if (
-          state === ConnectionState.Connected &&
-          shouldPlayRemote(callRef.current)
-        ) {
-          attachRemoteMedia(room, remoteEls(), audioEls());
+        if (state === ConnectionState.Connected) {
+          if (shouldPlayRemote(callRef.current)) {
+            attachRemoteMedia(room, remoteEls(), audioEls());
+          }
         }
+      });
+      room.on(RoomEvent.Reconnected, () => {
+        void ensureLocalPublished(room).catch((err) => {
+          setError(deviceErrorMessage(err));
+        });
       });
       room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach());
       room.on(RoomEvent.LocalTrackPublished, () => {
-        void applyCameraBackground();
-      });
-      room.on(RoomEvent.LocalTrackUnpublished, (pub) => {
-        const track = pub.track;
-        if (track instanceof LocalVideoTrack) {
-          void bgRef.current?.release(track);
-        }
+        attachLocalCamera(room, localEls());
+        refreshMicStream(room);
       });
       roomRef.current = room;
       setLiveRoom(room);
@@ -244,19 +197,7 @@ export function StudentCallSession({
         }
         return null;
       }
-      await room.localParticipant.setMicrophoneEnabled(wantRef.current.mic);
-      await room.localParticipant.setCameraEnabled(wantRef.current.camera);
-      {
-        const micTrack = room.localParticipant.getTrackPublication(
-          Track.Source.Microphone
-        )?.track?.mediaStreamTrack;
-        if (micTrack) {
-          setMicStream(new MediaStream([micTrack]));
-          void applyNoiseSuppressionToTrack(micTrack, noiseOn).then((result) => {
-            if (!result.ok && noiseOn) setNoiseOn(false);
-          });
-        }
-      }
+      await ensureLocalPublished(room);
       if (leavingRef.current) {
         room.removeAllListeners();
         await room.disconnect();
@@ -267,10 +208,17 @@ export function StudentCallSession({
         return null;
       }
       attachStage(room, view);
-      await applyCameraBackground();
       return room;
     },
-    [applyCameraBackground, attachStage, audioEls, callId, localEls, remoteEls, shouldPlayRemote]
+    [
+      attachStage,
+      audioEls,
+      callId,
+      ensureLocalPublished,
+      localEls,
+      remoteEls,
+      shouldPlayRemote,
+    ]
   );
 
   useEffect(() => {
@@ -304,7 +252,6 @@ export function StudentCallSession({
         const room = await connectOnce(data.call);
         if (!room || leavingRef.current || cancelled) return;
         attachStage(room, data.call);
-        await applyCameraBackground();
       } catch (err) {
         if (cancelled) return;
         if (err instanceof HttpStatusError && (err.status === 403 || err.status === 404)) {
@@ -345,25 +292,6 @@ export function StudentCallSession({
     };
   }, [pulse]);
 
-  async function toggleNoise() {
-    if (!noiseSupported) return;
-    const next = !noiseOn;
-    const room = roomRef.current;
-    const track = room?.localParticipant.getTrackPublication(
-      Track.Source.Microphone
-    )?.track?.mediaStreamTrack;
-    const result = room
-      ? await applyNoiseSuppressionInRoom(room, next)
-      : await applyNoiseSuppressionToTrack(track, next);
-    if (result.ok) {
-      setNoiseOn(next);
-    } else {
-      setError(
-        "Не удалось изменить шумоподавление. Браузер или устройство не применили настройку."
-      );
-    }
-  }
-
   async function toggle(kind: "mic" | "camera") {
     const room = roomRef.current;
     if (!room) return;
@@ -373,33 +301,34 @@ export function StudentCallSession({
         setWantMic(next);
         wantRef.current.mic = next;
         await room.localParticipant.setMicrophoneEnabled(next);
-        const track = room.localParticipant.getTrackPublication(
-          Track.Source.Microphone
-        )?.track?.mediaStreamTrack;
-        if (next && track) {
-          setMicStream(new MediaStream([track]));
-          void applyNoiseSuppressionToTrack(track, noiseOn).then((result) => {
-            if (!result.ok && noiseOn) setNoiseOn(false);
-          });
-        } else {
-          setMicStream(null);
-        }
+        refreshMicStream(room);
       } else {
         const next = !wantCamera;
         setWantCamera(next);
         wantRef.current.camera = next;
         await room.localParticipant.setCameraEnabled(next);
-        await applyCameraBackground();
+        attachLocalCamera(room, localEls());
       }
     } catch (err) {
       setError(deviceErrorMessage(err));
     }
   }
 
-  async function selectBackground(choice: CameraBackgroundChoice) {
-    setBgChoice(choice);
-    bgRef.current?.setDesired(choice);
-    await applyCameraBackground();
+  async function changeDevice(
+    kind: "audioinput" | "videoinput",
+    deviceId: string
+  ) {
+    if (kind === "audioinput") setMicDeviceId(deviceId);
+    else setCameraDeviceId(deviceId);
+    const room = roomRef.current;
+    if (!room) return;
+    try {
+      await switchCallDevice([room], kind, deviceId);
+      attachLocalCamera(room, localEls());
+      refreshMicStream(room);
+    } catch (err) {
+      setError(deviceErrorMessage(err));
+    }
   }
 
   function handlePipEls(els: PipMediaEls) {
@@ -440,7 +369,6 @@ export function StudentCallSession({
     leavingRef.current = true;
     setLeaving(true);
     pip.close();
-    await bgRef.current?.dispose();
     const room = roomRef.current;
     roomRef.current = null;
     setLiveRoom(null);
@@ -543,7 +471,7 @@ export function StudentCallSession({
               Ожидание преподавателя в эфире…
             </p>
           ) : null}
-          <div className="flex shrink-0 items-center justify-center gap-3 border-t border-border bg-muted/40 px-3 py-3 max-md:gap-4">
+          <div className="flex shrink-0 flex-wrap items-center justify-center gap-2 border-t border-border bg-muted/40 px-3 py-3 max-md:gap-3">
             <div className="flex items-center gap-1.5">
               <Button
                 type="button"
@@ -556,36 +484,31 @@ export function StudentCallSession({
                 {wantMic ? <Mic /> : <MicOff />}
               </Button>
               <MicLevelIndicator stream={micStream} active={wantMic} />
+              <DeviceSelect
+                kind="audioinput"
+                value={micDeviceId}
+                disabled={call.status !== "active"}
+                onChange={(id) => void changeDevice("audioinput", id)}
+              />
             </div>
-            {noiseSupported ? (
+            <div className="flex items-center gap-1.5">
               <Button
                 type="button"
-                variant={noiseOn ? "secondary" : "outline"}
-                size="sm"
-                className="rounded-full text-xs"
-                aria-pressed={noiseOn}
-                onClick={() => void toggleNoise()}
+                variant={wantCamera ? "secondary" : "outline"}
+                size="icon-lg"
+                className={callControlClass}
+                aria-label={wantCamera ? "Выключить камеру" : "Включить камеру"}
+                onClick={() => void toggle("camera")}
               >
-                Шум {noiseOn ? "вкл" : "выкл"}
+                {wantCamera ? <Video /> : <VideoOff />}
               </Button>
-            ) : null}
-            <Button
-              type="button"
-              variant={wantCamera ? "secondary" : "outline"}
-              size="icon-lg"
-              className={callControlClass}
-              aria-label={wantCamera ? "Выключить камеру" : "Включить камеру"}
-              onClick={() => void toggle("camera")}
-            >
-              {wantCamera ? <Video /> : <VideoOff />}
-            </Button>
-            {bgSupported ? (
-              <CameraBackgroundPicker
-                choice={bgChoice}
+              <DeviceSelect
+                kind="videoinput"
+                value={cameraDeviceId}
                 disabled={call.status !== "active" || !wantCamera}
-                onSelect={(choice) => void selectBackground(choice)}
+                onChange={(id) => void changeDevice("videoinput", id)}
               />
-            ) : null}
+            </div>
             {pip.supported ? (
               <Button
                 type="button"

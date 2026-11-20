@@ -148,6 +148,9 @@ export function StudentDetail({
           <StudentQuestionnaireSections
             student={student}
             teacherName={teacher?.fullName}
+            assignedTariffName={
+              data.tariffs.find((t) => t.id === student.assignedTariffId)?.name
+            }
           />
           <StudentAvailabilityPanel
             studentId={student.id}

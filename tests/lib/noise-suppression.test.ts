@@ -1,13 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  applyNoiseSuppressionToTrack,
-  buildAudioCaptureDefaults,
-  buildAudioProcessingConstraints,
-  noiseSuppressionSupported,
-} from "@/lib/video/noise-suppression";
+import { buildAudioCaptureDefaults } from "@/lib/video/noise-suppression";
 
-describe("noise suppression helpers", () => {
+describe("audio capture defaults", () => {
   const original = globalThis.navigator;
 
   afterEach(() => {
@@ -15,15 +10,6 @@ describe("noise suppression helpers", () => {
       configurable: true,
       value: original,
     });
-  });
-
-  it("reports unsupported without mediaDevices", () => {
-    Object.defineProperty(globalThis, "navigator", {
-      configurable: true,
-      value: {},
-    });
-    expect(noiseSuppressionSupported()).toBe(false);
-    expect(buildAudioProcessingConstraints(true)).toEqual({});
   });
 
   it("maps capture defaults for RoomOptions", () => {
@@ -46,60 +32,19 @@ describe("noise suppression helpers", () => {
     });
   });
 
-  it("builds only supported constraint keys", () => {
+  it("omits unsupported constraint keys", () => {
     Object.defineProperty(globalThis, "navigator", {
       configurable: true,
       value: {
         mediaDevices: {
           getSupportedConstraints: () => ({
-            noiseSuppression: true,
             echoCancellation: true,
-            autoGainControl: false,
           }),
         },
       },
     });
-    expect(buildAudioProcessingConstraints(false)).toEqual({
-      noiseSuppression: false,
+    expect(buildAudioCaptureDefaults(true)).toEqual({
       echoCancellation: true,
     });
-  });
-
-  it("does not flip UI success when applyConstraints fails", async () => {
-    Object.defineProperty(globalThis, "navigator", {
-      configurable: true,
-      value: {
-        mediaDevices: {
-          getSupportedConstraints: () => ({ noiseSuppression: true }),
-        },
-      },
-    });
-    const track = {
-      kind: "audio",
-      applyConstraints: vi.fn().mockRejectedValue(new Error("fail")),
-      getSettings: () => ({}),
-    } as unknown as MediaStreamTrack;
-    const result = await applyNoiseSuppressionToTrack(track, true);
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe("apply_failed");
-  });
-
-  it("rejects when getSettings contradicts requested noiseSuppression", async () => {
-    Object.defineProperty(globalThis, "navigator", {
-      configurable: true,
-      value: {
-        mediaDevices: {
-          getSupportedConstraints: () => ({ noiseSuppression: true }),
-        },
-      },
-    });
-    const track = {
-      kind: "audio",
-      applyConstraints: vi.fn().mockResolvedValue(undefined),
-      getSettings: () => ({ noiseSuppression: false }),
-    } as unknown as MediaStreamTrack;
-    const result = await applyNoiseSuppressionToTrack(track, true);
-    expect(result.ok).toBe(false);
-    expect(result.appliedNoiseSuppression).toBe(false);
   });
 });

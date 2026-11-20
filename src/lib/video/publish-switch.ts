@@ -34,12 +34,33 @@ export function extraPublisherError(
   return null;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Глушит публикацию во всех комнатах и проверяет, что эфир нигде не остался. */
-export async function muteAllPublishers(rooms: PublishControls[]): Promise<void> {
+export async function muteAllPublishers(
+  rooms: PublishControls[],
+  timeoutMs = 2500
+): Promise<void> {
   for (const room of rooms) {
     await room.setMicrophoneEnabled(false);
     await room.setCameraEnabled(false);
   }
+
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const stillLive = rooms.filter(
+      (room) => room.isMicrophoneEnabled() || room.isCameraEnabled()
+    );
+    if (stillLive.length === 0) return;
+    for (const room of stillLive) {
+      await room.setMicrophoneEnabled(false);
+      await room.setCameraEnabled(false);
+    }
+    await sleep(40);
+  }
+
   for (const room of rooms) {
     if (room.isMicrophoneEnabled()) {
       throw new Error(
@@ -72,10 +93,21 @@ export async function switchActivePublisher(
 
   await muteAllPublishers(rooms);
 
-  if (output.microphone) {
-    await target.setMicrophoneEnabled(true);
-  }
-  if (output.camera) {
-    await target.setCameraEnabled(true);
+  try {
+    if (output.microphone) {
+      await target.setMicrophoneEnabled(true);
+    }
+    if (output.camera) {
+      await target.setCameraEnabled(true);
+    }
+  } catch (err) {
+    // Не оставляем преподавателя без эфира во всех комнатах после сбоя.
+    try {
+      if (output.microphone) await target.setMicrophoneEnabled(true);
+      if (output.camera) await target.setCameraEnabled(true);
+    } catch {
+      /* исходная ошибка важнее */
+    }
+    throw err;
   }
 }

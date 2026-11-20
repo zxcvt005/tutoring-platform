@@ -88,6 +88,9 @@ type OkResult = {
   archived?: boolean;
   testAssignmentId?: string | null;
   status?: string;
+  remaining?: number | null;
+  directionId?: string | null;
+  lessonStatus?: string | null;
 };
 
 export type DemoStoreValue = {
@@ -423,6 +426,40 @@ function idempotencyKeyFor(
   return `${action}:${id}`;
 }
 
+function patchStudentDirectionBalance(
+  data: DemoData,
+  studentId: string,
+  directionId: string,
+  remaining: number
+): DemoData {
+  const students = data.students.map((s) => {
+    if (s.id !== studentId) return s;
+    const balances = [...(s.directionBalances ?? [])];
+    const idx = balances.findIndex((b) => b.directionId === directionId);
+    if (idx >= 0) {
+      balances[idx] = { ...balances[idx]!, balance: remaining };
+    } else {
+      balances.push({ directionId, balance: remaining });
+    }
+    return { ...s, directionBalances: balances };
+  });
+  const rows = [...(data.studentDirectionBalances ?? [])];
+  const rowIdx = rows.findIndex(
+    (r) => r.studentId === studentId && r.directionId === directionId
+  );
+  if (rowIdx >= 0) {
+    rows[rowIdx] = { ...rows[rowIdx]!, remaining };
+  } else {
+    rows.push({
+      studentId,
+      directionId,
+      remaining,
+      used: 0,
+    });
+  }
+  return { ...data, students, studentDirectionBalances: rows };
+}
+
 function upsertAttendanceRow(
   attendances: Attendance[],
   lessonId: string,
@@ -562,6 +599,8 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       patch?: (prev: DemoData) => DemoData,
       reloadMode: ReloadMode = "coalesce"
     ): Promise<OkResult> => {
+      const started =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
       try {
         const result = await apiPlatform<{
           created?: number;
@@ -571,7 +610,12 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
           archived?: boolean;
           testAssignmentId?: string | null;
           status?: string;
+          remaining?: number | null;
+          directionId?: string | null;
+          lessonStatus?: string | null;
         }>(action, payload, idempotencyKeyFor(action, payload, idem));
+        const afterPlatform =
+          typeof performance !== "undefined" ? performance.now() : Date.now();
         if (patch) {
           setData((prev) => patch(prev));
         }
@@ -585,6 +629,20 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
             );
           }
         }
+        const ended =
+          typeof performance !== "undefined" ? performance.now() : Date.now();
+        const totalMs = Math.round(ended - started);
+        const platformMs = Math.round(afterPlatform - started);
+        const reloadMs = Math.round(ended - afterPlatform);
+        if (totalMs >= 800) {
+          console.info("[client-timing]", {
+            label: `run:${action}`,
+            durationMs: totalMs,
+            platformMs,
+            reloadMs,
+            reloadMode,
+          });
+        }
         return {
           ok: true,
           created: result.created,
@@ -594,6 +652,9 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
           archived: result.archived,
           testAssignmentId: result.testAssignmentId,
           status: result.status,
+          remaining: result.remaining,
+          directionId: result.directionId,
+          lessonStatus: result.lessonStatus,
         };
       } catch (e) {
         const message = e instanceof Error ? e.message : "Ошибка сервера";
@@ -603,6 +664,36 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
     },
     [reload]
   );
+
+  // Фоновая материализация после ready: не блокирует bootstrap,
+  // но держит ближайшие недели расписания актуальными.
+  useEffect(() => {
+    if (!ready || !auth) return;
+    if (auth.role !== "director" && auth.role !== "teacher") return;
+    let cancelled = false;
+    const until = new Date();
+    until.setDate(until.getDate() + 21);
+    void (async () => {
+      const r = await run(
+        "ensureSchedulesMaterialized",
+        { until: until.toISOString() },
+        undefined,
+        undefined,
+        "skip"
+      );
+      if (cancelled || !r.ok) return;
+      if ((r.created ?? 0) > 0) {
+        try {
+          await reload();
+        } catch (err) {
+          reportClientError("schedule-materialize-reload", err);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, auth, run, reload]);
 
   const setCurrentTeacherId = useCallback((id: string) => {
     setFilterTeacherId(id);
@@ -727,8 +818,8 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         if (r.ok) toast.success("Занятие проведено");
         return r;
       },
-      setAttendance: (lessonId, studentId, status) =>
-        run(
+      setAttendance: async (lessonId, studentId, status) => {
+        const r = await run(
           "setAttendance",
           { lessonId, studentId, status },
           undefined,
@@ -740,14 +831,82 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
               studentId,
               status
             ),
-          })
-        ),
+          }),
+          "skip"
+        );
+        if (!r.ok) return r;
+        setData((d) => {
+          let next = d;
+          if (r.lessonStatus === "done") {
+            next = {
+              ...next,
+              lessons: next.lessons.map((l) =>
+                l.id === lessonId ? { ...l, status: "done" as const } : l
+              ),
+            };
+          }
+          if (
+            typeof r.remaining === "number" &&
+            typeof r.directionId === "string" &&
+            r.directionId
+          ) {
+            next = patchStudentDirectionBalance(
+              next,
+              studentId,
+              r.directionId,
+              r.remaining
+            );
+          }
+          return next;
+        });
+        return r;
+      },
       resetLessonConduct: (lessonId) =>
         run("resetLessonConduct", { lessonId }),
       setLessonTopic: (lessonId, title, topicId) =>
-        run("setLessonTopic", { lessonId, title, topicId: topicId ?? null }),
+        run(
+          "setLessonTopic",
+          { lessonId, title, topicId: topicId ?? null },
+          undefined,
+          (d) => ({
+            ...d,
+            lessons: d.lessons.map((l) =>
+              l.id === lessonId
+                ? {
+                    ...l,
+                    subject: title || l.subject,
+                    topicId: topicId || undefined,
+                  }
+                : l
+            ),
+          }),
+          "skip"
+        ),
       setLessonTopics: (lessonId, topics) =>
-        run("setLessonTopics", { lessonId, topics }),
+        run(
+          "setLessonTopics",
+          { lessonId, topics },
+          undefined,
+          (d) => ({
+            ...d,
+            lessons: d.lessons.map((l) => {
+              if (l.id !== lessonId) return l;
+              const links = topics.map((t, i) => ({
+                id: `lt_${lessonId}_${i}`,
+                topicId: t.topicId ?? null,
+                title: t.title ?? "",
+                sortOrder: i,
+              }));
+              return {
+                ...l,
+                lessonTopics: links,
+                subject: links[0]?.title || l.subject,
+                topicId: links[0]?.topicId || undefined,
+              };
+            }),
+          }),
+          "skip"
+        ),
       saveLessonContent: async (input) => {
         try {
           const result = await apiPlatform<{
@@ -773,22 +932,77 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       },
       saveTopic: async (topic) => {
         const id = topic.id ?? newClientId("tp");
-        const r = await run("upsertTopic", { ...topic, id });
+        const r = await run(
+          "upsertTopic",
+          { ...topic, id },
+          undefined,
+          (d) => {
+            const idx = d.topics.findIndex((t) => t.id === id);
+            const next = { ...topic, id } as (typeof d.topics)[number];
+            const topics =
+              idx === -1
+                ? [...d.topics, next]
+                : d.topics.map((t, i) => (i === idx ? { ...t, ...next } : t));
+            return { ...d, topics };
+          },
+          "skip"
+        );
         return { ...r, id: r.id ?? id };
       },
       upsertTopicSection: (section) => {
         const id = section.id ?? newClientId("sec");
-        void run("upsertTopicSection", { ...section, id });
+        void run(
+          "upsertTopicSection",
+          { ...section, id },
+          undefined,
+          (d) => {
+            const idx = d.topicSections.findIndex((s) => s.id === id);
+            const next = { ...section, id } as (typeof d.topicSections)[number];
+            const topicSections =
+              idx === -1
+                ? [...d.topicSections, next]
+                : d.topicSections.map((s, i) => (i === idx ? { ...s, ...next } : s));
+            return { ...d, topicSections };
+          },
+          "skip"
+        );
         return id;
       },
       deleteTopicSection: (id, moveTopicsTo) =>
         run("deleteTopicSection", { id, moveTopicsTo }),
       reorderTopicSections: (teacherId, orderedIds) => {
-        void run("reorderTopicSections", { teacherId, orderedIds });
+        void run(
+          "reorderTopicSections",
+          { teacherId, orderedIds },
+          undefined,
+          (d) => ({
+            ...d,
+            topicSections: d.topicSections.map((s) => {
+              if (s.teacherId !== teacherId) return s;
+              const sortOrder = orderedIds.indexOf(s.id);
+              return sortOrder >= 0 ? { ...s, sortOrder } : s;
+            }),
+          }),
+          "skip"
+        );
       },
       upsertTopic: (topic) => {
         const id = topic.id ?? newClientId("tp");
-        void run("upsertTopic", { ...topic, id });
+        void run(
+          "upsertTopic",
+          { ...topic, id },
+          undefined,
+          (d) => {
+            const idx = d.topics.findIndex((t) => t.id === id);
+            const next = { ...topic, id } as (typeof d.topics)[number];
+            const topics =
+              idx === -1
+                ? [...d.topics, next]
+                : d.topics.map((t, i) => (i === idx ? { ...t, ...next } : t));
+            return { ...d, topics };
+          },
+          "skip"
+        );
         return id;
       },
       deleteTopic: async (id) => {
@@ -803,10 +1017,43 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
         return r;
       },
       moveTopic: (topicId, sectionId, sortOrder) => {
-        void run("moveTopic", { topicId, sectionId, sortOrder });
+        void run(
+          "moveTopic",
+          { topicId, sectionId, sortOrder },
+          undefined,
+          (d) => ({
+            ...d,
+            topics: d.topics.map((t) =>
+              t.id === topicId
+                ? {
+                    ...t,
+                    sectionId: sectionId ?? t.sectionId,
+                    sortOrder:
+                      typeof sortOrder === "number" ? sortOrder : t.sortOrder,
+                  }
+                : t
+            ),
+          }),
+          "skip"
+        );
       },
       reorderTopics: (teacherId, sectionId, orderedIds) => {
-        void run("reorderTopics", { teacherId, sectionId, orderedIds });
+        void run(
+          "reorderTopics",
+          { teacherId, sectionId, orderedIds },
+          undefined,
+          (d) => ({
+            ...d,
+            topics: d.topics.map((t) => {
+              if (t.teacherId !== teacherId || t.sectionId !== sectionId) {
+                return t;
+              }
+              const order = orderedIds.indexOf(t.id);
+              return order >= 0 ? { ...t, sortOrder: order } : t;
+            }),
+          }),
+          "skip"
+        );
       },
       upsertMaterialFolder: async (input) => {
         const id = input.id ?? newClientId("fld");

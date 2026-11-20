@@ -82,16 +82,10 @@ export async function buildBootstrap(
 ): Promise<DemoData> {
   const orgId = ctx.organizationId;
   await refreshExpiredAssignments(db, orgId);
-  if (
-    ctx.role === "director" ||
-    ctx.role === "teacher" ||
-    ctx.role === "press"
-  ) {
-    const { ensureOrgSchedulesMaterialized } = await import(
-      "@/server/services/schedule-service"
-    );
-    await ensureOrgSchedulesMaterialized(db, orgId);
-  }
+  // Материализацию расписаний не запускаем здесь: она блокировала каждый
+  // bootstrap на секунды. Актуальные слоты создаются через
+  // ensureSchedulesMaterialized (экран расписания / фоновый ensure после ready)
+  // и при createRecurringSchedule.
 
   let teacherRows = await db
     .select()
@@ -544,6 +538,9 @@ export async function buildBootstrap(
       availabilitySlots: availabilityByStudent.get(s.id) ?? [],
       status: s.status as Student["status"],
       teacherId: s.primaryTeacherId ?? "",
+      // Преподаватель не получает назначение тарифа — это данные дирекции/прессы.
+      assignedTariffId:
+        ctx.role === "teacher" ? undefined : (s.assignedTariffId ?? null),
       archivedAt: s.archivedAt?.toISOString() ?? null,
       archivedReason: (s.archivedReason as Student["archivedReason"]) ?? null,
       archivedComment: s.archivedComment ?? null,
@@ -759,7 +756,9 @@ export async function buildBootstrap(
   if (ctx.role === "press") {
     paymentRows = [];
     orderRows = [];
-    tariffRows = [];
+    // Прессе нужен каталог активных тарифов для назначения ученику;
+    // платежи и заказы по-прежнему скрыты.
+    tariffRows = tariffRows.filter((t) => t.status === "active");
   }
 
   const optionRows = await db

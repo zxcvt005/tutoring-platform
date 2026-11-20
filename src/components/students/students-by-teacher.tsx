@@ -41,6 +41,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 
+import { AssignedTariffField } from "@/components/students/assigned-tariff-field";
 import { TariffBalanceNotice } from "@/components/tariff-balance-notice";
 import { nextTeacherFilterAfterStudentSave } from "@/lib/students/teacher-filter-after-save";
 import {
@@ -94,6 +95,7 @@ type FormState = {
   parentContacts: string;
   learningGoal: string;
   notes: string;
+  assignedTariffId: string;
 };
 
 const emptyForm = (teacherId: string): FormState => ({
@@ -107,6 +109,7 @@ const emptyForm = (teacherId: string): FormState => ({
   parentContacts: "",
   learningGoal: "",
   notes: "",
+  assignedTariffId: "",
 });
 
 export function StudentsByTeacher({
@@ -232,6 +235,7 @@ export function StudentsByTeacher({
       parentContacts: student.parentContacts ?? "",
       learningGoal: student.learningGoal ?? "",
       notes: student.notes ?? "",
+      assignedTariffId: student.assignedTariffId ?? "",
     });
     setOpen(true);
   }
@@ -259,6 +263,9 @@ export function StudentsByTeacher({
         parentContacts: form.parentContacts.trim() || null,
         learningGoal: form.learningGoal.trim() || null,
         notes: form.notes.trim() || undefined,
+        ...(mode === "direkciya"
+          ? { assignedTariffId: form.assignedTariffId.trim() || null }
+          : {}),
       });
       if (!saved.ok) return;
       // Default list filter is «Без преподавателя»; after create with a teacher
@@ -910,6 +917,16 @@ export function StudentsByTeacher({
                 placeholder="Из анкеты / внутренние заметки"
               />
             </div>
+            {mode === "direkciya" ? (
+              <AssignedTariffField
+                value={form.assignedTariffId}
+                tariffs={data.tariffs}
+                directions={data.learningDirections ?? []}
+                onChange={(assignedTariffId) =>
+                  setForm({ ...form, assignedTariffId })
+                }
+              />
+            ) : null}
           </div>
           {form.id && mode === "direkciya" ? (
             <div className="mt-4" data-testid="student-edit-access-panel">

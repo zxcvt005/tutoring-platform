@@ -71,12 +71,30 @@ export function PaymentCheckoutPanel() {
   const selectionRef = useRef({ tariffId: "", optionId: "" });
   selectionRef.current = { tariffId, optionId };
 
-  const activeDirections = useMemo(
-    () => directions.filter((d) => d.status === "active"),
-    [directions]
-  );
+  const assignedTariffId = student?.assignedTariffId?.trim() || null;
+  const assignedTariff = useMemo(() => {
+    if (!assignedTariffId) return null;
+    return (
+      data.tariffs.find(
+        (t) =>
+          t.id === assignedTariffId &&
+          t.status === "active" &&
+          (t.purchaseOptions ?? []).some((o) => o.isActive)
+      ) ?? null
+    );
+  }, [assignedTariffId, data.tariffs]);
+
+  const assignmentUnavailable = Boolean(assignedTariffId) && !assignedTariff;
+  const catalogLocked = Boolean(assignedTariff);
+
+  const activeDirections = useMemo(() => {
+    const all = directions.filter((d) => d.status === "active");
+    if (!assignedTariff) return all;
+    return all.filter((d) => d.id === assignedTariff.directionId);
+  }, [directions, assignedTariff]);
 
   const tariffsInDirection = useMemo(() => {
+    if (assignedTariff) return [assignedTariff];
     return data.tariffs
       .filter(
         (t) =>
@@ -85,14 +103,15 @@ export function PaymentCheckoutPanel() {
           (t.purchaseOptions ?? []).some((o) => o.isActive)
       )
       .sort((a, b) => a.name.localeCompare(b.name, "ru"));
-  }, [data.tariffs, directionId]);
+  }, [assignedTariff, data.tariffs, directionId]);
 
   const selectedTariff = useMemo(
     () =>
+      assignedTariff ??
       tariffsInDirection.find((t) => t.id === tariffId) ??
       tariffsInDirection[0] ??
       null,
-    [tariffsInDirection, tariffId]
+    [assignedTariff, tariffsInDirection, tariffId]
   );
 
   const options = useMemo(() => {
@@ -112,6 +131,18 @@ export function PaymentCheckoutPanel() {
     if (!ready || !studentId || hydrated) return;
 
     const prefs = loadStudentCheckoutPrefs(studentId);
+    if (assignedTariff) {
+      setDirectionId(assignedTariff.directionId);
+      const resolved = resolveCheckoutSelection({
+        tariffs: [assignedTariff],
+        preferred: prefs.byDirection[assignedTariff.directionId] ?? null,
+      });
+      setTariffId(assignedTariff.id);
+      setOptionId(resolved?.optionId ?? "");
+      setHydrated(true);
+      return;
+    }
+
     const dirId = resolveCheckoutDirectionId(
       activeDirections.map((d) => d.id),
       prefs.lastDirectionId
@@ -136,12 +167,30 @@ export function PaymentCheckoutPanel() {
     studentId,
     hydrated,
     activeDirections,
+    assignedTariff,
     data.tariffs,
   ]);
 
   // Если каталог обновился и текущий выбор недоступен — подставить актуальный.
   useEffect(() => {
-    if (!hydrated || !directionId) return;
+    if (!hydrated) return;
+    if (assignedTariff) {
+      if (directionId !== assignedTariff.directionId) {
+        setDirectionId(assignedTariff.directionId);
+      }
+      const current = selectionRef.current;
+      const resolved = resolveCheckoutSelection({
+        tariffs: [assignedTariff],
+        preferred:
+          current.tariffId && current.optionId
+            ? { tariffId: current.tariffId, optionId: current.optionId }
+            : null,
+      });
+      setTariffId(assignedTariff.id);
+      setOptionId(resolved?.optionId ?? "");
+      return;
+    }
+    if (!directionId) return;
     const current = selectionRef.current;
     const resolved = resolveCheckoutSelection({
       tariffs: tariffsInDirection,
@@ -164,7 +213,7 @@ export function PaymentCheckoutPanel() {
       setTariffId(resolved.tariffId);
       setOptionId(resolved.optionId);
     }
-  }, [hydrated, directionId, tariffsInDirection]);
+  }, [hydrated, directionId, tariffsInDirection, assignedTariff]);
 
   useEffect(() => {
     if (!hydrated || !studentId) return;
@@ -303,39 +352,60 @@ export function PaymentCheckoutPanel() {
               Покупка занятий
             </h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Выберите направление, тариф и пакет занятий. Оплата проходит на
-              защищённой странице школы.
+              {catalogLocked
+                ? "Вам назначен тариф — выберите удобный пакет занятий. Оплата проходит на защищённой странице школы."
+                : "Выберите направление, тариф и пакет занятий. Оплата проходит на защищённой странице школы."}
             </p>
 
-            {activeDirections.length === 0 ? (
+            {assignmentUnavailable ? (
+              <p className="mt-4 text-sm text-muted-foreground">
+                Назначенный тариф недоступен. Обратитесь к куратору.
+              </p>
+            ) : activeDirections.length === 0 ? (
               <p className="mt-4 text-sm text-muted-foreground">
                 Тарифы пока не опубликованы. Обратитесь к куратору.
               </p>
             ) : (
               <div className="mt-5 space-y-4">
-                <CatalogPick
-                  label="Направление"
-                  value={directionId}
-                  options={activeDirections.map((d) => ({
-                    id: d.id,
-                    label: d.name,
-                  }))}
-                  onChange={selectDirection}
-                />
-                <CatalogPick
-                  label="Тариф"
-                  value={selectedTariff?.id ?? ""}
-                  options={tariffsInDirection.map((t) => ({
-                    id: t.id,
-                    label: t.name,
-                  }))}
-                  onChange={selectTariff}
-                  emptyHint={
-                    tariffsInDirection.length === 0
-                      ? "Нет тарифов в этом направлении"
-                      : undefined
-                  }
-                />
+                {catalogLocked ? (
+                  <div className="rounded-2xl border border-black/10 bg-auditoria-surface px-4 py-3">
+                    <p className="text-xs text-muted-foreground">Ваш тариф</p>
+                    <p className="mt-1 font-medium">
+                      {selectedTariff?.name ?? "—"}
+                    </p>
+                    {activeDirections[0]?.name ? (
+                      <p className="mt-0.5 text-sm text-muted-foreground">
+                        {activeDirections[0].name}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <>
+                    <CatalogPick
+                      label="Направление"
+                      value={directionId}
+                      options={activeDirections.map((d) => ({
+                        id: d.id,
+                        label: d.name,
+                      }))}
+                      onChange={selectDirection}
+                    />
+                    <CatalogPick
+                      label="Тариф"
+                      value={selectedTariff?.id ?? ""}
+                      options={tariffsInDirection.map((t) => ({
+                        id: t.id,
+                        label: t.name,
+                      }))}
+                      onChange={selectTariff}
+                      emptyHint={
+                        tariffsInDirection.length === 0
+                          ? "Нет тарифов в этом направлении"
+                          : undefined
+                      }
+                    />
+                  </>
+                )}
                 <OptionGrid
                   options={options}
                   value={selectedOption?.id ?? ""}

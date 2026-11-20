@@ -47,7 +47,8 @@ export function ScheduleWorkspace({
       const r = await ensureSchedulesMaterialized(
         new Date(`${untilKey}T23:59:59+03:00`).toISOString()
       );
-      if (r.ok) await reload();
+      // Полный bootstrap только если появились новые занятия.
+      if (r.ok && (r.created ?? 0) > 0) await reload();
     })();
   }, [weekAnchor, ensureSchedulesMaterialized, reload]);
   const [dialogOpen, setDialogOpen] = useState(false);

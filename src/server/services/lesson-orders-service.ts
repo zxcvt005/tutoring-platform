@@ -149,6 +149,29 @@ export async function createCheckout(
     throw validationError("Укажите тариф и вариант покупки");
   }
 
+  const [studentRow] = await db
+    .select({
+      id: students.id,
+      assignedTariffId: students.assignedTariffId,
+    })
+    .from(students)
+    .where(
+      and(
+        eq(students.id, studentId),
+        eq(students.organizationId, ctx.organizationId)
+      )
+    )
+    .limit(1);
+  if (!studentRow) throw forbidden();
+  if (
+    studentRow.assignedTariffId &&
+    studentRow.assignedTariffId !== tariffId
+  ) {
+    throw badRequest(
+      "Вам назначен другой тариф. Обновите страницу оплаты и выберите пакет внутри назначенного тарифа."
+    );
+  }
+
   const { tariff, option, productIds } = await loadActiveTariffOption(
     db,
     ctx.organizationId,

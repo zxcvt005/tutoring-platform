@@ -57,6 +57,7 @@ import {
   materialFolders,
   memberships,
   students,
+  tariffs,
   teachers,
   testAnswerKeys,
   testAssignments,
@@ -456,6 +457,44 @@ export async function upsertStudent(
     student.parentName != null ? student.parentName.trim() || null : null;
   const learningGoal =
     student.learningGoal != null ? student.learningGoal.trim() || null : null;
+
+  // Назначение тарифа — только дирекция и пресса.
+  let assignedTariffId: string | null | undefined = undefined;
+  if (student.assignedTariffId !== undefined) {
+    if (ctx.role === "teacher") {
+      throw forbidden("Назначать тариф может только дирекция или пресса");
+    }
+    if (ctx.role !== "director" && ctx.role !== "press") {
+      throw forbidden();
+    }
+    const raw =
+      student.assignedTariffId == null
+        ? ""
+        : String(student.assignedTariffId).trim();
+    if (!raw) {
+      assignedTariffId = null;
+    } else {
+      const [tariff] = await db
+        .select({
+          id: tariffs.id,
+          status: tariffs.status,
+        })
+        .from(tariffs)
+        .where(
+          and(
+            eq(tariffs.id, raw),
+            eq(tariffs.organizationId, ctx.organizationId)
+          )
+        )
+        .limit(1);
+      if (!tariff) throw badRequest("Тариф не найден");
+      if (tariff.status !== "active") {
+        throw badRequest("Можно назначить только активный тариф");
+      }
+      assignedTariffId = tariff.id;
+    }
+  }
+
   const values = {
     id,
     organizationId: ctx.organizationId,
@@ -500,6 +539,10 @@ export async function upsertStudent(
           student.parentContacts !== undefined
             ? parentContacts
             : existing[0].parentContacts,
+        assignedTariffId:
+          assignedTariffId !== undefined
+            ? assignedTariffId
+            : existing[0].assignedTariffId,
       })
       .where(eq(students.id, id));
     if (
@@ -514,6 +557,7 @@ export async function upsertStudent(
   } else {
     await db.insert(students).values({
       ...values,
+      assignedTariffId: assignedTariffId ?? null,
       onboardingStatus: "complete",
       createdAt: new Date(),
     });
@@ -838,11 +882,12 @@ export async function ensureSchedulesMaterializedAction(
     typeof untilRaw === "string" && untilRaw.trim()
       ? new Date(untilRaw)
       : undefined;
+  const force = payload.force === true;
   const created = await ensureOrgSchedulesMaterialized(
     db,
     ctx.organizationId,
     new Date(),
-    { force: true, until }
+    { force, until }
   );
   return { ok: true, created };
 }
@@ -1399,6 +1444,8 @@ export async function setAttendance(
   return {
     ok: true,
     remaining: balance?.remaining ?? null,
+    directionId: lesson.directionId ?? null,
+    lessonStatus: becameDone ? ("done" as const) : lesson.status,
     used: null,
   };
 }

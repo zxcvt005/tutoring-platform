@@ -526,6 +526,11 @@ export type Student = {
   onboardingStatus?: StudentOnboardingStatus;
   status: PersonStatus;
   teacherId: string;
+  /**
+   * Назначенный каталожный тариф для оплаты.
+   * null/undefined — ограничение не задано, ученик видит все тарифы.
+   */
+  assignedTariffId?: string | null;
   /** Внутренние заметки администрации — не отдаются ученику. */
   notes?: string;
   archivedAt?: string | null;

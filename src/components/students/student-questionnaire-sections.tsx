@@ -112,12 +112,19 @@ function directionsLabel(
 export function StudentQuestionnaireSections({
   student,
   teacherName,
+  assignedTariffName,
 }: {
   student: Student;
   teacherName?: string | null;
+  assignedTariffName?: string | null;
 }) {
   const emptyNotes = !student.notes?.trim();
   const emptyGoal = !student.learningGoal?.trim();
+  const tariffLabel = assignedTariffName?.trim()
+    ? assignedTariffName
+    : student.assignedTariffId
+      ? "Тариф назначен (название недоступно)"
+      : "Не назначен — все тарифы";
 
   return (
     <div className="space-y-4">
@@ -155,6 +162,7 @@ export function StudentQuestionnaireSections({
         <Field label="Направление обучения">
           {directionsLabel(student.directionBalances)}
         </Field>
+        <Field label="Назначенный тариф">{tariffLabel}</Field>
         <Field label="Преподаватель">
           {questionnaireValue(teacherName)}
         </Field>

@@ -144,6 +144,14 @@ export const students = pgTable("students", {
   primaryTeacherId: text("primary_teacher_id").references(() => teachers.id, {
     onDelete: "set null",
   }),
+  /**
+   * Предварительно назначенный каталожный тариф для оплаты.
+   * NULL — ученик видит все активные тарифы школы.
+   */
+  assignedTariffId: text("assigned_tariff_id").references(
+    (): AnyPgColumn => tariffs.id,
+    { onDelete: "set null" }
+  ),
   fullName: text("full_name").notNull(),
   /** Класс: 8–11. null — не указан. */
   grade: text("grade"),
@@ -180,6 +188,7 @@ export const students = pgTable("students", {
 }, (t) => [
   index("students_org_idx").on(t.organizationId),
   index("students_teacher_idx").on(t.primaryTeacherId),
+  index("students_assigned_tariff_idx").on(t.assignedTariffId),
   index("students_onboarding_status_idx").on(t.organizationId, t.onboardingStatus),
   uniqueIndex("students_org_user_uidx").on(t.organizationId, t.userId),
   check(

@@ -21,9 +21,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { AssignedTariffField } from "@/components/students/assigned-tariff-field";
 import { personStatusLabel } from "@/lib/format";
 import { STUDENT_GRADES, gradeLabel } from "@/lib/student-contacts";
-import type { PersonStatus, Student, StudentGrade, Teacher } from "@/lib/types";
+import type {
+  LearningDirection,
+  PersonStatus,
+  Student,
+  StudentGrade,
+  Tariff,
+  Teacher,
+} from "@/lib/types";
 
 export type StudentProfileEditValues = {
   id: string;
@@ -37,6 +45,7 @@ export type StudentProfileEditValues = {
   parentContacts: string;
   learningGoal: string;
   notes: string;
+  assignedTariffId: string;
 };
 
 function toForm(student: Student): StudentProfileEditValues {
@@ -52,6 +61,7 @@ function toForm(student: Student): StudentProfileEditValues {
     parentContacts: student.parentContacts ?? "",
     learningGoal: student.learningGoal ?? "",
     notes: student.notes ?? "",
+    assignedTariffId: student.assignedTariffId ?? "",
   };
 }
 
@@ -60,12 +70,19 @@ export function StudentProfileEditDialog({
   onOpenChange,
   student,
   teachers,
+  tariffs = [],
+  directions = [],
+  canAssignTariff = true,
   onSave,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   student: Student | null;
   teachers: Teacher[];
+  tariffs?: Tariff[];
+  directions?: LearningDirection[];
+  /** Назначение тарифа — дирекция и пресса. */
+  canAssignTariff?: boolean;
   onSave: (values: StudentProfileEditValues) => Promise<boolean>;
 }) {
   const [form, setForm] = useState<StudentProfileEditValues | null>(null);
@@ -273,6 +290,16 @@ export function StudentProfileEditDialog({
                 placeholder="Из анкеты / внутренние заметки"
               />
             </div>
+            {canAssignTariff ? (
+              <AssignedTariffField
+                value={form.assignedTariffId}
+                tariffs={tariffs}
+                directions={directions}
+                onChange={(assignedTariffId) =>
+                  setForm({ ...form, assignedTariffId })
+                }
+              />
+            ) : null}
           </div>
         </div>
         <DialogFooter className="mx-0 mb-0 shrink-0 gap-2 rounded-none sm:justify-end">
