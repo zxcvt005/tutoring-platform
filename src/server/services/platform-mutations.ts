@@ -873,7 +873,8 @@ export async function ensureSchedulesMaterializedAction(
   ctx: AuthContext,
   payload: Record<string, unknown>
 ) {
-  requireRoles(ctx, ["director", "teacher"]);
+  // Пресса — только материализация для актуального просмотра, без прав на CRUD занятий.
+  requireRoles(ctx, ["director", "teacher", "press"]);
   const { ensureOrgSchedulesMaterialized } = await import(
     "@/server/services/schedule-service"
   );

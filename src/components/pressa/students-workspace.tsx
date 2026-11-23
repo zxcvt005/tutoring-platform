@@ -11,6 +11,7 @@ import {
   StudentEnrollmentInvites,
   type StudentEnrollmentInvitesHandle,
 } from "@/components/students/student-enrollment-invites";
+import { TariffBalanceNotice } from "@/components/tariff-balance-notice";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -28,12 +29,21 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatDate } from "@/lib/format";
 import {
   pressStudentBucketLabel,
   type PressStudentBucket,
+  type PressStudentLastPayment,
   type PressStudentSort,
 } from "@/lib/press-students";
+import {
+  directionBalancesLabel,
+  formatRubAmount,
+  minDirectionBalance,
+  packageStatusFromBalance,
+} from "@/lib/student-direction-balance";
 import { apiPressGet } from "@/lib/store/api-client";
+import type { StudentDirectionBalance } from "@/lib/types";
 
 type Row = {
   id: string;
@@ -44,7 +54,20 @@ type Row = {
   tariffName: string | null;
   phone: string | null;
   telegram: string | null;
+  directionBalances: StudentDirectionBalance[];
+  lastPayment: PressStudentLastPayment | null;
 };
+
+function lastPaymentLabel(payment: PressStudentLastPayment | null): string {
+  if (!payment) return "нет данных";
+  const parts: string[] = [];
+  if (payment.paidAt) parts.push(formatDate(payment.paidAt));
+  parts.push(formatRubAmount(payment.amount));
+  if (payment.lessonsCount != null) {
+    parts.push(`${payment.lessonsCount} зан.`);
+  }
+  return parts.join(" · ");
+}
 
 export function PressStudentsWorkspace() {
   const [query, setQuery] = useState("");
@@ -167,29 +190,46 @@ export function PressStudentsWorkspace() {
                 <TableHead>Статус</TableHead>
                 <TableHead>Преподаватель</TableHead>
                 <TableHead>Тариф</TableHead>
+                <TableHead className="min-w-[9rem]">Баланс</TableHead>
+                <TableHead className="min-w-[10rem]">Последняя оплата</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((s) => (
-                <TableRow key={s.id}>
-                  <TableCell>
-                    <Link
-                      href={`/pressa/students/${s.id}`}
-                      className="font-medium hover:underline"
-                    >
-                      {s.fullName}
-                    </Link>
-                    <p className="text-xs text-muted-foreground">
-                      {pressStudentBucketLabel[s.bucket]}
-                    </p>
-                  </TableCell>
-                  <TableCell>
-                    <PersonStatusBadge status={s.status} />
-                  </TableCell>
-                  <TableCell>{s.teacherName ?? "Не назначен"}</TableCell>
-                  <TableCell>{s.tariffName ?? "—"}</TableCell>
-                </TableRow>
-              ))}
+              {rows.map((s) => {
+                const remaining = minDirectionBalance(s);
+                return (
+                  <TableRow key={s.id}>
+                    <TableCell>
+                      <Link
+                        href={`/pressa/students/${s.id}`}
+                        className="font-medium hover:underline"
+                      >
+                        {s.fullName}
+                      </Link>
+                      <p className="text-xs text-muted-foreground">
+                        {pressStudentBucketLabel[s.bucket]}
+                      </p>
+                      <TariffBalanceNotice
+                        remaining={remaining}
+                        packageStatus={packageStatusFromBalance(remaining)}
+                        compact
+                        className="mt-1"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <PersonStatusBadge status={s.status} />
+                    </TableCell>
+                    <TableCell>{s.teacherName ?? "Не назначен"}</TableCell>
+                    <TableCell>{s.tariffName ?? "—"}</TableCell>
+                    <TableCell className="max-w-[12rem] text-sm">
+                      {directionBalancesLabel(s)}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {lastPaymentLabel(s.lastPayment)}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>

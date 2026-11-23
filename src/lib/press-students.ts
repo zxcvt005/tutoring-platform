@@ -25,6 +25,14 @@ export function pressStudentBucket(student: {
 
 export type PressStudentSort = "name" | "status";
 
+/** Последняя успешная оплата ученика (read-only сводка для прессы). */
+export type PressStudentLastPayment = {
+  paidAt: string | null;
+  amount: number;
+  lessonsCount: number | null;
+  tariffName: string | null;
+};
+
 export function comparePressStudents<
   T extends {
     fullName: string;

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 
 import { parseAppInstant } from "@/lib/app-time";
@@ -7,15 +7,20 @@ import {
   comparePressStudents,
   pressStudentBucket,
   type PressStudentBucket,
+  type PressStudentLastPayment,
   type PressStudentSort,
 } from "@/lib/press-students";
+import type { StudentDirectionBalance } from "@/lib/types";
 import type { AuthContext } from "@/server/authz/context";
 import { requireRoles } from "@/server/authz/require";
 import {
+  learningDirections,
+  lessonOrders,
+  payments,
   studentContactTasks,
   studentInteractionNotes,
+  studentLessonLedger,
   studentSalesProfiles,
-  lessonOrders,
   students,
   teachers,
   users,
@@ -51,6 +56,8 @@ async function loadStudentInOrg(
   return row;
 }
 
+export type { PressStudentLastPayment };
+
 export type PressStudentListItem = {
   id: string;
   fullName: string;
@@ -63,7 +70,106 @@ export type PressStudentListItem = {
   phone: string | null;
   tariffName: string | null;
   createdAt: string;
+  /** Остатки занятий по направлениям (SUM журнала). Пусто — платежей/списаний ещё не было. */
+  directionBalances: StudentDirectionBalance[];
+  /** Последний платёж со статусом paid; null — оплат ещё не было. */
+  lastPayment: PressStudentLastPayment | null;
 };
+
+async function loadDirectionBalancesByStudent(
+  db: AppDb,
+  organizationId: string,
+  studentIds: string[]
+): Promise<Map<string, StudentDirectionBalance[]>> {
+  const result = new Map<string, StudentDirectionBalance[]>();
+  if (studentIds.length === 0) return result;
+
+  const directionRows = await db
+    .select({
+      id: learningDirections.id,
+      name: learningDirections.name,
+      slug: learningDirections.slug,
+    })
+    .from(learningDirections)
+    .where(eq(learningDirections.organizationId, organizationId));
+  const directionById = new Map(directionRows.map((d) => [d.id, d]));
+
+  const balanceRows = await db
+    .select({
+      studentId: studentLessonLedger.studentId,
+      directionId: studentLessonLedger.directionId,
+      remaining: sql<number>`coalesce(sum(${studentLessonLedger.delta}), 0)`,
+    })
+    .from(studentLessonLedger)
+    .where(
+      and(
+        eq(studentLessonLedger.organizationId, organizationId),
+        inArray(studentLessonLedger.studentId, studentIds)
+      )
+    )
+    .groupBy(
+      studentLessonLedger.studentId,
+      studentLessonLedger.directionId
+    );
+
+  for (const row of balanceRows) {
+    const direction = directionById.get(row.directionId);
+    const list = result.get(row.studentId) ?? [];
+    list.push({
+      directionId: row.directionId,
+      directionName: direction?.name,
+      directionSlug: direction?.slug,
+      balance: Number(row.remaining ?? 0),
+    });
+    result.set(row.studentId, list);
+  }
+  return result;
+}
+
+async function loadLastPaymentsByStudent(
+  db: AppDb,
+  organizationId: string,
+  studentIds: string[]
+): Promise<Map<string, PressStudentLastPayment>> {
+  const result = new Map<string, PressStudentLastPayment>();
+  if (studentIds.length === 0) return result;
+
+  const paymentRows = await db
+    .select({
+      studentId: payments.studentId,
+      paidAt: payments.paidAt,
+      amount: payments.amount,
+      createdAt: payments.createdAt,
+      lessonsCount: lessonOrders.lessonsCount,
+      tariffName: lessonOrders.tariffNameSnapshot,
+    })
+    .from(payments)
+    .innerJoin(lessonOrders, eq(lessonOrders.id, payments.orderId))
+    .where(
+      and(
+        eq(payments.organizationId, organizationId),
+        eq(payments.status, "paid"),
+        inArray(payments.studentId, studentIds)
+      )
+    );
+
+  const sorted = [...paymentRows].sort((a, b) => {
+    const aTs = (a.paidAt ?? a.createdAt).getTime();
+    const bTs = (b.paidAt ?? b.createdAt).getTime();
+    return bTs - aTs;
+  });
+
+  for (const row of sorted) {
+    if (!row.studentId || result.has(row.studentId)) continue;
+    result.set(row.studentId, {
+      paidAt: row.paidAt?.toISOString() ?? null,
+      amount: Number(row.amount),
+      lessonsCount: row.lessonsCount ?? null,
+      tariffName: row.tariffName ?? null,
+    });
+  }
+  return result;
+}
 
 export async function listPressStudents(
   db: AppDb,
@@ -115,6 +221,12 @@ export async function listPressStudents(
     if (row.tariffName) tariffByStudent.set(row.studentId, row.tariffName);
   }
 
+  const studentIds = studentRows.map((s) => s.id);
+  const [balancesByStudent, lastPaymentByStudent] = await Promise.all([
+    loadDirectionBalancesByStudent(db, ctx.organizationId, studentIds),
+    loadLastPaymentsByStudent(db, ctx.organizationId, studentIds),
+  ]);
+
   const q = input.query?.trim().toLowerCase() ?? "";
   let items: PressStudentListItem[] = studentRows.map((s) => {
     const teacherId = s.primaryTeacherId;
@@ -134,6 +246,8 @@ export async function listPressStudents(
       phone: s.phone,
       tariffName: tariffByStudent.get(s.id) ?? null,
       createdAt: s.createdAt.toISOString(),
+      directionBalances: balancesByStudent.get(s.id) ?? [],
+      lastPayment: lastPaymentByStudent.get(s.id) ?? null,
     };
   });
 
@@ -199,6 +313,11 @@ export async function getPressStudentCard(
   const currentTariff =
     orderRows.find((a) => a.status === "paid") ?? orderRows[0] ?? null;
 
+  const [balancesByStudent, lastPaymentByStudent] = await Promise.all([
+    loadDirectionBalancesByStudent(db, ctx.organizationId, [studentId]),
+    loadLastPaymentsByStudent(db, ctx.organizationId, [studentId]),
+  ]);
+
   const bucket = pressStudentBucket({
     status: student.status as "active" | "paused" | "archived",
     teacherId: student.primaryTeacherId,
@@ -226,6 +345,8 @@ export async function getPressStudentCard(
       archivedReason: student.archivedReason,
       tariffName: currentTariff?.tariffNameSnapshot ?? null,
       tariffStatus: currentTariff?.status ?? null,
+      directionBalances: balancesByStudent.get(studentId) ?? [],
+      lastPayment: lastPaymentByStudent.get(studentId) ?? null,
     },
     currentInfo: profile?.currentInfo ?? "",
     notes: notes.map((n) => ({

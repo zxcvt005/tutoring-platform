@@ -669,7 +669,12 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
   // но держит ближайшие недели расписания актуальными.
   useEffect(() => {
     if (!ready || !auth) return;
-    if (auth.role !== "director" && auth.role !== "teacher") return;
+    if (
+      auth.role !== "director" &&
+      auth.role !== "teacher" &&
+      auth.role !== "press"
+    )
+      return;
     let cancelled = false;
     const until = new Date();
     until.setDate(until.getDate() + 21);

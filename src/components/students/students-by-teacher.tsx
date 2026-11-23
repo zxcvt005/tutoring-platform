@@ -60,28 +60,11 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-function minDirectionBalance(student: Student): number | null {
-  const balances = student.directionBalances ?? [];
-  if (!balances.length) return null;
-  return Math.min(...balances.map((b) => b.balance));
-}
-
-function directionBalancesLabel(student: Student): string {
-  const balances = student.directionBalances ?? [];
-  if (!balances.length) return "—";
-  return balances
-    .map((b) => `${b.directionName ?? b.directionSlug ?? "…"}: ${b.balance}`)
-    .join(" · ");
-}
-
-function packageStatusFromBalance(
-  balance: number | null
-): "active" | "exhausted" | "debt" | "none" {
-  if (balance == null) return "none";
-  if (balance <= -1) return "debt";
-  if (balance <= 0) return "exhausted";
-  return "active";
-}
+import {
+  directionBalancesLabel,
+  minDirectionBalance,
+  packageStatusFromBalance,
+} from "@/lib/student-direction-balance";
 
 type FormState = {
   id?: string;

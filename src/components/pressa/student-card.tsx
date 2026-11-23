@@ -25,8 +25,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { formatDateTime, formatDueAt } from "@/lib/format";
-import { pressStudentBucketLabel } from "@/lib/press-students";
+import { formatDate, formatDateTime, formatDueAt } from "@/lib/format";
+import {
+  pressStudentBucketLabel,
+  type PressStudentLastPayment,
+} from "@/lib/press-students";
+import {
+  formatRubAmount,
+  packageStatusFromBalance,
+} from "@/lib/student-direction-balance";
 import { apiPress, apiPressGet } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { getAssignmentTitle } from "@/lib/tests/helpers";
@@ -39,16 +46,8 @@ type SalesCard = {
     createdAt: string;
     authorName: string | null;
   }[];
+  lastPayment: PressStudentLastPayment | null;
 };
-
-function packageStatusFromBalance(
-  balance: number | null
-): "active" | "exhausted" | "debt" | "none" {
-  if (balance == null) return "none";
-  if (balance <= -1) return "debt";
-  if (balance <= 0) return "exhausted";
-  return "active";
-}
 
 export function PressStudentCard({ studentId }: { studentId: string }) {
   const { data, upsertStudent, assignmentsForStudent, ready, reload } =
@@ -88,11 +87,16 @@ export function PressStudentCard({ studentId }: { studentId: string }) {
   const loadSales = useCallback(async () => {
     setSalesError(null);
     try {
-      const card = await apiPressGet<SalesCard & { student: unknown }>(
-        "student",
-        { id: studentId }
-      );
-      setSales({ currentInfo: card.currentInfo, notes: card.notes });
+      const card = await apiPressGet<
+        SalesCard & {
+          student: { lastPayment?: PressStudentLastPayment | null };
+        }
+      >("student", { id: studentId });
+      setSales({
+        currentInfo: card.currentInfo,
+        notes: card.notes,
+        lastPayment: card.student?.lastPayment ?? null,
+      });
       setInfo(card.currentInfo);
     } catch (e) {
       setSalesError(
@@ -205,14 +209,17 @@ export function PressStudentCard({ studentId }: { studentId: string }) {
 
       <section className="panel space-y-3 p-5">
         <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
-          Баланс по направлениям
+          Оплаты и баланс
         </p>
         {directionBalances.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Баланс по направлениям появится после покупки занятий.
+            Баланс по направлениям: нет данных (покупок или списаний ещё не было).
           </p>
         ) : (
           <div className="space-y-1.5 text-sm">
+            <p className="text-xs text-muted-foreground">
+              Остаток оплаченных занятий по направлениям
+            </p>
             {directionBalances.map((b) => (
               <div
                 key={b.directionId}
@@ -228,6 +235,36 @@ export function PressStudentCard({ studentId }: { studentId: string }) {
           remaining={minBalance}
           packageStatus={packageStatusFromBalance(minBalance)}
         />
+        <div className="border-t border-border/60 pt-3 text-sm">
+          <p className="text-xs text-muted-foreground">Последняя оплата</p>
+          {sales == null && !salesError ? (
+            <p className="mt-1 text-muted-foreground">Загрузка…</p>
+          ) : sales?.lastPayment ? (
+            <div className="mt-1 space-y-0.5">
+              <p>
+                {sales.lastPayment.paidAt
+                  ? formatDate(sales.lastPayment.paidAt)
+                  : "дата не указана"}
+                {" · "}
+                {formatRubAmount(sales.lastPayment.amount)}
+              </p>
+              {sales.lastPayment.lessonsCount != null ? (
+                <p className="text-muted-foreground">
+                  В заказе: {sales.lastPayment.lessonsCount} занятий
+                  {sales.lastPayment.tariffName
+                    ? ` · ${sales.lastPayment.tariffName}`
+                    : ""}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <p className="mt-1 text-muted-foreground">нет данных</p>
+          )}
+          <p className="mt-2 text-xs text-muted-foreground">
+            Срок «до какой даты хватает оплаты» в системе не ведётся — учёт идёт
+            по остатку занятий, а не по календарю.
+          </p>
+        </div>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-3">

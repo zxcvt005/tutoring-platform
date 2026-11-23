@@ -39,6 +39,8 @@ type WeekCalendarProps = {
   onTrialClick?: (trial: TrialLessonPublic) => void;
   /** Подпись кнопки свободного слота на мобильной сетке */
   slotActionLabel?: string;
+  /** Доп. строка на карточке занятия (например, ФИО преподавателя в общем виде). */
+  lessonExtraLine?: (lesson: Lesson) => string | null | undefined;
 };
 
 function trialAsLesson(trial: TrialLessonPublic): Lesson {
@@ -68,6 +70,7 @@ export function WeekCalendar({
   onLessonClick,
   onTrialClick,
   slotActionLabel = "+ Занятие",
+  lessonExtraLine,
 }: WeekCalendarProps) {
   const trialById = useMemo(
     () => new Map(trialLessons.map((t) => [t.id, t])),
@@ -212,6 +215,14 @@ export function WeekCalendar({
                               {l.subject ? ` · ${l.subject}` : ""}
                             </div>
                           ) : null}
+                          {(() => {
+                            const extra = lessonExtraLine?.(l);
+                            return extra ? (
+                              <div className="truncate text-[0.65rem] text-muted-foreground">
+                                {extra}
+                              </div>
+                            ) : null;
+                          })()}
                         </div>
                         <LessonStatusBadge status={l.status} />
                       </button>
@@ -277,6 +288,7 @@ export function WeekCalendar({
               trialById={trialById}
               students={students}
               nameOf={nameOf}
+              lessonExtraLine={lessonExtraLine}
               gridHeight={gridHeight}
               dayStartMin={dayStartMin}
               onSlotClick={onSlotClick}
@@ -296,6 +308,7 @@ function DayColumn({
   trialById,
   students,
   nameOf,
+  lessonExtraLine,
   gridHeight,
   dayStartMin,
   onSlotClick,
@@ -307,6 +320,7 @@ function DayColumn({
   trialById: Map<string, TrialLessonPublic>;
   students: Student[];
   nameOf: (id: string) => string;
+  lessonExtraLine?: (lesson: Lesson) => string | null | undefined;
   gridHeight: number;
   dayStartMin: number;
   onSlotClick: (day: Date, hour: number, minute: number) => void;
@@ -399,6 +413,12 @@ function DayColumn({
                 )}
               </div>
             ) : null}
+            {(() => {
+              const extra = lessonExtraLine?.(l);
+              return extra ? (
+                <div className="truncate text-[0.58rem] opacity-80">{extra}</div>
+              ) : null;
+            })()}
             {trial ? (
               <div className="truncate text-[0.6rem] font-semibold tracking-wide uppercase opacity-80">
                 Пробный

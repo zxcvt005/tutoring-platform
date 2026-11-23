@@ -100,6 +100,7 @@ const iconsByHref: Record<string, NavItem["icon"]> = {
   "/pressa/ratings": Star,
   "/pressa/students": GraduationCap,
   "/pressa/teachers": Users,
+  "/pressa/schedule": CalendarClock,
   "/pressa/trials": CalendarDays,
   "/pressa/planchety": Table2,
   "/pressa/analytics": ClipboardList,

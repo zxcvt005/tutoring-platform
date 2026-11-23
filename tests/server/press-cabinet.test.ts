@@ -45,8 +45,12 @@ import {
   listTrialLessonsForSchedule,
   updateTrialLesson,
 } from "@/server/services/trial-lessons-service";
-import { physicsDirectionId } from "../helpers/commerce";
+import { physicsDirectionId, seedPaidLessons } from "../helpers/commerce";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
+import {
+  adminAdjustLessonBalanceAction,
+  ensureSchedulesMaterializedAction,
+} from "@/server/services/platform-mutations";
 
 describe("press cabinet", () => {
   let close: (() => Promise<void>) | undefined;
@@ -544,5 +548,77 @@ describe("press cabinet", () => {
       teacherId: "t2",
     });
     expect(other.analytics.created).toBe(0);
+  });
+
+  it("exposes read-only payment summary and balances for press students", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const press = await asRole(t.db, "press@demo.local");
+    const director = await asRole(t.db, "director@demo.local");
+    const directionId = await physicsDirectionId(t.db, press.organizationId);
+
+    const paid = await seedPaidLessons(t.db, director, "s1", {
+      directionId,
+      lessons: 8,
+      totalPrice: 12_000,
+      tariffName: "Пакет прессы",
+    });
+
+    const list = await listPressStudents(t.db, press, { bucket: "all" });
+    const withPay = list.students.find((s) => s.id === "s1");
+    const withoutPay = list.students.find((s) => s.lastPayment == null);
+
+    expect(withPay?.lastPayment).toMatchObject({
+      amount: paid.totalAmount,
+      lessonsCount: 8,
+      tariffName: "Пакет прессы",
+    });
+    expect(withPay?.lastPayment?.paidAt).toBeTruthy();
+    const physicsBalance = withPay?.directionBalances.find(
+      (b) => b.directionId === directionId
+    );
+    expect(physicsBalance?.balance).toBeGreaterThanOrEqual(8);
+
+    expect(withoutPay).toBeTruthy();
+    expect(withoutPay!.lastPayment).toBeNull();
+
+    const card = await getPressStudentCard(t.db, press, "s1");
+    expect(card.student.lastPayment?.amount).toBe(12_000);
+    expect(card.student.lastPayment?.tariffName).toBe("Пакет прессы");
+    expect(
+      card.student.directionBalances.find((b) => b.directionId === directionId)
+        ?.balance
+    ).toBeGreaterThanOrEqual(8);
+
+    const boot = await buildBootstrap(t.db, press);
+    expect(boot.payments).toEqual([]);
+    expect(boot.lessonOrders).toEqual([]);
+
+    await expect(
+      adminAdjustLessonBalanceAction(t.db, press, {
+        studentId: "s1",
+        directionId,
+        delta: 1,
+        note: "hack",
+      })
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("allows press to materialize schedules but not mutate lessons", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const press = await asRole(t.db, "press@demo.local");
+
+    const materialized = await ensureSchedulesMaterializedAction(t.db, press, {});
+    expect(materialized.ok).toBe(true);
+
+    await expect(
+      upsertLesson(t.db, press, {
+        teacherId: "t1",
+        studentIds: ["s1"],
+        ...slot(3, 12),
+        status: "planned",
+      })
+    ).rejects.toMatchObject({ status: 403 });
   });
 });
