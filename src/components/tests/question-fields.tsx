@@ -47,7 +47,9 @@ type Props = {
   /** ID теста для загрузки и показа изображений вопроса */
   testId?: string;
   /** Перед upload — сохранить черновик теста (см. QuestionImagePreview). */
-  ensureTestReady?: () => Promise<string>;
+  ensureTestReady?: (requiredQuestionId?: string) => Promise<string>;
+  /** +1 при старте upload/delete, −1 при завершении — блокирует Save в редакторе. */
+  onImageBusyChange?: (delta: 1 | -1) => void;
 };
 
 export function QuestionFields({
@@ -65,6 +67,7 @@ export function QuestionFields({
   onTeacherCommentChange,
   testId,
   ensureTestReady,
+  onImageBusyChange,
 }: Props) {
   const editable = mode === "edit";
   const taking = mode === "take";
@@ -149,13 +152,18 @@ export function QuestionFields({
                     "@/lib/store/api-client"
                   );
                   const { toast } = await import("sonner");
+                  const targetQuestionId = question.id;
+                  onImageBusyChange?.(1);
                   try {
                     const readyTestId = ensureTestReady
-                      ? await ensureTestReady()
+                      ? await ensureTestReady(targetQuestionId)
                       : testId;
+                    if (!readyTestId) {
+                      throw new Error("Тест ещё не сохранён");
+                    }
                     const result = await apiTestQuestionImageUpload(
                       readyTestId,
-                      question.id,
+                      targetQuestionId,
                       file
                     );
                     patchQ({ imageObjectKey: result.imageObjectKey });
@@ -164,6 +172,8 @@ export function QuestionFields({
                     toast.error(
                       err instanceof Error ? err.message : "Не удалось вставить"
                     );
+                  } finally {
+                    onImageBusyChange?.(-1);
                   }
                 })();
                 return;
@@ -192,6 +202,7 @@ export function QuestionFields({
           imageObjectKey={question.imageObjectKey}
           editable={editable}
           ensureTestReady={editable ? ensureTestReady : undefined}
+          onBusyChange={editable ? onImageBusyChange : undefined}
           onImageChange={
             editable
               ? (imageObjectKey) => patchQ({ imageObjectKey })

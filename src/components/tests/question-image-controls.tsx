@@ -37,6 +37,7 @@ export function QuestionImagePreview({
   editable,
   onImageChange,
   ensureTestReady,
+  onBusyChange,
   className,
 }: {
   testId: string;
@@ -47,44 +48,87 @@ export function QuestionImagePreview({
   /**
    * Перед upload/delete сохраняет черновик теста в БД и возвращает актуальный testId.
    * Нужен, когда редактор ещё не делал upsert (клиентский id без строки в tests).
+   * Аргумент — id вопроса, который обязан оказаться в сохранённом черновике.
    */
-  ensureTestReady?: () => Promise<string>;
+  ensureTestReady?: (requiredQuestionId?: string) => Promise<string>;
+  onBusyChange?: (delta: 1 | -1) => void;
   className?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
   const [resolvedTestId, setResolvedTestId] = useState(testId);
+  const uploadGenRef = useRef(0);
+  const busyHoldRef = useRef(false);
   useEffect(() => {
     setResolvedTestId(testId);
   }, [testId]);
+  useEffect(() => {
+    // Смена вопроса / размонтирование — не применять результат чужого upload.
+    uploadGenRef.current += 1;
+    if (busyHoldRef.current) {
+      busyHoldRef.current = false;
+      onBusyChange?.(-1);
+      setBusy(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only reset on question switch
+  }, [questionId]);
+  useEffect(() => {
+    return () => {
+      if (busyHoldRef.current) {
+        busyHoldRef.current = false;
+        onBusyChange?.(-1);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount cleanup only
+  }, []);
   const src = imageObjectKey
     ? testQuestionImageUrl(resolvedTestId, questionId, imageObjectKey)
     : undefined;
 
-  async function resolveTestId(): Promise<string> {
+  function beginBusy() {
+    if (busyHoldRef.current) return;
+    busyHoldRef.current = true;
+    setBusy(true);
+    onBusyChange?.(1);
+  }
+
+  function endBusy(gen: number) {
+    if (gen !== uploadGenRef.current) return;
+    if (!busyHoldRef.current) return;
+    busyHoldRef.current = false;
+    setBusy(false);
+    onBusyChange?.(-1);
+  }
+
+  async function resolveTestId(forQuestionId: string): Promise<string> {
     if (!ensureTestReady) return testId;
-    const readyId = await ensureTestReady();
+    const readyId = await ensureTestReady(forQuestionId);
     setResolvedTestId(readyId);
     return readyId;
   }
 
   async function attachFile(file: File) {
     if (!editable || !onImageChange) return;
-    setBusy(true);
+    const targetQuestionId = questionId;
+    const gen = ++uploadGenRef.current;
+    beginBusy();
     try {
-      const readyTestId = await resolveTestId();
+      const readyTestId = await resolveTestId(targetQuestionId);
+      if (gen !== uploadGenRef.current) return;
       const result = await apiTestQuestionImageUpload(
         readyTestId,
-        questionId,
+        targetQuestionId,
         withClipboardFileName(file)
       );
+      if (gen !== uploadGenRef.current) return;
       onImageChange(result.imageObjectKey);
       toast.success("Изображение прикреплено");
     } catch (err) {
+      if (gen !== uploadGenRef.current) return;
       toast.error(err instanceof Error ? err.message : "Не удалось загрузить");
     } finally {
-      setBusy(false);
+      endBusy(gen);
     }
   }
 
@@ -94,7 +138,6 @@ export function QuestionImagePreview({
       toast.message("Используйте Ctrl+V или загрузку файла");
       return;
     }
-    setBusy(true);
     try {
       const items = await navigator.clipboard.read();
       for (const item of items) {
@@ -109,23 +152,26 @@ export function QuestionImagePreview({
       toast.message("В буфере нет изображения");
     } catch {
       toast.message("Нет доступа к буферу — используйте Ctrl+V");
-    } finally {
-      setBusy(false);
     }
   }
 
   async function removeImage() {
     if (!editable || !onImageChange || !imageObjectKey) return;
-    setBusy(true);
+    const targetQuestionId = questionId;
+    const gen = ++uploadGenRef.current;
+    beginBusy();
     try {
-      const readyTestId = await resolveTestId();
-      await apiTestQuestionImageDelete(readyTestId, questionId);
+      const readyTestId = await resolveTestId(targetQuestionId);
+      if (gen !== uploadGenRef.current) return;
+      await apiTestQuestionImageDelete(readyTestId, targetQuestionId);
+      if (gen !== uploadGenRef.current) return;
       onImageChange(undefined);
       toast.success("Изображение удалено");
     } catch (err) {
+      if (gen !== uploadGenRef.current) return;
       toast.error(err instanceof Error ? err.message : "Не удалось удалить");
     } finally {
-      setBusy(false);
+      endBusy(gen);
     }
   }
 

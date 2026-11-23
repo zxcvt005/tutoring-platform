@@ -401,12 +401,17 @@ function newClientId(prefix: string) {
 
 type ReloadMode = "coalesce" | "skip";
 
-/** Действия, для которых ключ строится из payload.id (создание/обновление сущности). */
+/**
+ * Действия, для которых ключ строится из payload.id (создание/обновление сущности).
+ * upsertHomework намеренно НЕ здесь: один и тот же test id сохраняется много раз
+ * с разным набором вопросов (добавление задания, ensureTestReady перед картинкой).
+ * Стабильный ключ `upsertHomework:${id}` реплеил первый ответ и оставлял в БД
+ * старый questionsPublic → «Вопрос не найден в этом тесте» при upload.
+ */
 const IDEMPOTENT_ENTITY_ACTIONS = new Set([
   "upsertStudent",
   "upsertTeacher",
   "upsertLesson",
-  "upsertHomework",
   "upsertTopic",
   "upsertTopicSection",
   "upsertMaterialFolder",

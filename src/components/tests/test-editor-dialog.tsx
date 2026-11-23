@@ -158,12 +158,24 @@ function TestEditorForm({
   onSaved?: (hw: { id: string }) => void;
 }) {
   const { upsertHomework, publishHomework } = useDemoStore();
-  const [form, setForm] = useState<FormState>(() => {
+  const [form, setFormState] = useState<FormState>(() => {
     const next = toForm(homework ?? undefined);
     if (!next.id) next.id = newId("hw");
     return next;
   });
   const formRef = useRef(form);
+  /** Синхронно зеркалим form в ref — иначе ensureTestReady может прочитать
+   *  устаревший questions до useEffect после addQuestion / смены типа. */
+  const setForm = useCallback(
+    (updater: FormState | ((prev: FormState) => FormState)) => {
+      setFormState((prev) => {
+        const next = typeof updater === "function" ? updater(prev) : updater;
+        formRef.current = next;
+        return next;
+      });
+    },
+    []
+  );
   useEffect(() => {
     formRef.current = form;
   }, [form]);
@@ -171,6 +183,15 @@ function TestEditorForm({
   const [addType, setAddType] = useState<QuestionType>("single_choice");
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
+  const [imageBusy, setImageBusy] = useState(false);
+  const imageOpsRef = useRef(0);
+  /** Цепочка ensureTestReady: параллельные upload не гоняют upsert со stale snapshot. */
+  const ensureChainRef = useRef(Promise.resolve<void>(undefined));
+
+  const noteImageBusy = useCallback((delta: 1 | -1) => {
+    imageOpsRef.current = Math.max(0, imageOpsRef.current + delta);
+    setImageBusy(imageOpsRef.current > 0);
+  }, []);
 
   const maxScore = useMemo(
     () => computeMaxScore(form.questions),
@@ -181,34 +202,58 @@ function TestEditorForm({
    * Загрузка картинки идёт в API по testId из БД. Редактор сразу выдаёт
    * клиентский id, но строка в `tests` появляется только после upsert —
    * иначе POST image отвечает «Тест не найден».
+   * requiredQuestionId — вопрос, к которому сейчас грузят картинку; должен
+   * попасть в сохранённый questionsPublic.
    */
-  const ensureTestReady = useCallback(async () => {
-    const current = formRef.current;
-    const title = current.title.trim() || "Черновик теста";
-    const questions = current.questions;
-    const saved = await upsertHomework({
-      id: current.id,
-      topicId: topicId || null,
-      ...(purpose === "homework" ? { folderId } : {}),
-      teacherId,
-      libraryScope,
-      title,
-      description: normalizeOptionalDescription(current.description),
-      status: current.status === "published" ? "published" : "draft",
-      purpose,
-      questions,
-      maxScore: computeMaxScore(questions),
-    });
-    if (!saved.ok || !saved.id) {
-      throw new Error("Не удалось сохранить черновик теста перед загрузкой изображения");
-    }
-    setForm((prev) => ({
-      ...prev,
-      id: saved.id,
-      title: prev.title.trim() ? prev.title : title,
-    }));
-    return saved.id;
-  }, [upsertHomework, topicId, purpose, teacherId, libraryScope, folderId]);
+  const ensureTestReady = useCallback(
+    async (requiredQuestionId?: string) => {
+      const run = async (): Promise<string> => {
+        const current = formRef.current;
+        if (
+          requiredQuestionId &&
+          !current.questions.some((q) => q.id === requiredQuestionId)
+        ) {
+          throw new Error(
+            "Вопрос ещё не в черновике. Обновите задание и повторите загрузку."
+          );
+        }
+        const title = current.title.trim() || "Черновик теста";
+        const questions = current.questions;
+        const saved = await upsertHomework({
+          id: current.id,
+          topicId: topicId || null,
+          ...(purpose === "homework" ? { folderId } : {}),
+          teacherId,
+          libraryScope,
+          title,
+          description: normalizeOptionalDescription(current.description),
+          status: current.status === "published" ? "published" : "draft",
+          purpose,
+          questions,
+          maxScore: computeMaxScore(questions),
+        });
+        if (!saved.ok || !saved.id) {
+          throw new Error(
+            "Не удалось сохранить черновик теста перед загрузкой изображения"
+          );
+        }
+        setForm((prev) => ({
+          ...prev,
+          id: saved.id,
+          title: prev.title.trim() ? prev.title : title,
+        }));
+        return saved.id;
+      };
+
+      const queued = ensureChainRef.current.then(run, run);
+      ensureChainRef.current = queued.then(
+        () => undefined,
+        () => undefined
+      );
+      return queued;
+    },
+    [upsertHomework, topicId, purpose, teacherId, libraryScope, folderId, setForm]
+  );
 
   function updateQuestion(index: number, q: TestQuestion) {
     setForm((prev) => {
@@ -243,7 +288,12 @@ function TestEditorForm({
   }
 
   async function save(andPublish: boolean) {
-    if (busy || busyRef.current) return;
+    if (busy || busyRef.current || imageOpsRef.current > 0) {
+      if (imageOpsRef.current > 0) {
+        toast.message("Дождитесь окончания загрузки изображения");
+      }
+      return;
+    }
     if (!form.title.trim()) {
       toast.error("Укажите название теста");
       return;
@@ -261,24 +311,26 @@ function TestEditorForm({
     busyRef.current = true;
     setBusy(true);
     try {
-      // Сначала дожидаемся сохранения теста: раньше upsertHomework был
-      // fire-and-forget, и publishHomework сразу получал «Не найдено».
+      // Дождаться ensureTestReady от upload, затем брать свежий formRef
+      // (с imageObjectKey), иначе save затрёт ключ только что залитой картинки.
+      await ensureChainRef.current;
+      const current = formRef.current;
       const saved = await upsertHomework({
-        id: form.id,
+        id: current.id,
         topicId: topicId || null,
         ...(purpose === "homework" ? { folderId } : {}),
         teacherId,
         libraryScope,
-        title: form.title.trim(),
-        description: normalizeOptionalDescription(form.description),
+        title: current.title.trim(),
+        description: normalizeOptionalDescription(current.description),
         status: andPublish
           ? "published"
-          : form.status === "published"
+          : current.status === "published"
             ? "published"
             : "draft",
         purpose,
-        questions: form.questions,
-        maxScore,
+        questions: current.questions,
+        maxScore: computeMaxScore(current.questions),
       });
       if (!saved.ok || !saved.id) return;
       setForm((prev) => ({ ...prev, id: saved.id }));
@@ -346,7 +398,10 @@ function TestEditorForm({
                       value={q.type}
                       onValueChange={(v) => {
                         if (!v) return;
+                        // Сохраняем id: иначе картинка/ответ ключуются на старый id,
+                        // а upload после смены типа получает «Вопрос не найден».
                         const next = createEmptyQuestion(v as QuestionType);
+                        next.id = q.id;
                         next.prompt = q.prompt;
                         next.maxScore = q.maxScore;
                         next.explanation = q.explanation;
@@ -404,6 +459,7 @@ function TestEditorForm({
                     index={index}
                     mode="edit"
                     ensureTestReady={ensureTestReady}
+                    onImageBusyChange={noteImageBusy}
                     onQuestionChange={(nq) => updateQuestion(index, nq)}
                   />
                 </div>
@@ -472,13 +528,18 @@ function TestEditorForm({
       </div>
 
       <DialogFooter className="shrink-0 border-t border-border/70 px-5 py-3">
-        <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onClose}
+          disabled={busy || imageBusy}
+        >
           Отмена
         </Button>
         <Button
           type="button"
           variant="outline"
-          disabled={busy}
+          disabled={busy || imageBusy}
           onClick={() => setPreview((p) => !p)}
         >
           {preview ? "К редактированию" : "Предпросмотр"}
@@ -486,17 +547,17 @@ function TestEditorForm({
         <Button
           type="button"
           variant="outline"
-          disabled={busy}
+          disabled={busy || imageBusy}
           onClick={() => void save(false)}
         >
-          {busy ? "Сохранение…" : "Сохранить черновик"}
+          {busy ? "Сохранение…" : imageBusy ? "Загрузка фото…" : "Сохранить черновик"}
         </Button>
         <Button
           type="button"
-          disabled={busy}
+          disabled={busy || imageBusy}
           onClick={() => void save(true)}
         >
-          {busy ? "Публикация…" : "Сохранить и опубликовать"}
+          {busy ? "Публикация…" : imageBusy ? "Загрузка фото…" : "Сохранить и опубликовать"}
         </Button>
       </DialogFooter>
     </>
