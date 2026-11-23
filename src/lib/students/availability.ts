@@ -61,19 +61,37 @@ export function normalizeAvailabilitySlots(
   return out;
 }
 
+/**
+ * Анкета отправлена: ученик виден в общем списке.
+ * `availability_pending` — legacy (до того как удобное время стало опциональным).
+ */
+export function isStudentListedInDirectory(
+  status: string | null | undefined
+): boolean {
+  return (
+    !status ||
+    status === "complete" ||
+    status === "availability_pending"
+  );
+}
+
+/** @deprecated Используйте isStudentListedInDirectory для списков. */
 export function isStudentFullyOnboarded(
   status: string | null | undefined
 ): boolean {
-  return !status || status === "complete";
+  return isStudentListedInDirectory(status);
 }
 
+/**
+ * Куда направить ученика при незавершённой регистрации.
+ * Удобное время опционально — после анкеты кабинет открыт.
+ */
 export function onboardingPathForStatus(
   status: string | null | undefined
 ): string | null {
-  if (!status || status === "complete") return null;
-  if (status === "availability_pending") {
-    return "/auditoria/onboarding/availability";
+  if (!status || status === "complete" || status === "availability_pending") {
+    return null;
   }
-  // invited (shouldn't normally have session) and profile_pending
+  // invited (обычно без сессии) и profile_pending
   return "/auditoria/onboarding/profile";
 }

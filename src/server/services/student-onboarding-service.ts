@@ -120,7 +120,11 @@ async function loadStudentForStaff(
     if (row.primaryTeacherId !== ctx.teacherId) {
       throw forbidden("Доступны только ваши ученики");
     }
-    if (row.onboardingStatus !== "complete") {
+    // В общем списке только после анкеты (complete / legacy availability_pending).
+    if (
+      row.onboardingStatus !== "complete" &&
+      row.onboardingStatus !== "availability_pending"
+    ) {
       throw forbidden("Регистрация ученика ещё не завершена");
     }
   }
@@ -369,10 +373,8 @@ export async function saveStudentOnboardingProfile(
   const learningGoal = trimRequired(input.learningGoal, "цель обучения");
   const notes = (input.notes ?? "").trim() || null;
 
-  const nextStatus: StudentOnboardingStatus =
-    row.onboardingStatus === "complete"
-      ? "complete"
-      : "availability_pending";
+  // Анкета = появление в общем списке. Удобное время опционально.
+  const nextStatus: StudentOnboardingStatus = "complete";
 
   await db
     .update(students)
@@ -450,12 +452,13 @@ export async function saveStudentOnboardingAvailability(
     throw conflict("Сначала заполните анкету");
   }
 
+  // Опциональный шаг: можно сохранить пустой набор (очистить) или слоты.
   const saved = await replaceAvailabilitySlots(
     db,
     ctx.organizationId,
     row.id,
     slots,
-    { requireMin: true }
+    { requireMin: false }
   );
 
   await db

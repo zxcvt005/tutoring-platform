@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   MIN_AVAILABILITY_SLOTS,
   isStudentFullyOnboarded,
+  isStudentListedInDirectory,
   normalizeAvailabilitySlots,
   onboardingPathForStatus,
 } from "@/lib/students/availability";
@@ -23,29 +24,30 @@ describe("student availability helpers", () => {
     ]);
   });
 
-  it("treats legacy/null as fully onboarded", () => {
-    expect(isStudentFullyOnboarded(undefined)).toBe(true);
-    expect(isStudentFullyOnboarded(null)).toBe(true);
-    expect(isStudentFullyOnboarded("complete")).toBe(true);
+  it("lists students only after questionnaire (complete / legacy availability_pending)", () => {
+    expect(isStudentListedInDirectory(undefined)).toBe(true);
+    expect(isStudentListedInDirectory(null)).toBe(true);
+    expect(isStudentListedInDirectory("complete")).toBe(true);
+    expect(isStudentListedInDirectory("availability_pending")).toBe(true);
+    expect(isStudentListedInDirectory("invited")).toBe(false);
+    expect(isStudentListedInDirectory("profile_pending")).toBe(false);
+    // alias keeps same semantics for roster visibility
+    expect(isStudentFullyOnboarded("availability_pending")).toBe(true);
     expect(isStudentFullyOnboarded("invited")).toBe(false);
-    expect(isStudentFullyOnboarded("profile_pending")).toBe(false);
-    expect(isStudentFullyOnboarded("availability_pending")).toBe(false);
   });
 
-  it("routes unfinished onboarding to the right step", () => {
+  it("does not force availability step after questionnaire", () => {
     expect(onboardingPathForStatus("complete")).toBeNull();
+    expect(onboardingPathForStatus("availability_pending")).toBeNull();
     expect(onboardingPathForStatus("profile_pending")).toBe(
       "/auditoria/onboarding/profile"
-    );
-    expect(onboardingPathForStatus("availability_pending")).toBe(
-      "/auditoria/onboarding/availability"
     );
     expect(onboardingPathForStatus("invited")).toBe(
       "/auditoria/onboarding/profile"
     );
   });
 
-  it("requires at least three slots for completion", () => {
+  it("keeps suggested minimum for optional availability UI", () => {
     expect(MIN_AVAILABILITY_SLOTS).toBe(3);
   });
 });

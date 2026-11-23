@@ -41,7 +41,7 @@ import {
 import { loadOriginMap, originKey } from "@/server/services/material-origins";
 import { loadLessonTopicsMap } from "@/server/services/platform-mutations";
 import { mergeQuestionsWithKeys, stripQuestionKeys } from "@/server/services/question-merge";
-import { isStudentFullyOnboarded } from "@/lib/students/availability";
+import { isStudentListedInDirectory } from "@/lib/students/availability";
 import type {
   Attendance,
   DemoData,
@@ -148,7 +148,7 @@ export async function buildBootstrap(
       studentRows = studentRows.filter(
         (s) =>
           s.primaryTeacherId === tid &&
-          isStudentFullyOnboarded(s.onboardingStatus)
+          isStudentListedInDirectory(s.onboardingStatus)
       );
       lessonRows = lessonRows.filter((l) => l.teacherId === tid);
       sectionRows = sectionRows.filter((s) => s.teacherId === tid);
@@ -167,10 +167,14 @@ export async function buildBootstrap(
     }
   }
 
-  if (ctx.role === "director" || ctx.role === "assistant") {
-    // Незавершённые enrollment-регистрации — только в блоке «Приглашения».
+  if (
+    ctx.role === "director" ||
+    ctx.role === "assistant" ||
+    ctx.role === "press"
+  ) {
+    // invited / profile_pending — только в блоке «Приглашения», не в общем списке.
     studentRows = studentRows.filter((s) =>
-      isStudentFullyOnboarded(s.onboardingStatus)
+      isStudentListedInDirectory(s.onboardingStatus)
     );
   }
 

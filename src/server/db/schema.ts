@@ -166,10 +166,10 @@ export const students = pgTable("students", {
   /** Цель обучения из обязательной анкеты. */
   learningGoal: text("learning_goal"),
   /**
-   * invited — ссылка создана, аккаунт ещё не принят;
-   * profile_pending — нужна анкета;
-   * availability_pending — нужно выбрать свободное время;
-   * complete — полноценный ученик (в т.ч. legacy / ручное создание).
+   * invited — ссылка создана, аккаунт ещё не принят (не в общем списке);
+   * profile_pending — нужна анкета (не в общем списке);
+   * availability_pending — legacy: анкета есть, удобное время ещё не выбрано (уже в списке);
+   * complete — анкета отправлена (удобное время опционально); также legacy / ручное создание.
    */
   onboardingStatus: text("onboarding_status").notNull().default("complete"),
   status: text("status").notNull().default("active"),

@@ -196,7 +196,7 @@ export function StudentQuestionnaireSections({
           {student.onboardingStatus === "complete"
             ? "Регистрация завершена"
             : student.onboardingStatus === "availability_pending"
-              ? "Выбирает расписание"
+              ? "Анкета есть · время можно указать позже"
               : student.onboardingStatus === "profile_pending"
                 ? "Заполняет анкету"
                 : student.onboardingStatus === "invited"

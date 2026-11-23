@@ -125,7 +125,8 @@ export default function OnboardingProfilePage() {
       });
       localStorage.removeItem(storageKey(studentId));
       await reload();
-      router.replace("/auditoria/onboarding/availability");
+      // Удобное время опционально — после анкеты ученик уже в общем списке.
+      router.replace("/auditoria");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить");
     } finally {
@@ -137,7 +138,7 @@ export default function OnboardingProfilePage() {
     <OnboardingShell
       step={1}
       title="Расскажите о себе"
-      description="Заполните обязательную анкету. Без неё доступ в Аудиторию закрыт. Данные сохраняются при обновлении страницы."
+      description="Заполните обязательную анкету. Без неё доступ в Аудиторию закрыт. Удобное время можно указать позже. Данные сохраняются при обновлении страницы."
     >
       <form className="grid gap-4" onSubmit={onSubmit}>
         <div className="space-y-1.5">
@@ -218,7 +219,7 @@ export default function OnboardingProfilePage() {
         </div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         <Button type="submit" disabled={!canSubmit || busy} className="mt-2">
-          {busy ? "Сохранение…" : "Сохранить и продолжить"}
+          {busy ? "Сохранение…" : "Отправить анкету"}
         </Button>
       </form>
     </OnboardingShell>

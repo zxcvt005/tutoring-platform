@@ -38,7 +38,10 @@ export default function OnboardingAvailabilityPage() {
           availabilitySlots: StudentAvailabilitySlot[];
         }>("getStudentOnboardingState", {});
         if (cancelled) return;
-        if (state.onboardingStatus === "profile_pending") {
+        if (
+          state.onboardingStatus === "profile_pending" ||
+          state.onboardingStatus === "invited"
+        ) {
           router.replace("/auditoria/onboarding/profile");
           return;
         }
@@ -95,7 +98,7 @@ export default function OnboardingAvailabilityPage() {
     <OnboardingShell
       step={2}
       title="Когда вам удобно заниматься?"
-      description="Отметьте свободные часы на неделе. Нужно выбрать минимум три слота. Выбор сохраняется при обновлении страницы."
+      description="Необязательный шаг. Можно отметить свободные часы сейчас или пропустить и сделать это позже. При сохранении желательно выбрать минимум три слота."
     >
       <AvailabilityWeekGrid slots={slots} onChange={setSlots} />
       {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
@@ -110,10 +113,18 @@ export default function OnboardingAvailabilityPage() {
         </Button>
         <Button
           type="button"
+          variant="outline"
+          onClick={() => router.replace("/auditoria")}
+          disabled={busy}
+        >
+          Пропустить
+        </Button>
+        <Button
+          type="button"
           onClick={() => void onSave()}
           disabled={busy || slots.length < MIN_AVAILABILITY_SLOTS}
         >
-          {busy ? "Сохранение…" : "Сохранить и продолжить"}
+          {busy ? "Сохранение…" : "Сохранить"}
         </Button>
       </div>
     </OnboardingShell>
