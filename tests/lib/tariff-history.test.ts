@@ -108,7 +108,7 @@ describe("tariff history statuses", () => {
     expect(tariffBalanceAlert(0).message).not.toMatch(/в долг/);
   });
 
-  it("treats remaining -1 as debt: no learning, one more debit allowed", () => {
+  it("treats remaining -1 as debt package, but learning stays open until -3", () => {
     const current = asg({
       id: "a1",
       studentId: "s1",
@@ -121,9 +121,10 @@ describe("tariff history statuses", () => {
     );
     expect(tariffHistoryStatusLabel.expired).toBe("Истёк");
     const alert = tariffBalanceAlert(-1);
-    expect(alert.allowsLearning).toBe(false);
+    expect(alert.allowsLearning).toBe(true);
     expect(alert.allowsDebit).toBe(true);
     expect(alert.tone).toBe("debt");
+    expect(tariffBalanceAlert(-3).allowsLearning).toBe(false);
   });
 
   it("shows a paid queued tariff as queued even when the old package is exhausted", () => {

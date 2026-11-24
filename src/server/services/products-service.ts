@@ -10,6 +10,7 @@ import {
   slugifyProductName,
 } from "@/lib/products";
 import type { Product } from "@/lib/types";
+import { allowsLearningMaterials } from "@/lib/tariff-warnings";
 import type { AuthContext } from "@/server/authz/context";
 import { requireRoles, requireStudentProfile } from "@/server/authz/require";
 import {
@@ -320,7 +321,7 @@ export async function studentAccessibleProductSlugs(
   const productIdSet = new Set<string>();
   for (const order of orders) {
     const remaining = balances.get(order.directionId) ?? 0;
-    if (remaining <= 0) continue;
+    if (!allowsLearningMaterials(remaining)) continue;
     for (const productId of (order.productIdsSnapshot ?? []) as string[]) {
       if (productId) productIdSet.add(productId);
     }

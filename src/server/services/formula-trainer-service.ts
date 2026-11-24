@@ -61,10 +61,14 @@ function assertOwnStudent(ctx: AuthContext, studentId: string) {
   }
 }
 
-/** Тренажёр доступен любому авторизованному ученику Аудитории (без тарифа/баланса). */
-async function requireStudent(_db: AppDb, ctx: AuthContext) {
+/** Ученик + проверка баланса: при −3 и ниже тренажёр закрыт. */
+async function requireStudent(db: AppDb, ctx: AuthContext) {
   const studentId = await requireStudentProfile(ctx);
   assertOwnStudent(ctx, studentId);
+  const { assertStudentLearningAccess } = await import(
+    "@/server/services/learning-access"
+  );
+  await assertStudentLearningAccess(db, ctx, studentId, "homework");
   return studentId;
 }
 

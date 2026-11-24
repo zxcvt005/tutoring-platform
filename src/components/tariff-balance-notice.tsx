@@ -40,7 +40,7 @@ export function LearningLockedBanner({ message }: { message: string | null }) {
   if (!message) return null;
   return (
     <div className="rounded-xl border border-destructive/40 bg-red-50 px-4 py-3 dark:bg-red-950">
-      <p className="text-sm font-medium">Тариф закончился</p>
+      <p className="text-sm font-medium">Нужно пополнить баланс занятий</p>
       <p className="mt-1 text-sm text-muted-foreground">{message}</p>
     </div>
   );

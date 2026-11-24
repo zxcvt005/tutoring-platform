@@ -3,13 +3,11 @@
 import Link from "next/link";
 
 import { EmptyState } from "@/components/empty-state";
-import { LearningLockedBanner } from "@/components/tariff-balance-notice";
 import { formatDueAt } from "@/lib/format";
 import {
   intensiveDeadlineSummary,
   intensiveProgress,
 } from "@/lib/intensives/progress";
-import { studentLearningLock } from "@/lib/learning-lock";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { useStudentCabinetHref } from "@/lib/student-tour/paths";
 import type { IntensiveAssignment } from "@/lib/types";
@@ -26,14 +24,12 @@ export function StudentIntensiveWorkspace() {
   const { data, intensiveAssignmentsForStudent } = useDemoStore();
   const href = useStudentCabinetHref();
   const items = intensiveAssignmentsForStudent(data.currentStudentId);
-  const learning = studentLearningLock(data, data.currentStudentId);
   const teacherName =
     data.teachers.find((t) => t.id === data.currentTeacherId)?.fullName ??
     "Преподаватель";
 
   return (
     <div className="space-y-4">
-      {learning.locked ? <LearningLockedBanner message={learning.message} /> : null}
       <section className="auditoria-home-card py-3">
         <h2 className="font-display text-lg font-semibold tracking-tight">
           Интенсивы
@@ -57,7 +53,7 @@ export function StudentIntensiveWorkspace() {
             return (
               <li key={item.id}>
                 <Link
-                  href={learning.locked ? "#" : href(`/intensivy/${item.id}`)}
+                  href={href(`/intensivy/${item.id}`)}
                   className="auditoria-home-card block space-y-2"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">

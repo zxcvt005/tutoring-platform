@@ -4,10 +4,8 @@ import Link from "next/link";
 import { Download, FileText } from "lucide-react";
 
 import { HomeworkAssignmentStatusBadge } from "@/components/status-badge";
-import { LearningLockedBanner } from "@/components/tariff-balance-notice";
 import { VideoEmbed } from "@/components/theory/video-embed";
 import { formatDueAt } from "@/lib/format";
-import { studentLearningLock } from "@/lib/learning-lock";
 import { theoryFileKindLabel } from "@/lib/theory/file-sniff";
 import { useDemoStore } from "@/lib/store/demo-store";
 
@@ -24,16 +22,6 @@ export function StudentIntensiveViewer({ assignmentId }: { assignmentId: string 
         <Link href="/auditoria/intensivy" className="text-sm underline">
           К списку
         </Link>
-      </div>
-    );
-  }
-
-  const learning = studentLearningLock(data, data.currentStudentId);
-  if (learning.locked) {
-    return (
-      <div className="space-y-3 rounded-2xl border border-border/70 bg-auditoria-surface p-4">
-        <h1 className="font-display text-xl font-semibold">{item.title}</h1>
-        <LearningLockedBanner message={learning.message} />
       </div>
     );
   }

@@ -265,7 +265,7 @@ describe("direction lesson balance + attendance", () => {
     expect(access.allowed).toBe(true);
   });
 
-  it("allows one debt lesson at remaining 0, blocks below -2", async () => {
+  it("keeps learning open through -2, locks at -3, and still debits past -2", async () => {
     const t = await createTestDb();
     close = t.close;
     const director = await asRole(t.db, "director@demo.local");
@@ -286,6 +286,7 @@ describe("direction lesson balance + attendance", () => {
       directionId
     );
     expect(access.remaining).toBe(0);
+    expect(access.allowed).toBe(true);
 
     const lesson2 = await makePlannedLesson(t.db, anna, {
       studentIds: ["s11"],
@@ -301,6 +302,7 @@ describe("direction lesson balance + attendance", () => {
       directionId
     );
     expect(access.remaining).toBe(-1);
+    expect(access.allowed).toBe(true);
 
     const lesson3 = await makePlannedLesson(t.db, anna, {
       studentIds: ["s11"],
@@ -316,15 +318,39 @@ describe("direction lesson balance + attendance", () => {
       directionId
     );
     expect(access.remaining).toBe(-2);
+    expect(access.allowed).toBe(true);
 
     const lesson4 = await makePlannedLesson(t.db, anna, {
       studentIds: ["s11"],
       directionId,
       slotHour: 13,
     });
-    await expect(
-      setAttendance(t.db, anna, lesson4, "s11", "present")
-    ).rejects.toMatchObject({ status: 400 });
+    await setAttendance(t.db, anna, lesson4, "s11", "present");
+    access = await resolveLearningAccess(
+      t.db,
+      director.organizationId,
+      "s11",
+      "homework",
+      directionId
+    );
+    expect(access.remaining).toBe(-3);
+    expect(access.allowed).toBe(false);
+
+    const lesson5 = await makePlannedLesson(t.db, anna, {
+      studentIds: ["s11"],
+      directionId,
+      slotHour: 14,
+    });
+    await setAttendance(t.db, anna, lesson5, "s11", "present");
+    access = await resolveLearningAccess(
+      t.db,
+      director.organizationId,
+      "s11",
+      "homework",
+      directionId
+    );
+    expect(access.remaining).toBe(-4);
+    expect(access.allowed).toBe(false);
   });
 
   it("credits a newly created student after purchase", async () => {

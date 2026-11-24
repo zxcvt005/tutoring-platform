@@ -13,6 +13,12 @@ export type TariffBalanceAlert = {
   allowsDebit: boolean;
 };
 
+/**
+ * Минимальный остаток, при котором теория / ДЗ / тренажёр формул ещё открыты.
+ * При −3 и ниже материалы закрываются; расписание и списание занятий продолжаются.
+ */
+export const LEARNING_MATERIALS_MIN_REMAINING = -2;
+
 const EMPTY_ALERT: TariffBalanceAlert = {
   tone: "ok",
   message: null,
@@ -24,31 +30,53 @@ const EMPTY_ALERT: TariffBalanceAlert = {
   allowsDebit: true,
 };
 
+/** Учебные материалы доступны при остатке ≥ −2. */
+export function allowsLearningMaterials(
+  remaining: number | null | undefined
+): boolean {
+  if (remaining == null) return true;
+  return remaining >= LEARNING_MATERIALS_MIN_REMAINING;
+}
+
 /** Остаток занятий по направлению (SUM журнала). */
 export function tariffBalanceAlert(
   remaining: number | null | undefined
 ): TariffBalanceAlert {
   if (remaining == null) return EMPTY_ALERT;
 
-  const allowsDebit = remaining > -2;
-  const allowsLearning = remaining > 0;
-  const allowsLastDebtLesson = remaining === 0 || remaining === -1;
+  const allowsLearning = allowsLearningMaterials(remaining);
+  // Посещаемость списывается при любом долге — иначе баланс «залипает».
+  const allowsDebit = true;
+  const allowsLastDebtLesson = remaining >= -2 && remaining <= 0;
 
-  if (remaining <= -1) {
+  if (remaining <= -3) {
+    return {
+      tone: "debt",
+      message:
+        "Материалы закрыты: баланс занятий −3 и ниже. Пополните пакет, чтобы снова открыть теорию, домашние задания и тренажёр формул.",
+      compactLabel: "Пополните баланс занятий",
+      needsRenewal: true,
+      showRenewCta: true,
+      allowsLastDebtLesson: false,
+      allowsLearning: false,
+      allowsDebit,
+    };
+  }
+  if (remaining === -2 || remaining === -1) {
     return {
       tone: "debt",
       message:
         remaining === -1
-          ? "Занятие в долг — требуется продление"
-          : "Лимит долга исчерпан — продлите пакет занятий",
+          ? "Занятие в долг — рекомендуется продлить пакет"
+          : "Баланс −2 — ещё есть полный доступ. При −3 закроются теория, ДЗ и тренажёр формул",
       compactLabel:
         remaining === -1
-          ? "Занятие в долг — требуется продление"
-          : "Лимит долга исчерпан",
+          ? "Занятие в долг"
+          : "Баланс −2 — скоро ограничение материалов",
       needsRenewal: true,
       showRenewCta: true,
       allowsLastDebtLesson,
-      allowsLearning,
+      allowsLearning: true,
       allowsDebit,
     };
   }
@@ -56,13 +84,13 @@ export function tariffBalanceAlert(
     return {
       tone: "zero",
       message:
-        "Занятия по направлению закончились. Продлите пакет, чтобы снова открыть материалы",
+        "Оплаченные занятия закончились. До −2 включительно доступ полный; при −3 закроются теория, ДЗ и тренажёр формул",
       compactLabel: "Занятия закончились",
       needsRenewal: true,
       showRenewCta: true,
       allowsLastDebtLesson: true,
-      allowsLearning: false,
-      allowsDebit: true,
+      allowsLearning: true,
+      allowsDebit,
     };
   }
   if (remaining === 1) {
@@ -74,7 +102,7 @@ export function tariffBalanceAlert(
       showRenewCta: true,
       allowsLastDebtLesson: false,
       allowsLearning: true,
-      allowsDebit: true,
+      allowsDebit,
     };
   }
   if (remaining === 2) {
@@ -86,7 +114,7 @@ export function tariffBalanceAlert(
       showRenewCta: true,
       allowsLastDebtLesson: false,
       allowsLearning: true,
-      allowsDebit: true,
+      allowsDebit,
     };
   }
   return {
@@ -113,16 +141,21 @@ export function studentLearningLocked(
   packageStatus?: StudentPackageStatus | null
 ) {
   if (packageStatus === "unpaid" || packageStatus === "cancelled") return true;
-  return remaining != null && remaining <= 0;
+  return remaining != null && !allowsLearningMaterials(remaining);
 }
 
-export function canDebitFromRemaining(remaining: number | null | undefined) {
-  if (remaining == null) return true;
-  return remaining > -2;
+/**
+ * Списание за посещаемость не ограничивается долгом.
+ * Лимит −2 для ручных корректировок остаётся в lesson-balance-rules.
+ */
+export function canDebitFromRemaining(
+  _remaining?: number | null | undefined
+) {
+  return true;
 }
 
 export function allowsLearningFromRemaining(
   remaining: number | null | undefined
 ) {
-  return tariffBalanceAlert(remaining).allowsLearning;
+  return allowsLearningMaterials(remaining);
 }

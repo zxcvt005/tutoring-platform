@@ -38,9 +38,14 @@ export async function GET(request: Request) {
         return jsonOk(await getFormulaTrainerState(db, ctx));
       case "quick":
         return jsonOk(await getOrCreateQuickQuestion(db, ctx));
-      case "catalog":
-        await requireStudentProfile(ctx);
+      case "catalog": {
+        const studentId = await requireStudentProfile(ctx);
+        const { assertStudentLearningAccess } = await import(
+          "@/server/services/learning-access"
+        );
+        await assertStudentLearningAccess(db, ctx, studentId, "homework");
         return jsonOk(await getCatalogPublic());
+      }
       default:
         throw validationError(`Неизвестное действие: ${action}`);
     }

@@ -167,17 +167,8 @@ export async function applyAttendanceBalance(
 
     if (shouldDebit && !state) {
       const txDb = tx as unknown as AppDb;
-      const current = await getDirectionBalance(
-        txDb,
-        ctx.organizationId,
-        input.studentId,
-        directionId
-      );
-      if (!canDebitFromRemaining(current.remaining)) {
-        throw badRequest(
-          "Нельзя списать занятие: занятие в долг уже использовано. Сначала продлите пакет."
-        );
-      }
+      // Списание за посещаемость не ограничивается долгом: баланс может уходить
+      // ниже −2; при −3 закрываются только учебные материалы (теория/ДЗ/формулы).
       const ledgerId = newId("led");
       const reason =
         input.attendanceStatus === "present"

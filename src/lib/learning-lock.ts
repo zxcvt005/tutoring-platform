@@ -1,4 +1,7 @@
-import { tariffBalanceAlert } from "@/lib/tariff-warnings";
+import {
+  allowsLearningMaterials,
+  tariffBalanceAlert,
+} from "@/lib/tariff-warnings";
 import type {
   HomeworkAssignmentStatus,
   LessonOrder,
@@ -14,8 +17,9 @@ export type MaterialsLearningLock = {
 };
 
 /**
- * Блокировка только учебных материалов (теория, ДЗ, тесты) — не истории, расписания и оплаты.
- * Доступ: оплаченный заказ с нужной возможностью + положительный баланс по направлению заказа.
+ * Блокировка только учебных материалов (теория, ДЗ, тренажёр формул) —
+ * не истории, расписания и оплаты.
+ * Доступ: оплаченный заказ с нужной возможностью + остаток ≥ −2.
  */
 export function materialsLearningLock(input: {
   remaining: number | null | undefined;
@@ -26,20 +30,21 @@ export function materialsLearningLock(input: {
   const remaining =
     input.remaining == null ? null : Number(input.remaining);
   const locked =
-    !hasEntitlement || (remaining != null && remaining <= 0);
+    !hasEntitlement ||
+    (remaining != null && !allowsLearningMaterials(remaining));
 
   let message: string | null = null;
   if (locked) {
     if (!hasEntitlement) {
       message =
         "Материалы недоступны: нет оплаченного тарифа с доступом к этому направлению.";
-    } else if (remaining != null && remaining <= -1) {
+    } else if (remaining != null && remaining <= -3) {
       message =
-        "Материалы закрыты: занятия по направлению исчерпаны. Купите занятия, чтобы снова открыть теорию, тесты и домашние задания.";
+        "Материалы закрыты: баланс занятий −3 и ниже. Пополните баланс занятий, чтобы снова открыть теорию, домашние задания и тренажёр формул.";
     } else {
       message =
         alert.message ??
-        "Материалы закрыты: занятия по направлению закончились. Купите занятия, чтобы продолжить.";
+        "Материалы закрыты. Пополните баланс занятий, чтобы продолжить.";
     }
   }
 
@@ -80,7 +85,6 @@ export function studentLearningLock(
   for (const order of paidOrders) {
     const features = order.featuresSnapshot ?? [];
     if (!features.includes(feature) && feature !== "individual_lessons") {
-      // homework/theory historically gated by "homework"
       if (feature === "homework" && !features.includes("homework")) continue;
       if (feature !== "homework") continue;
     }
@@ -88,18 +92,16 @@ export function studentLearningLock(
 
     const rem = balances.get(`${studentId}:${order.directionId}`);
     if (rem == null) continue;
-    if (rem > 0) {
+    if (allowsLearningMaterials(rem)) {
       hasEntitlement = true;
       bestRemaining =
         bestRemaining == null ? rem : Math.max(bestRemaining, rem);
     } else if (bestRemaining == null || rem > bestRemaining) {
-      // keep least-bad remaining for messaging when all exhausted
       bestRemaining = rem;
-      hasEntitlement = true; // had paid feature, but balance exhausted
+      hasEntitlement = true;
     }
   }
 
-  // No paid feature orders at all
   if (
     paidOrders.every((o) => !(o.featuresSnapshot ?? []).includes(feature)) &&
     feature === "homework"

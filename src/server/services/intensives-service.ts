@@ -747,10 +747,7 @@ export async function getIntensiveFileForViewer(
       )
       .limit(1);
     if (!assignment) throw forbidden();
-    const { assertStudentLearningAccess } = await import(
-      "@/server/services/learning-access"
-    );
-    await assertStudentLearningAccess(db, ctx, ctx.studentId, "homework");
+    // Интенсивы не входят в блок теории/ДЗ/тренажёра — доступ не зависит от долга.
   } else {
     throw forbidden();
   }

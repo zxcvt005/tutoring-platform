@@ -4,6 +4,7 @@ import type { AuthContext } from "@/server/authz/context";
 import { lessonOrders } from "@/server/db/schema";
 import type { AppDb } from "@/server/db/types";
 import type { TariffFeatureKey } from "@/lib/types";
+import { allowsLearningMaterials } from "@/lib/tariff-warnings";
 import {
   getDirectionBalance,
   getDirectionBalancesMap,
@@ -80,7 +81,7 @@ function mergeFeatures(orders: PaidOrderRow[]): TariffFeatureKey[] {
 }
 
 /**
- * Оплаченный заказ с нужной возможностью и положительным остатком по направлению заказа.
+ * Оплаченный заказ с нужной возможностью и остатком ≥ −2 по направлению заказа.
  */
 export async function studentHasFeature(
   db: AppDb,
@@ -118,7 +119,7 @@ export async function studentHasFeature(
     ? eligible.filter((o) => o.directionId === directionId)
     : eligible) {
     const remaining = balances.get(order.directionId) ?? 0;
-    if (remaining > 0) {
+    if (allowsLearningMaterials(remaining)) {
       return {
         has: true,
         orderId: order.id,
@@ -143,7 +144,7 @@ export async function studentHasFeature(
 }
 
 /**
- * Доступ к платным материалам: оплаченный заказ с возможностью + остаток > 0 по направлению.
+ * Доступ к платным материалам: оплаченный заказ с возможностью + остаток ≥ −2.
  */
 export async function resolveLearningAccess(
   db: AppDb,
@@ -188,7 +189,7 @@ export async function resolveLearningAccess(
     );
     if (!check.has) {
       const reason =
-        check.remaining != null && check.remaining <= 0
+        check.remaining != null && !allowsLearningMaterials(check.remaining)
           ? "exhausted"
           : "missing_feature";
       return base(reason, {
@@ -221,7 +222,7 @@ export async function resolveLearningAccess(
   let bestOrder: PaidOrderRow | null = null;
   for (const order of orders) {
     const remaining = balances.get(order.directionId) ?? 0;
-    if (remaining > 0) {
+    if (allowsLearningMaterials(remaining)) {
       bestOrder = order;
       bestRemaining = remaining;
       break;
@@ -232,7 +233,7 @@ export async function resolveLearningAccess(
     }
   }
 
-  if (bestRemaining == null || bestRemaining <= 0) {
+  if (bestRemaining == null || !allowsLearningMaterials(bestRemaining)) {
     return base("exhausted", {
       orderId: bestOrder?.id ?? null,
       directionId: bestOrder?.directionId ?? null,
@@ -270,7 +271,7 @@ export async function assertStudentLearningAccess(
   if (!access.allowed) {
     throw forbidden(
       access.reason === "exhausted"
-        ? "Материалы недоступны: занятия по направлению закончились. Продлите пакет."
+        ? "Материалы закрыты: баланс занятий −3 и ниже. Пополните баланс занятий, чтобы снова открыть теорию, домашние задания и тренажёр формул."
         : access.reason === "missing_feature"
           ? "Обучение недоступно: возможность не входит в оплаченный пакет"
           : access.reason === "no_assignment"
