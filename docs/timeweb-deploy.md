@@ -22,6 +22,8 @@
    - **Команда запуска:** `npm start`
 3. HTTPS-домен → укажите его в `APP_BASE_URL`.
 
+`npm start` уже поднимает Next через `scripts/start-with-russian-ca.mjs`: перед стартом скачивает Root/Sub CA Минцифры с официального источника Госуслуг и задаёт `NODE_EXTRA_CA_CERTS` (нужно для TLS к `enter.tochka.com`). Отдельно выставлять `NODE_EXTRA_CA_CERTS` в панели **не обязательно**, если команда запуска — `npm start`. Не задавайте `NODE_TLS_REJECT_UNAUTHORIZED=0`.
+
 `npm ci` быстрее и детерминированнее, чем `npm install`, при наличии `package-lock.json`. Ставьте **полный** набор зависимостей (включая `devDependencies`): `next build` нуждается в них. **Не** используйте `npm ci --omit=dev` — сборка падает без CSS из `shadcn` (`@import "shadcn/tailwind.css"` в `globals.css`) и без части `@types/*`.
 
 **Важно:** `shadcn`, `@tailwindcss/postcss`, `tailwindcss` и `typescript` должны оставаться в `dependencies` (нужны на этапе Production build). Не удаляйте их из dependencies.
@@ -57,6 +59,8 @@
 | `AVITO_CLIENT_ID` | для «РНП Авито» | Client ID OAuth-приложения Avito. Только сервер. |
 | `AVITO_CLIENT_SECRET` | для «РНП Авито» | Client secret Avito. Только сервер. |
 | `AVITO_USER_ID` | для «РНП Авито» | Числовой ID пользователя Avito (например `178228957`). Без него sync вернёт «не настроен». |
+| `TOCHKA_JWT` / `TOCHKA_CUSTOMER_CODE` / `TOCHKA_MERCHANT_ID` | для оплаты | Эквайринг Точки. TLS к банку чинит `npm start` (сертификаты Минцифры → `NODE_EXTRA_CA_CERTS`), отдельно CA в env не нужны |
+| `NODE_TLS_REJECT_UNAUTHORIZED` | нет | **Не задавать** (и не ставить `0`) |
 
 Секреты только в панели Timeweb. Не коммитить `.env.local` / реальные токены.
 

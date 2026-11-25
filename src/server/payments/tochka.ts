@@ -82,6 +82,22 @@ function withTimeout(fetchFn: HttpFetch, timeoutMs: number): HttpFetch {
       if (err instanceof Error && err.name === "AbortError") {
         throw serviceUnavailable("Таймаут запроса к API Точка Банк");
       }
+      const cause =
+        err instanceof Error && err.cause instanceof Error ? err.cause : err;
+      const code =
+        cause && typeof cause === "object" && "code" in cause
+          ? String((cause as { code?: unknown }).code ?? "")
+          : "";
+      if (
+        /CERT|SSL|TLS|UNABLE_TO_VERIFY|SELF_SIGNED/i.test(code) ||
+        /certificate|SSL|TLS/i.test(
+          cause instanceof Error ? cause.message : String(cause ?? "")
+        )
+      ) {
+        throw serviceUnavailable(
+          "API Точка Банк: ошибка TLS (нужны сертификаты Минцифры, NODE_EXTRA_CA_CERTS)"
+        );
+      }
       throw serviceUnavailable("API Точка Банк недоступен");
     } finally {
       clearTimeout(timer);

@@ -15,6 +15,7 @@ import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { config as loadEnv } from "dotenv";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -31,6 +32,10 @@ import {
   verifySchoolOrganization,
 } from "../src/server/db/seed-school";
 import { ensureSchoolTariffQaFixtures } from "../src/server/db/seed-school-tariff-qa";
+
+type EnsureRussianTrustedCaBundle = (
+  cwd?: string
+) => Promise<string>;
 
 loadEnv({ path: ".env.local" });
 loadEnv();
@@ -329,7 +334,18 @@ async function ensurePostgres(): Promise<{
   return { pg, startedHere: true };
 }
 
-function startNext(): ChildProcess {
+async function resolveRussianTrustedCaBundle(): Promise<string> {
+  const mod = (await import(
+    pathToFileURL(
+      path.join(process.cwd(), "scripts", "lib", "russian-trusted-ca.mjs")
+    ).href
+  )) as { ensureRussianTrustedCaBundle: EnsureRussianTrustedCaBundle };
+  const bundle = await mod.ensureRussianTrustedCaBundle(process.cwd());
+  console.log(`Точка TLS: NODE_EXTRA_CA_CERTS=${bundle}`);
+  return bundle;
+}
+
+async function startNext(): Promise<ChildProcess> {
   const nextBin = path.join(
     process.cwd(),
     "node_modules",
@@ -338,6 +354,7 @@ function startNext(): ChildProcess {
     "bin",
     "next"
   );
+  const russianCaBundle = await resolveRussianTrustedCaBundle();
   const args = ["dev", "--webpack", "-H", "0.0.0.0", "-p", String(APP_PORT)];
   console.log(`Next.js → http://127.0.0.1:${APP_PORT}/`);
   return spawn(process.execPath, [nextBin, ...args], {
@@ -348,6 +365,7 @@ function startNext(): ChildProcess {
       ALLOW_DEMO_LOGIN: "1",
       ALLOW_TEST_SEED: "1",
       NEXT_PUBLIC_DATA_MODE: "api",
+      NODE_EXTRA_CA_CERTS: russianCaBundle,
     },
   });
 }
@@ -378,7 +396,7 @@ async function main() {
     return;
   }
 
-  const child = startNext();
+  const child = await startNext();
 
   try {
     await waitForHttp(APP_PORT, 180_000);

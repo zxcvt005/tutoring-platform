@@ -1,0 +1,6 @@
+# Локальные и runtime-файлы в certs/ не коммитятся (.gitignore).
+# Сертификаты Минцифры (Russian Trusted Root/Sub CA) скачиваются только
+# с официального источника Госуслуг скриптом:
+#   npm run certs:russian-trusted
+# и подключаются через NODE_EXTRA_CA_CERTS (см. scripts/start-with-russian-ca.mjs).
+# Не класть CA в public/.
