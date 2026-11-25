@@ -33,9 +33,9 @@ import {
 } from "../src/server/db/seed-school";
 import { ensureSchoolTariffQaFixtures } from "../src/server/db/seed-school-tariff-qa";
 
-type EnsureRussianTrustedCaBundle = (
-  cwd?: string
-) => Promise<string>;
+type ResolveNodeExtraCaCerts = (options?: {
+  cwd?: string;
+}) => Promise<{ path: string; source: string; certCount: number }>;
 
 loadEnv({ path: ".env.local" });
 loadEnv();
@@ -339,10 +339,12 @@ async function resolveRussianTrustedCaBundle(): Promise<string> {
     pathToFileURL(
       path.join(process.cwd(), "scripts", "lib", "russian-trusted-ca.mjs")
     ).href
-  )) as { ensureRussianTrustedCaBundle: EnsureRussianTrustedCaBundle };
-  const bundle = await mod.ensureRussianTrustedCaBundle(process.cwd());
-  console.log(`Точка TLS: NODE_EXTRA_CA_CERTS=${bundle}`);
-  return bundle;
+  )) as { resolveNodeExtraCaCerts: ResolveNodeExtraCaCerts };
+  const selection = await mod.resolveNodeExtraCaCerts({ cwd: process.cwd() });
+  console.log(
+    `Точка TLS: source=${selection.source} certs=${selection.certCount} NODE_EXTRA_CA_CERTS=${selection.path}`
+  );
+  return selection.path;
 }
 
 async function startNext(): Promise<ChildProcess> {

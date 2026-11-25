@@ -6,32 +6,26 @@
  *   npm run test:tochka-tls
  *
  * NODE_EXTRA_CA_CERTS читается Node только при старте процесса — при необходимости
- * скрипт перезапускает себя с уже выставленной переменной.
+ * скрипт перезапускает себя с уже выставленной переменной (тот же выбор, что npm start).
  */
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  assertBundleReady,
   ensureRussianTrustedCaBundle,
+  resolveNodeExtraCaCerts,
 } from "./lib/russian-trusted-ca.mjs";
 
 const TLS_TEST_URL = "https://tls-test.tochka.com/api";
 const selfPath = fileURLToPath(import.meta.url);
 
-const refresh = process.argv.includes("--refresh");
-const bundle = refresh
-  ? await ensureRussianTrustedCaBundle()
-  : (() => {
-      try {
-        return assertBundleReady();
-      } catch {
-        return null;
-      }
-    })() ?? (await ensureRussianTrustedCaBundle());
+if (process.argv.includes("--refresh")) {
+  await ensureRussianTrustedCaBundle();
+}
 
-const resolvedBundle = path.resolve(bundle);
+const selection = await resolveNodeExtraCaCerts();
+const resolvedBundle = path.resolve(selection.path);
 const currentExtra = process.env.NODE_EXTRA_CA_CERTS
   ? path.resolve(process.env.NODE_EXTRA_CA_CERTS)
   : "";
@@ -56,7 +50,9 @@ if (currentExtra !== resolvedBundle) {
     process.exit(code ?? 1);
   });
 } else {
+  console.log(`source=${selection.source}`);
   console.log(`NODE_EXTRA_CA_CERTS=${process.env.NODE_EXTRA_CA_CERTS}`);
+  console.log(`certs=${selection.certCount}`);
   console.log(`GET ${TLS_TEST_URL}`);
 
   try {
