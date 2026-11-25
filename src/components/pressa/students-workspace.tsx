@@ -77,7 +77,6 @@ export function PressStudentsWorkspace() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const enrollmentRef = useRef<StudentEnrollmentInvitesHandle>(null);
-  const [inviteCreating, setInviteCreating] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -111,16 +110,12 @@ export function PressStudentsWorkspace() {
             type="button"
             variant="outline"
             className="rounded-full"
-            disabled={inviteCreating}
             data-testid="invite-student-button"
             onClick={() => {
-              setInviteCreating(true);
-              void enrollmentRef.current
-                ?.createInvite()
-                .finally(() => setInviteCreating(false));
+              void enrollmentRef.current?.createInvite();
             }}
           >
-            {inviteCreating ? "Создание…" : "Пригласить ученика"}
+            Пригласить ученика
           </Button>
         }
       />

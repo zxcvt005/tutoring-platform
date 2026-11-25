@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { StudentAvailabilityPanel } from "@/components/students/student-availability-panel";
+import { StudentBalancePanel } from "@/components/students/student-balance-panel";
 import { StudentQuestionnaireSections } from "@/components/students/student-questionnaire-sections";
 import { StudentProfileEditDialog } from "@/components/students/student-profile-edit-dialog";
 import {
@@ -14,7 +15,6 @@ import {
   LessonStatusBadge,
   PersonStatusBadge,
 } from "@/components/status-badge";
-import { TariffBalanceNotice } from "@/components/tariff-balance-notice";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -30,10 +30,7 @@ import {
   pressStudentBucketLabel,
   type PressStudentLastPayment,
 } from "@/lib/press-students";
-import {
-  formatRubAmount,
-  packageStatusFromBalance,
-} from "@/lib/student-direction-balance";
+import { formatRubAmount } from "@/lib/student-direction-balance";
 import { apiPress, apiPressGet } from "@/lib/store/api-client";
 import { useDemoStore } from "@/lib/store/demo-store";
 import { getAssignmentTitle } from "@/lib/tests/helpers";
@@ -68,9 +65,6 @@ export function PressStudentCard({ studentId }: { studentId: string }) {
       data.teachers.find((t) => t.id === (student.previousTeacherId ?? ""))
     : undefined;
   const directionBalances = student?.directionBalances ?? [];
-  const minBalance = directionBalances.length
-    ? Math.min(...directionBalances.map((b) => b.balance))
-    : null;
 
   const lessons = useMemo(
     () =>
@@ -207,40 +201,22 @@ export function PressStudentCard({ studentId }: { studentId: string }) {
         <StudentAvailabilityPanel studentId={student.id} canEdit />
       </div>
 
+      <StudentBalancePanel
+        studentId={student.id}
+        studentName={student.fullName}
+        directionBalances={directionBalances}
+        cabinet="pressa"
+      />
+
       <section className="panel space-y-3 p-5">
         <p className="text-[0.65rem] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
-          Оплаты и баланс
+          Последняя оплата
         </p>
-        {directionBalances.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Баланс по направлениям: нет данных (покупок или списаний ещё не было).
-          </p>
-        ) : (
-          <div className="space-y-1.5 text-sm">
-            <p className="text-xs text-muted-foreground">
-              Остаток оплаченных занятий по направлениям
-            </p>
-            {directionBalances.map((b) => (
-              <div
-                key={b.directionId}
-                className="flex justify-between gap-2 tabular-nums"
-              >
-                <span>{b.directionName ?? b.directionSlug ?? "—"}</span>
-                <span className="font-medium">{b.balance}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        <TariffBalanceNotice
-          remaining={minBalance}
-          packageStatus={packageStatusFromBalance(minBalance)}
-        />
-        <div className="border-t border-border/60 pt-3 text-sm">
-          <p className="text-xs text-muted-foreground">Последняя оплата</p>
+        <div className="text-sm">
           {sales == null && !salesError ? (
-            <p className="mt-1 text-muted-foreground">Загрузка…</p>
+            <p className="text-muted-foreground">Загрузка…</p>
           ) : sales?.lastPayment ? (
-            <div className="mt-1 space-y-0.5">
+            <div className="space-y-0.5">
               <p>
                 {sales.lastPayment.paidAt
                   ? formatDate(sales.lastPayment.paidAt)
@@ -258,7 +234,7 @@ export function PressStudentCard({ studentId }: { studentId: string }) {
               ) : null}
             </div>
           ) : (
-            <p className="mt-1 text-muted-foreground">нет данных</p>
+            <p className="text-muted-foreground">нет данных</p>
           )}
           <p className="mt-2 text-xs text-muted-foreground">
             Срок «до какой даты хватает оплаты» в системе не ведётся — учёт идёт

@@ -18,6 +18,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { formatDateTime } from "@/lib/format";
 import { apiPlatform } from "@/lib/store/api-client";
 import { cn } from "@/lib/utils";
@@ -26,6 +28,8 @@ type EnrollmentRow = {
   studentId: string;
   invitationId: string | null;
   displayName: string;
+  inviteLabel: string | null;
+  hidden: boolean;
   status:
     | "awaiting_registration"
     | "filling_profile"
@@ -66,9 +70,14 @@ export const StudentEnrollmentInvites = forwardRef<
   const [createdMeta, setCreatedMeta] = useState<{
     createdAt: string;
     statusLabel: string;
+    displayName: string;
   } | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [resultOpen, setResultOpen] = useState(false);
+  const [inviteLabelDraft, setInviteLabelDraft] = useState("");
   const [copied, setCopied] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);
+  const [busyInvitationId, setBusyInvitationId] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -90,7 +99,15 @@ export const StudentEnrollmentInvites = forwardRef<
     void reload();
   }, [reload]);
 
-  const createInvite = useCallback(async () => {
+  const openCompose = useCallback(async () => {
+    setInviteLabelDraft("");
+    setCopied(false);
+    setCreatedUrl(null);
+    setCreatedMeta(null);
+    setComposeOpen(true);
+  }, []);
+
+  const submitCreate = useCallback(async () => {
     if (creatingRef.current) return;
     creatingRef.current = true;
     setCreating(true);
@@ -104,14 +121,21 @@ export const StudentEnrollmentInvites = forwardRef<
         inviteUrl: string;
         createdAt: string;
         statusLabel: string;
-      }>("createStudentEnrollmentInvitation", {}, idem);
+        displayName: string;
+      }>(
+        "createStudentEnrollmentInvitation",
+        { inviteLabel: inviteLabelDraft.trim() || null },
+        idem
+      );
       const url = absoluteInviteUrl(created.inviteUrl);
       setCreatedUrl(url);
       setCreatedMeta({
         createdAt: created.createdAt,
         statusLabel: created.statusLabel,
+        displayName: created.displayName,
       });
-      setDialogOpen(true);
+      setComposeOpen(false);
+      setResultOpen(true);
       await reload();
     } catch (err) {
       toast.error(
@@ -121,15 +145,15 @@ export const StudentEnrollmentInvites = forwardRef<
       creatingRef.current = false;
       setCreating(false);
     }
-  }, [reload]);
+  }, [inviteLabelDraft, reload]);
 
   useImperativeHandle(
     ref,
     () => ({
-      createInvite,
+      createInvite: openCompose,
       creating,
     }),
-    [createInvite, creating]
+    [openCompose, creating]
   );
 
   async function copyText(text: string) {
@@ -142,8 +166,105 @@ export const StudentEnrollmentInvites = forwardRef<
     }
   }
 
-  const pending = rows.filter((r) => r.status !== "completed");
-  const completed = rows.filter((r) => r.status === "completed");
+  async function setHidden(row: EnrollmentRow, hidden: boolean) {
+    if (!row.invitationId || busyInvitationId) return;
+    setBusyInvitationId(row.invitationId);
+    try {
+      await apiPlatform("setStudentEnrollmentInvitationHidden", {
+        invitationId: row.invitationId,
+        hidden,
+      });
+      setRows((prev) =>
+        prev.map((item) =>
+          item.studentId === row.studentId ? { ...item, hidden } : item
+        )
+      );
+      toast.success(hidden ? "Приглашение скрыто" : "Приглашение восстановлено");
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : hidden
+            ? "Не удалось скрыть приглашение"
+            : "Не удалось восстановить приглашение"
+      );
+    } finally {
+      setBusyInvitationId(null);
+    }
+  }
+
+  const visibleRows = rows.filter((r) => !r.hidden);
+  const hiddenRows = rows.filter((r) => r.hidden);
+  const pending = visibleRows.filter((r) => r.status !== "completed");
+  const completed = visibleRows.filter((r) => r.status === "completed");
+
+  function renderRow(row: EnrollmentRow, opts: { hiddenList?: boolean }) {
+    const secondaryLabel =
+      row.inviteLabel &&
+      row.status === "completed" &&
+      row.inviteLabel !== row.displayName
+        ? `ссылка для: ${row.inviteLabel}`
+        : null;
+
+    return (
+      <li
+        key={row.studentId}
+        className={cn(
+          "flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between",
+          opts.hiddenList && "py-2.5"
+        )}
+      >
+        <div className="min-w-0 space-y-0.5">
+          <p className="truncate text-sm font-medium">{row.displayName}</p>
+          <p className="text-xs text-muted-foreground">
+            {row.statusLabel}
+            {" · "}
+            создано {formatDateTime(row.createdAt)}
+            {row.expiresAt ? ` · до ${formatDateTime(row.expiresAt)}` : ""}
+            {secondaryLabel ? ` · ${secondaryLabel}` : ""}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {row.canCopyLink && row.inviteUrl ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-9 rounded-xl"
+              onClick={() => void copyText(absoluteInviteUrl(row.inviteUrl!))}
+            >
+              Копировать ссылку
+            </Button>
+          ) : null}
+          {row.invitationId ? (
+            opts.hiddenList ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9 rounded-xl"
+                disabled={busyInvitationId === row.invitationId}
+                onClick={() => void setHidden(row, false)}
+              >
+                Восстановить
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-9 rounded-xl text-muted-foreground"
+                disabled={busyInvitationId === row.invitationId}
+                onClick={() => void setHidden(row, true)}
+              >
+                Скрыть
+              </Button>
+            )
+          ) : null}
+        </div>
+      </li>
+    );
+  }
 
   return (
     <section
@@ -170,7 +291,7 @@ export const StudentEnrollmentInvites = forwardRef<
             type="button"
             className="rounded-full"
             disabled={creating}
-            onClick={() => void createInvite()}
+            onClick={() => void openCompose()}
             data-testid="invite-student-button-inline"
           >
             {creating ? "Создание…" : "Пригласить ученика"}
@@ -180,7 +301,9 @@ export const StudentEnrollmentInvites = forwardRef<
 
       {loading ? (
         <p className="text-sm text-muted-foreground">Загрузка…</p>
-      ) : pending.length === 0 && completed.length === 0 ? (
+      ) : pending.length === 0 &&
+        completed.length === 0 &&
+        hiddenRows.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           Пока нет приглашений. Нажмите «Пригласить ученика», чтобы получить
           ссылку.
@@ -193,39 +316,7 @@ export const StudentEnrollmentInvites = forwardRef<
                 В процессе
               </p>
               <ul className="divide-y divide-border/70 rounded-xl border border-border/70 bg-background">
-                {pending.map((row) => (
-                  <li
-                    key={row.studentId}
-                    className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="min-w-0 space-y-0.5">
-                      <p className="truncate text-sm font-medium">
-                        {row.displayName}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {row.statusLabel}
-                        {" · "}
-                        создано {formatDateTime(row.createdAt)}
-                        {row.expiresAt
-                          ? ` · до ${formatDateTime(row.expiresAt)}`
-                          : ""}
-                      </p>
-                    </div>
-                    {row.canCopyLink && row.inviteUrl ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-9 shrink-0 rounded-xl"
-                        onClick={() =>
-                          void copyText(absoluteInviteUrl(row.inviteUrl!))
-                        }
-                      >
-                        Копировать ссылку
-                      </Button>
-                    ) : null}
-                  </li>
-                ))}
+                {pending.map((row) => renderRow(row, {}))}
               </ul>
             </div>
           ) : null}
@@ -236,26 +327,86 @@ export const StudentEnrollmentInvites = forwardRef<
                 Завершённые
               </p>
               <ul className="divide-y divide-border/70 rounded-xl border border-border/60 bg-muted/20">
-                {completed.map((row) => (
-                  <li
-                    key={row.studentId}
-                    className="flex flex-col gap-1 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <p className="truncate text-sm font-medium">
-                      {row.displayName}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {row.statusLabel}
-                    </p>
-                  </li>
-                ))}
+                {completed.map((row) => renderRow(row, {}))}
               </ul>
+            </div>
+          ) : null}
+
+          {hiddenRows.length > 0 ? (
+            <div className="space-y-2">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between rounded-xl border border-border/60 bg-muted/10 px-3 py-2 text-left text-sm transition-colors hover:bg-muted/30"
+                onClick={() => setShowHidden((v) => !v)}
+                aria-expanded={showHidden}
+                data-testid="toggle-hidden-invites"
+              >
+                <span className="font-medium">
+                  Скрытые
+                  <span className="ml-2 text-muted-foreground">
+                    ({hiddenRows.length})
+                  </span>
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {showHidden ? "Свернуть" : "Показать"}
+                </span>
+              </button>
+              {showHidden ? (
+                <ul className="divide-y divide-border/70 rounded-xl border border-dashed border-border/70 bg-background/60">
+                  {hiddenRows.map((row) =>
+                    renderRow(row, { hiddenList: true })
+                  )}
+                </ul>
+              ) : null}
             </div>
           ) : null}
         </div>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={composeOpen} onOpenChange={setComposeOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Пригласить ученика</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              Создайте одноразовую ссылку на 7 дней. Имя нужно только вам — в
+              анкету оно не подставится.
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="enrollment-invite-label">Имя ученика</Label>
+              <Input
+                id="enrollment-invite-label"
+                value={inviteLabelDraft}
+                onChange={(e) => setInviteLabelDraft(e.target.value)}
+                placeholder="Необязательно"
+                maxLength={120}
+                autoFocus
+                data-testid="enrollment-invite-label-input"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setComposeOpen(false)}
+            >
+              Отмена
+            </Button>
+            <Button
+              type="button"
+              disabled={creating}
+              onClick={() => void submitCreate()}
+              data-testid="enrollment-invite-create-submit"
+            >
+              {creating ? "Создание…" : "Создать ссылку"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={resultOpen} onOpenChange={setResultOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Ссылка-приглашение</DialogTitle>
@@ -268,6 +419,8 @@ export const StudentEnrollmentInvites = forwardRef<
             </p>
             {createdMeta ? (
               <p className="text-xs text-muted-foreground">
+                {createdMeta.displayName}
+                {" · "}
                 {createdMeta.statusLabel}
                 {" · "}
                 {formatDateTime(createdMeta.createdAt)}
@@ -283,7 +436,7 @@ export const StudentEnrollmentInvites = forwardRef<
             <Button
               type="button"
               variant="outline"
-              onClick={() => setDialogOpen(false)}
+              onClick={() => setResultOpen(false)}
             >
               Закрыть
             </Button>

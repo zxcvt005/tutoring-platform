@@ -407,6 +407,13 @@
       "when": 1798100000000,
       "tag": "0058_student_assigned_tariff",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1798200000000,
+      "tag": "0059_enrollment_invite_label_hidden",
+      "breakpoints": true
     }
   ]
 }

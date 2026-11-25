@@ -662,7 +662,7 @@ export async function adminAdjustBalance(
     allowBelowDebtFloor?: boolean;
   }
 ) {
-  requireRoles(ctx, ["director"]);
+  requireRoles(ctx, ["director", "press"]);
   const note = input.note?.trim();
   if (!note || note.length < 3) {
     throw validationError(
@@ -777,13 +777,13 @@ export type StudentBalanceLedgerEntryDto = {
   createdAt: string;
 };
 
-/** Журнал изменений баланса занятий ученика (только дирекция). */
+/** Журнал изменений баланса занятий ученика (дирекция и пресса). */
 export async function listStudentBalanceLedger(
   db: AppDb,
   ctx: AuthContext,
   input: { studentId: string; directionId?: string | null; limit?: number }
 ): Promise<{ entries: StudentBalanceLedgerEntryDto[] }> {
-  requireRoles(ctx, ["director"]);
+  requireRoles(ctx, ["director", "press"]);
   const studentId = input.studentId?.trim();
   if (!studentId) throw validationError("studentId обязателен");
 

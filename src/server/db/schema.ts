@@ -269,6 +269,13 @@ export const accountInvitations = pgTable(
     tokenHash: text("token_hash").notNull(),
     /** Сырой токен до usedAt/revokedAt; после — null. */
     rawToken: text("raw_token"),
+    /**
+     * Внутренняя подпись enrollment-приглашения (для списка у директора/прессы).
+     * Не подставляется в анкету и не меняет fullName ученика.
+     */
+    inviteLabel: text("invite_label"),
+    /** Скрытие в списке приглашений; ссылка и регистрация продолжают работать. */
+    hiddenAt: timestamp("hidden_at", { withTimezone: true }),
     createdByUserId: text("created_by_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -287,6 +294,7 @@ export const accountInvitations = pgTable(
     index("account_invitations_org_idx").on(t.organizationId),
     index("account_invitations_teacher_idx").on(t.teacherId),
     index("account_invitations_student_idx").on(t.studentId),
+    index("account_invitations_org_hidden_idx").on(t.organizationId, t.hiddenAt),
     check(
       "account_invitations_kind_check",
       sql`${t.kind} in ('teacher', 'student')`

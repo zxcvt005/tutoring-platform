@@ -13,9 +13,11 @@ import { acceptInvitation } from "@/server/services/invitation-service";
 import {
   createStudentEnrollmentInvitation,
   getStudentAvailabilityForViewer,
+  getStudentOnboardingState,
   listStudentEnrollmentInvitations,
   saveStudentOnboardingAvailability,
   saveStudentOnboardingProfile,
+  setStudentEnrollmentInvitationHidden,
   updateStudentAvailabilityByStaff,
 } from "@/server/services/student-onboarding-service";
 import { createTestDb, DEMO_PASSWORD } from "../helpers/pg-test";
@@ -71,9 +73,118 @@ describe("student invite onboarding + directory visibility", () => {
     );
 
     const listed = await listStudentEnrollmentInvitations(t.db, director);
+    const row = listed.invitations.find((r) => r.studentId === invite.studentId);
+    expect(row?.status).toBe("awaiting_registration");
+    expect(row?.displayName).toBe("Без имени");
+    expect(row?.inviteLabel).toBeNull();
+    expect(row?.hidden).toBe(false);
+  });
+
+  it("creates invite with internal label without filling questionnaire", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await asDirector(t.db);
+
+    const invite = await createStudentEnrollmentInvitation(t.db, director, {
+      inviteLabel: "  Иван Петров  ",
+    });
+    expect(invite.inviteLabel).toBe("Иван Петров");
+    expect(invite.displayName).toBe("Иван Петров");
+
+    const [pending] = await t.db
+      .select()
+      .from(students)
+      .where(eq(students.id, invite.studentId))
+      .limit(1);
+    expect(pending.fullName).toBe("Новый ученик");
+
+    const listed = await listStudentEnrollmentInvitations(t.db, director);
+    const row = listed.invitations.find((r) => r.studentId === invite.studentId);
+    expect(row?.displayName).toBe("Иван Петров");
+    expect(row?.inviteLabel).toBe("Иван Петров");
+
+    const rawToken = invite.inviteUrl.split("/invite/")[1]!;
+    const accepted = await acceptInvitation(t.db, {
+      rawToken,
+      email: "labeled.student@example.com",
+      password: DEMO_PASSWORD,
+      passwordConfirm: DEMO_PASSWORD,
+    });
+    const studentCtx = await resolveAuthContext(t.db, accepted.session.rawToken);
+    const onboarding = await getStudentOnboardingState(t.db, studentCtx);
+    expect(onboarding.profile.fullName).toBe("");
+
+    await saveStudentOnboardingProfile(t.db, studentCtx, {
+      fullName: "Иван Сидоров",
+      telegram: "@ivan",
+      parentName: "Родитель",
+      parentContacts: "@parent",
+      grade: "9",
+      learningGoal: "ЕГЭ",
+    });
+
+    const listedAfter = await listStudentEnrollmentInvitations(t.db, director);
+    const after = listedAfter.invitations.find(
+      (r) => r.studentId === invite.studentId
+    );
+    expect(after?.displayName).toBe("Иван Сидоров");
+    expect(after?.inviteLabel).toBe("Иван Петров");
+
+    const boot = await buildBootstrap(t.db, director);
+    const card = boot.students.find((s) => s.id === invite.studentId);
+    expect(card?.fullName).toBe("Иван Сидоров");
+  });
+
+  it("hides and restores enrollment invitations without revoking the link", async () => {
+    const t = await createTestDb();
+    close = t.close;
+    const director = await asDirector(t.db);
+    const press = await asPress(t.db);
+
+    const invite = await createStudentEnrollmentInvitation(t.db, director, {
+      inviteLabel: "Скрываемый",
+    });
+
+    await setStudentEnrollmentInvitationHidden(t.db, press, {
+      invitationId: invite.invitationId,
+      hidden: true,
+    });
+
+    const listedHidden = await listStudentEnrollmentInvitations(t.db, director);
+    const hiddenRow = listedHidden.invitations.find(
+      (r) => r.studentId === invite.studentId
+    );
+    expect(hiddenRow?.hidden).toBe(true);
+    expect(hiddenRow?.canCopyLink).toBe(true);
+    expect(hiddenRow?.inviteUrl).toBeTruthy();
+
+    const [dbInvite] = await t.db
+      .select()
+      .from(accountInvitations)
+      .where(eq(accountInvitations.id, invite.invitationId))
+      .limit(1);
+    expect(dbInvite.hiddenAt).toBeTruthy();
+    expect(dbInvite.revokedAt).toBeNull();
+    expect(dbInvite.rawToken).toBeTruthy();
+
+    const rawToken = invite.inviteUrl.split("/invite/")[1]!;
+    const accepted = await acceptInvitation(t.db, {
+      rawToken,
+      email: "hidden.invite@example.com",
+      password: DEMO_PASSWORD,
+      passwordConfirm: DEMO_PASSWORD,
+    });
+    expect(accepted.studentId).toBe(invite.studentId);
+
+    await setStudentEnrollmentInvitationHidden(t.db, director, {
+      invitationId: invite.invitationId,
+      hidden: false,
+    });
+    const listedRestored = await listStudentEnrollmentInvitations(t.db, press);
     expect(
-      listed.invitations.find((r) => r.studentId === invite.studentId)?.status
-    ).toBe("awaiting_registration");
+      listedRestored.invitations.find((r) => r.studentId === invite.studentId)
+        ?.hidden
+    ).toBe(false);
   });
 
   it("2. opening invite / accepting without questionnaire keeps student out of directory", async () => {

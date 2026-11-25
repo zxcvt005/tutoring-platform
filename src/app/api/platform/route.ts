@@ -106,13 +106,25 @@ async function handlePlatformAction(
           const {
             createStudentEnrollmentInvitation,
           } = await import("@/server/services/student-onboarding-service");
-          return createStudentEnrollmentInvitation(db, ctx);
+          return createStudentEnrollmentInvitation(db, ctx, {
+            inviteLabel:
+              typeof p.inviteLabel === "string" ? p.inviteLabel : null,
+          });
         }
         case "listStudentEnrollmentInvitations": {
           const {
             listStudentEnrollmentInvitations,
           } = await import("@/server/services/student-onboarding-service");
           return listStudentEnrollmentInvitations(db, ctx);
+        }
+        case "setStudentEnrollmentInvitationHidden": {
+          const {
+            setStudentEnrollmentInvitationHidden,
+          } = await import("@/server/services/student-onboarding-service");
+          return setStudentEnrollmentInvitationHidden(db, ctx, {
+            invitationId: String(p.invitationId ?? ""),
+            hidden: Boolean(p.hidden),
+          });
         }
         case "getStudentOnboardingState": {
           const {

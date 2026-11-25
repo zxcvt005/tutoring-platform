@@ -131,16 +131,32 @@ async function loadStudentForStaff(
   return row;
 }
 
+function normalizeInviteLabel(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value !== "string") {
+    throw validationError("Некорректное имя ученика");
+  }
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  if (!trimmed) return null;
+  if (trimmed.length > 120) {
+    throw validationError("Имя ученика слишком длинное (макс. 120 символов)");
+  }
+  return trimmed;
+}
+
 /**
  * Создаёт enrollment-приглашение без ручной карточки директора.
  * Технически нужен student_id в account_invitations — создаётся скрытый
  * placeholder (onboardingStatus=invited), который не попадает в основной список.
+ * inviteLabel — только внутренняя подпись списка; в анкету не подставляется.
  */
 export async function createStudentEnrollmentInvitation(
   db: AppDb,
-  ctx: AuthContext
+  ctx: AuthContext,
+  input?: { inviteLabel?: string | null }
 ) {
   requireRoles(ctx, ["director", "press"]);
+  const inviteLabel = normalizeInviteLabel(input?.inviteLabel);
   const studentId = newId("st");
   const now = new Date();
   const expiresAt = new Date(now.getTime() + INVITE_TTL_MS);
@@ -176,6 +192,7 @@ export async function createStudentEnrollmentInvitation(
       studentId,
       tokenHash,
       rawToken,
+      inviteLabel,
       createdByUserId: ctx.userId,
       expiresAt,
     });
@@ -185,11 +202,14 @@ export async function createStudentEnrollmentInvitation(
     studentId,
     invitationId: inviteId,
     inviteUrl: buildInviteUrl(rawToken),
+    inviteLabel,
+    displayName: inviteLabel ?? "Без имени",
     expiresAt: expiresAt.toISOString(),
     createdAt: now.toISOString(),
     status: "awaiting_registration" as const,
     statusLabel: ENROLLMENT_STATUS_LABEL.awaiting_registration,
     onboardingStatus: "invited" as const,
+    hidden: false,
   };
 }
 
@@ -219,6 +239,8 @@ export async function listStudentEnrollmentInvitations(
       usedAt: accountInvitations.usedAt,
       revokedAt: accountInvitations.revokedAt,
       rawToken: accountInvitations.rawToken,
+      inviteLabel: accountInvitations.inviteLabel,
+      hiddenAt: accountInvitations.hiddenAt,
     })
     .from(accountInvitations)
     .where(
@@ -266,10 +288,12 @@ export async function listStudentEnrollmentInvitations(
     invitations: allStudents.map((s) => {
       const status = enrollmentStatusFromStudent(s.onboardingStatus);
       const invite = inviteByStudent.get(s.id);
-      const displayName =
-        s.fullName === ENROLLMENT_PLACEHOLDER_NAME || !s.fullName.trim()
-          ? "Без имени"
-          : s.fullName;
+      const inviteLabel = invite?.inviteLabel?.trim() || null;
+      const isPlaceholder =
+        s.fullName === ENROLLMENT_PLACEHOLDER_NAME || !s.fullName.trim();
+      const displayName = isPlaceholder
+        ? inviteLabel ?? "Без имени"
+        : s.fullName;
       const canCopyLink =
         status === "awaiting_registration" &&
         Boolean(invite?.rawToken) &&
@@ -279,6 +303,8 @@ export async function listStudentEnrollmentInvitations(
         studentId: s.id,
         invitationId: invite?.id ?? null,
         displayName,
+        inviteLabel,
+        hidden: Boolean(invite?.hiddenAt),
         status,
         statusLabel: ENROLLMENT_STATUS_LABEL[status],
         onboardingStatus: s.onboardingStatus as StudentOnboardingStatus,
@@ -291,6 +317,53 @@ export async function listStudentEnrollmentInvitations(
         canCopyLink,
       };
     }),
+  };
+}
+
+/**
+ * Скрывает или восстанавливает enrollment-приглашение в списке.
+ * Не отзывает ссылку и не меняет статус регистрации.
+ */
+export async function setStudentEnrollmentInvitationHidden(
+  db: AppDb,
+  ctx: AuthContext,
+  input: { invitationId: string; hidden: boolean }
+) {
+  requireRoles(ctx, ["director", "press"]);
+  const invitationId = String(input.invitationId ?? "").trim();
+  if (!invitationId) throw validationError("Укажите приглашение");
+
+  const [invite] = await db
+    .select({
+      id: accountInvitations.id,
+      kind: accountInvitations.kind,
+      hiddenAt: accountInvitations.hiddenAt,
+    })
+    .from(accountInvitations)
+    .where(
+      and(
+        eq(accountInvitations.id, invitationId),
+        eq(accountInvitations.organizationId, ctx.organizationId)
+      )
+    )
+    .limit(1);
+  if (!invite) throw notFound("Приглашение не найдено");
+  if (invite.kind !== "student") {
+    throw forbidden("Можно скрывать только приглашения учеников");
+  }
+
+  const nextHiddenAt = input.hidden ? invite.hiddenAt ?? new Date() : null;
+  if (Boolean(invite.hiddenAt) !== Boolean(nextHiddenAt)) {
+    await db
+      .update(accountInvitations)
+      .set({ hiddenAt: nextHiddenAt })
+      .where(eq(accountInvitations.id, invite.id));
+  }
+
+  return {
+    ok: true as const,
+    invitationId: invite.id,
+    hidden: Boolean(nextHiddenAt),
   };
 }
 

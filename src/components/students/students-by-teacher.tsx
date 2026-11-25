@@ -130,7 +130,6 @@ export function StudentsByTeacher({
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const enrollmentRef = useRef<StudentEnrollmentInvitesHandle>(null);
-  const [inviteCreating, setInviteCreating] = useState(false);
 
   const basePath = mode === "direkciya" ? "/direkciya" : "/kafedra";
 
@@ -372,16 +371,12 @@ export function StudentsByTeacher({
                   type="button"
                   variant="outline"
                   className="rounded-full"
-                  disabled={inviteCreating}
                   data-testid="invite-student-button"
                   onClick={() => {
-                    setInviteCreating(true);
-                    void enrollmentRef.current
-                      ?.createInvite()
-                      .finally(() => setInviteCreating(false));
+                    void enrollmentRef.current?.createInvite();
                   }}
                 >
-                  {inviteCreating ? "Создание…" : "Пригласить ученика"}
+                  Пригласить ученика
                 </Button>
               ) : null}
               <Button type="button" className="rounded-full" onClick={openCreate}>

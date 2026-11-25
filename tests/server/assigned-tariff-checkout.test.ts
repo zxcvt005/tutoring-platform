@@ -374,5 +374,31 @@ describe("assigned tariff checkout gate", () => {
     expect(boot.students.find((s) => s.id === "s11")?.assignedTariffId).toBe(
       seeded.egeId
     );
+
+    await upsertStudent(t.db, pressCtx, {
+      id: "s11",
+      fullName: "Ученик 11",
+      status: "active",
+      teacherId: "t1",
+      assignedTariffId: seeded.ogeId,
+    });
+    const directorBoot = await buildBootstrap(t.db, seeded.dirCtx);
+    expect(
+      directorBoot.students.find((s) => s.id === "s11")?.assignedTariffId
+    ).toBe(seeded.ogeId);
+
+    await upsertStudent(t.db, pressCtx, {
+      id: "s11",
+      fullName: "Ученик 11",
+      status: "active",
+      teacherId: "t1",
+      assignedTariffId: null,
+    });
+    const [cleared] = await t.db
+      .select({ assignedTariffId: students.assignedTariffId })
+      .from(students)
+      .where(eq(students.id, "s11"))
+      .limit(1);
+    expect(cleared?.assignedTariffId).toBeNull();
   });
 });

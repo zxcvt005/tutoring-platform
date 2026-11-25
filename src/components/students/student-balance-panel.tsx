@@ -50,10 +50,13 @@ export function StudentBalancePanel({
   studentId,
   studentName,
   directionBalances,
+  cabinet = "direkciya",
 }: {
   studentId: string;
   studentName: string;
   directionBalances: StudentDirectionBalance[];
+  /** Где показан блок: влияет на подпись и ссылку на покупки. */
+  cabinet?: "direkciya" | "pressa";
 }) {
   const { data, reload } = useDemoStore();
   const directions = useMemo(
@@ -201,15 +204,17 @@ export function StudentBalancePanel({
             По направлениям
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Ручные начисления и списания — только Дирекция. В доход не входят.
+            Ручные начисления и списания — Дирекция и Пресса. В доход не входят.
           </p>
         </div>
-        <Link
-          href={`/direkciya/payments?studentId=${encodeURIComponent(studentId)}`}
-          className="text-sm font-medium underline-offset-4 hover:underline"
-        >
-          Покупки {studentName.split(" ")[0] ?? "ученика"} →
-        </Link>
+        {cabinet === "direkciya" ? (
+          <Link
+            href={`/direkciya/payments?studentId=${encodeURIComponent(studentId)}`}
+            className="text-sm font-medium underline-offset-4 hover:underline"
+          >
+            Покупки {studentName.split(" ")[0] ?? "ученика"} →
+          </Link>
+        ) : null}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

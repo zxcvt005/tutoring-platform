@@ -550,7 +550,7 @@ describe("press cabinet", () => {
     expect(other.analytics.created).toBe(0);
   });
 
-  it("exposes read-only payment summary and balances for press students", async () => {
+  it("exposes payment summary and lets press adjust lesson balances", async () => {
     const t = await createTestDb();
     close = t.close;
     const press = await asRole(t.db, "press@demo.local");
@@ -578,6 +578,7 @@ describe("press cabinet", () => {
       (b) => b.directionId === directionId
     );
     expect(physicsBalance?.balance).toBeGreaterThanOrEqual(8);
+    const balanceBefore = physicsBalance!.balance;
 
     expect(withoutPay).toBeTruthy();
     expect(withoutPay!.lastPayment).toBeNull();
@@ -594,12 +595,69 @@ describe("press cabinet", () => {
     expect(boot.payments).toEqual([]);
     expect(boot.lessonOrders).toEqual([]);
 
+    await adminAdjustLessonBalanceAction(t.db, press, {
+      studentId: "s1",
+      directionId,
+      delta: 2,
+      note: "компенсация от прессы",
+    });
+    await adminAdjustLessonBalanceAction(t.db, press, {
+      studentId: "s1",
+      directionId,
+      delta: -1,
+      note: "корректировка прессой",
+    });
+
+    const { listStudentBalanceLedgerAction } = await import(
+      "@/server/services/platform-mutations"
+    );
+    const ledger = await listStudentBalanceLedgerAction(t.db, press, {
+      studentId: "s1",
+      directionId,
+      limit: 20,
+    });
+    expect(
+      ledger.entries.some(
+        (e) => e.delta === 2 && e.note?.includes("компенсация от прессы")
+      )
+    ).toBe(true);
+    expect(
+      ledger.entries.some(
+        (e) => e.delta === -1 && e.note?.includes("корректировка прессой")
+      )
+    ).toBe(true);
+
+    const directorBoot = await buildBootstrap(t.db, director);
+    const directorStudent = directorBoot.students.find((s) => s.id === "s1");
+    const directorBalance = directorStudent?.directionBalances?.find(
+      (b) => b.directionId === directionId
+    )?.balance;
+    expect(directorBalance).toBe(balanceBefore + 1);
+
+    const pressBoot = await buildBootstrap(t.db, press);
+    const pressStudent = pressBoot.students.find((s) => s.id === "s1");
+    expect(
+      pressStudent?.directionBalances?.find((b) => b.directionId === directionId)
+        ?.balance
+    ).toBe(balanceBefore + 1);
+
+    const teacher = await asRole(t.db, "anna@example.com");
     await expect(
-      adminAdjustLessonBalanceAction(t.db, press, {
+      adminAdjustLessonBalanceAction(t.db, teacher, {
         studentId: "s1",
         directionId,
         delta: 1,
-        note: "hack",
+        note: "попытка преподавателя",
+      })
+    ).rejects.toMatchObject({ status: 403 });
+
+    const student = await asRole(t.db, "s1@demo.local");
+    await expect(
+      adminAdjustLessonBalanceAction(t.db, student, {
+        studentId: "s1",
+        directionId,
+        delta: 1,
+        note: "попытка ученика",
       })
     ).rejects.toMatchObject({ status: 403 });
   });
