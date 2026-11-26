@@ -13,6 +13,8 @@
     "build": "next build --webpack",
     "start": "node scripts/start-with-russian-ca.mjs",
     "test:tochka-tls": "node scripts/check-tochka-tls.mjs",
+    "diagnose:tochka": "node scripts/diagnose-tochka-runtime.mjs",
+    "diagnose:tochka:create-payment": "node scripts/diagnose-tochka-runtime.mjs --create-payment",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/db-migrate.mjs",

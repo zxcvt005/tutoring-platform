@@ -211,11 +211,19 @@ export function checkoutBannerPayment(
   return latestStudentPayment(payments, studentId);
 }
 
+/** Абсолютный http(s) URL платёжной страницы банка — иначе UI не должен делать redirect. */
 export function resolveCheckoutUrl(
   checkoutUrl: string | null | undefined
 ): string | null {
   const trimmed = checkoutUrl?.trim();
-  return trimmed || null;
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (!/^https?:$/i.test(parsed.protocol)) return null;
+    return trimmed;
+  } catch {
+    return null;
+  }
 }
 
 export function unitPriceLabel(totalPrice: number, lessonsCount: number): string {

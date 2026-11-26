@@ -4,6 +4,15 @@ const DEFAULT_API_BASE = "https://enter.tochka.com/uapi";
 const SANDBOX_API_BASE = "https://enter.tochka.com/sandbox/v2";
 const DEFAULT_TIMEOUT_MS = 25_000;
 
+/** Официальный OpenAPI Tochka.API: Create Payment Operation. */
+export const TOCHKA_CUSTOMER_CODE_LEN = 9;
+export const TOCHKA_MERCHANT_ID_LEN = 15;
+export const TOCHKA_PURPOSE_MAX_LEN = 140;
+export const TOCHKA_PAYMENT_LINK_ID_MAX_LEN = 45;
+export const TOCHKA_TTL_MIN = 1;
+export const TOCHKA_TTL_MAX = 44_640;
+export const TOCHKA_SBP_PAYMENT_MODE = ["sbp"] as const;
+
 export type TochkaConfig = {
   apiBase: string;
   jwt: string;
@@ -69,6 +78,119 @@ export type PaymentOperationInfo = {
 
 type HttpFetch = (input: string, init?: RequestInit) => Promise<Response>;
 
+function assertTochkaConfig(cfg: TochkaConfig) {
+  if (cfg.customerCode.length !== TOCHKA_CUSTOMER_CODE_LEN) {
+    throw validationError(
+      `TOCHKA_CUSTOMER_CODE должен быть ровно ${TOCHKA_CUSTOMER_CODE_LEN} символов (OpenAPI Tochka)`
+    );
+  }
+  if (cfg.merchantId.length !== TOCHKA_MERCHANT_ID_LEN) {
+    throw validationError(
+      `TOCHKA_MERCHANT_ID должен быть ровно ${TOCHKA_MERCHANT_ID_LEN} символов (OpenAPI Tochka)`
+    );
+  }
+  if (cfg.ttlMinutes < TOCHKA_TTL_MIN || cfg.ttlMinutes > TOCHKA_TTL_MAX) {
+    throw validationError(
+      `TOCHKA_PAYMENT_TTL_MINUTES вне диапазона ${TOCHKA_TTL_MIN}…${TOCHKA_TTL_MAX}`
+    );
+  }
+  try {
+    const redirect = new URL(cfg.redirectUrl);
+    const fail = new URL(cfg.failRedirectUrl);
+    if (!/^https?:$/i.test(redirect.protocol) || !/^https?:$/i.test(fail.protocol)) {
+      throw new Error("bad protocol");
+    }
+  } catch {
+    throw validationError(
+      "redirectUrl/failRedirectUrl невалидны: проверьте APP_BASE_URL и TOCHKA_*_REDIRECT_PATH"
+    );
+  }
+}
+
+export function truncateTochkaPurpose(purpose: string): string {
+  const trimmed = purpose.trim();
+  if (!trimmed) {
+    throw validationError("Назначение платежа (purpose) не может быть пустым");
+  }
+  if (trimmed.length <= TOCHKA_PURPOSE_MAX_LEN) return trimmed;
+  return `${trimmed.slice(0, TOCHKA_PURPOSE_MAX_LEN - 1)}…`;
+}
+
+export function truncateTochkaPaymentLinkId(paymentLinkId: string): string {
+  const trimmed = paymentLinkId.trim();
+  if (!trimmed) {
+    throw validationError("paymentLinkId не может быть пустым");
+  }
+  return trimmed.slice(0, TOCHKA_PAYMENT_LINK_ID_MAX_LEN);
+}
+
+/** Безопасное сообщение по телу ошибки Точки (без токенов и PII). */
+export function formatTochkaApiError(status: number, body: unknown): string {
+  if (!body || typeof body !== "object") {
+    return `HTTP ${status}`;
+  }
+  const obj = body as {
+    message?: unknown;
+    Errors?: unknown;
+    errors?: unknown;
+  };
+  const category =
+    typeof obj.message === "string" && obj.message.trim()
+      ? obj.message.trim()
+      : "";
+  const list = Array.isArray(obj.Errors)
+    ? obj.Errors
+    : Array.isArray(obj.errors)
+      ? obj.errors
+      : [];
+  const details: string[] = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as { errorCode?: unknown; message?: unknown };
+    const code =
+      typeof row.errorCode === "string" && row.errorCode.trim()
+        ? row.errorCode.trim()
+        : "";
+    const msg =
+      typeof row.message === "string" && row.message.trim()
+        ? row.message.trim()
+        : "";
+    if (code && msg) details.push(`${code}: ${msg}`);
+    else if (msg) details.push(msg);
+    else if (code) details.push(code);
+  }
+  const detail = details[0] ?? "";
+  if (category && detail) return `HTTP ${status} ${category} — ${detail}`;
+  if (detail) return `HTTP ${status} — ${detail}`;
+  if (category) return `HTTP ${status} ${category}`;
+  return `HTTP ${status}`;
+}
+
+function isTlsTransportError(err: unknown): boolean {
+  const cause =
+    err instanceof Error && err.cause instanceof Error ? err.cause : err;
+  const code =
+    cause && typeof cause === "object" && "code" in cause
+      ? String((cause as { code?: unknown }).code ?? "")
+      : "";
+  if (
+    /SELF_SIGNED_CERT_IN_CHAIN|UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT|CERT_HAS_EXPIRED|ERR_TLS_CERT_ALTNAME_INVALID|DEPTH_ZERO_SELF_SIGNED_CERT/i.test(
+      code
+    )
+  ) {
+    return true;
+  }
+  const message = cause instanceof Error ? cause.message : String(cause ?? "");
+  return /self[- ]signed certificate|unable to verify|certificate chain|unable to get local issuer/i.test(
+    message
+  );
+}
+
+function logSafeTochkaDiag(fields: Record<string, string | number | boolean>) {
+  // Только технические поля: без JWT, без сумм/ссылок/тел/ФИО.
+  console.warn("[tochka]", fields);
+}
+
 function withTimeout(fetchFn: HttpFetch, timeoutMs: number): HttpFetch {
   return async (input, init) => {
     const controller = new AbortController();
@@ -80,7 +202,25 @@ function withTimeout(fetchFn: HttpFetch, timeoutMs: number): HttpFetch {
       });
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
+        logSafeTochkaDiag({ stage: "transport", kind: "timeout" });
         throw serviceUnavailable("Таймаут запроса к API Точка Банк");
+      }
+      if (isTlsTransportError(err)) {
+        const cause =
+          err instanceof Error && err.cause instanceof Error ? err.cause : err;
+        const code =
+          cause && typeof cause === "object" && "code" in cause
+            ? String((cause as { code?: unknown }).code ?? "")
+            : "";
+        logSafeTochkaDiag({
+          stage: "tls",
+          kind: "handshake",
+          code: code || "tls_error",
+          hasNodeExtraCa: Boolean(process.env.NODE_EXTRA_CA_CERTS?.trim()),
+        });
+        throw serviceUnavailable(
+          "API Точка Банк: ошибка TLS (нужны сертификаты Минцифры, NODE_EXTRA_CA_CERTS)"
+        );
       }
       const cause =
         err instanceof Error && err.cause instanceof Error ? err.cause : err;
@@ -88,16 +228,11 @@ function withTimeout(fetchFn: HttpFetch, timeoutMs: number): HttpFetch {
         cause && typeof cause === "object" && "code" in cause
           ? String((cause as { code?: unknown }).code ?? "")
           : "";
-      if (
-        /CERT|SSL|TLS|UNABLE_TO_VERIFY|SELF_SIGNED/i.test(code) ||
-        /certificate|SSL|TLS/i.test(
-          cause instanceof Error ? cause.message : String(cause ?? "")
-        )
-      ) {
-        throw serviceUnavailable(
-          "API Точка Банк: ошибка TLS (нужны сертификаты Минцифры, NODE_EXTRA_CA_CERTS)"
-        );
-      }
+      logSafeTochkaDiag({
+        stage: "transport",
+        kind: "network",
+        code: code || "network_error",
+      });
       throw serviceUnavailable("API Точка Банк недоступен");
     } finally {
       clearTimeout(timer);
@@ -152,11 +287,15 @@ async function tochkaRequest(
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const message =
-      json && typeof json === "object" && "message" in json
-        ? String((json as { message?: unknown }).message)
-        : `HTTP ${res.status}`;
-    throw serviceUnavailable(`Точка Банк: ${message}`);
+    const formatted = formatTochkaApiError(res.status, json);
+    logSafeTochkaDiag({
+      stage: "http",
+      method,
+      path,
+      status: res.status,
+      detail: formatted.slice(0, 240),
+    });
+    throw serviceUnavailable(`Точка Банк: ${formatted}`);
   }
   return json;
 }
@@ -166,14 +305,16 @@ export async function createPaymentOperation(
   input: CreatePaymentOperationInput,
   fetchFn?: HttpFetch
 ): Promise<CreatePaymentOperationResult> {
+  assertTochkaConfig(cfg);
   if (!(input.amount > 0)) throw validationError("Сумма оплаты должна быть больше 0");
-  const paymentLinkId = input.paymentLinkId.slice(0, 64);
+  const paymentLinkId = truncateTochkaPaymentLinkId(input.paymentLinkId);
+  const purpose = truncateTochkaPurpose(input.purpose);
   const body = {
     Data: {
       customerCode: cfg.customerCode,
       amount: Number(input.amount.toFixed(2)),
-      purpose: input.purpose,
-      paymentMode: ["sbp"],
+      purpose,
+      paymentMode: [...TOCHKA_SBP_PAYMENT_MODE],
       paymentLinkId,
       merchantId: cfg.merchantId,
       redirectUrl: cfg.redirectUrl,
@@ -181,6 +322,13 @@ export async function createPaymentOperation(
       ttl: cfg.ttlMinutes,
     },
   };
+  logSafeTochkaDiag({
+    stage: "create_payment",
+    path: "/acquiring/v1.0/payments",
+    paymentMode: TOCHKA_SBP_PAYMENT_MODE.join(","),
+    purposeLen: purpose.length,
+    paymentLinkIdLen: paymentLinkId.length,
+  });
   const raw = await tochkaRequest(
     cfg,
     "POST",
@@ -190,6 +338,7 @@ export async function createPaymentOperation(
   );
   const data = digData(raw);
   if (!data) {
+    logSafeTochkaDiag({ stage: "parse", kind: "missing_data" });
     throw serviceUnavailable("Точка Банк: неожиданный ответ при создании платежа");
   }
   const operationId =
@@ -197,10 +346,32 @@ export async function createPaymentOperation(
   const paymentLink =
     readString(data, "paymentLink", "payment_link", "link", "url") ?? "";
   if (!operationId || !paymentLink) {
+    logSafeTochkaDiag({
+      stage: "parse",
+      kind: "missing_fields",
+      hasOperationId: Boolean(operationId),
+      hasPaymentLink: Boolean(paymentLink),
+    });
     throw serviceUnavailable(
       "Точка Банк: в ответе нет operationId или paymentLink"
     );
   }
+  try {
+    // Ссылка должна быть абсолютным URL — иначе UI откроет не туда.
+    const parsed = new URL(paymentLink);
+    if (!/^https?:$/i.test(parsed.protocol)) {
+      throw new Error("bad protocol");
+    }
+  } catch {
+    logSafeTochkaDiag({ stage: "parse", kind: "invalid_payment_link" });
+    throw serviceUnavailable("Точка Банк: некорректная платёжная ссылка в ответе");
+  }
+  logSafeTochkaDiag({
+    stage: "create_payment",
+    kind: "ok",
+    hasOperationId: true,
+    hasPaymentLink: true,
+  });
   return { operationId, paymentLink, raw };
 }
 
@@ -209,6 +380,7 @@ export async function getPaymentOperationInfo(
   operationId: string,
   fetchFn?: HttpFetch
 ): Promise<PaymentOperationInfo> {
+  assertTochkaConfig(cfg);
   const raw = await tochkaRequest(
     cfg,
     "GET",
@@ -235,6 +407,7 @@ export async function refundPaymentOperation(
   amount?: number,
   fetchFn?: HttpFetch
 ): Promise<unknown> {
+  assertTochkaConfig(cfg);
   const body =
     amount != null
       ? { Data: { amount: Number(amount.toFixed(2)) } }

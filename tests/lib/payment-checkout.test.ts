@@ -7,6 +7,7 @@ import {
   lessonOrderStatusLabel,
   paymentFlowStatus,
   paymentRecordStatusLabel,
+  resolveCheckoutUrl,
   STUDENT_CHECKOUT_RETURN_PATH,
 } from "@/lib/payment-checkout";
 import type { LessonOrder, PaymentRecord } from "@/lib/types";
@@ -68,6 +69,18 @@ describe("status labels in Russian", () => {
   it("maps order and payment statuses", () => {
     expect(lessonOrderStatusLabel("awaiting_payment")).toBe("Ожидает оплаты");
     expect(paymentRecordStatusLabel("refunded")).toBe("Возврат");
+  });
+});
+
+describe("resolveCheckoutUrl", () => {
+  it("accepts absolute http(s) bank links only", () => {
+    expect(resolveCheckoutUrl("https://merch.securepaytb.ru/pay/abc")).toBe(
+      "https://merch.securepaytb.ru/pay/abc"
+    );
+    expect(resolveCheckoutUrl("http://localhost:3000/pay")).toContain("http://");
+    expect(resolveCheckoutUrl("/relative")).toBeNull();
+    expect(resolveCheckoutUrl("not-a-url")).toBeNull();
+    expect(resolveCheckoutUrl("")).toBeNull();
   });
 });
 

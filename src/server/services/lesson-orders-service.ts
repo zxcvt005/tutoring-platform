@@ -28,7 +28,10 @@ import {
   getPaymentProvider,
   requirePaymentProvider,
 } from "@/server/payments/provider";
-import { readTochkaConfig } from "@/server/payments/tochka";
+import {
+  readTochkaConfig,
+  truncateTochkaPaymentLinkId,
+} from "@/server/payments/tochka";
 import {
   loadTariffProductIdsByTariff,
 } from "@/server/services/products-service";
@@ -53,11 +56,6 @@ export type CommerceActor = {
 
 function moneyEqual(a: number, b: number): boolean {
   return Math.abs(a - b) < 0.01;
-}
-
-function truncatePaymentLinkId(orderId: string): string {
-  // Точка: paymentLinkId не длиннее 45 символов
-  return orderId.slice(0, 45);
 }
 
 async function loadActiveTariffOption(
@@ -123,10 +121,19 @@ async function findReusableCheckout(
     )
     .limit(1);
   if (!pay) return null;
-  const checkoutUrl =
+  const rawUrl =
     typeof pay.metadata?.checkoutUrl === "string"
-      ? pay.metadata.checkoutUrl
-      : null;
+      ? pay.metadata.checkoutUrl.trim()
+      : "";
+  let checkoutUrl: string | null = null;
+  if (rawUrl) {
+    try {
+      const parsed = new URL(rawUrl);
+      if (/^https?:$/i.test(parsed.protocol)) checkoutUrl = rawUrl;
+    } catch {
+      checkoutUrl = null;
+    }
+  }
   return { order, payment: pay, checkoutUrl };
 }
 
@@ -204,7 +211,7 @@ export async function createCheckout(
   if (!pending) {
     const orderId = newId("lord");
     const paymentId = newId("pay");
-    const paymentLinkId = truncatePaymentLinkId(orderId);
+    const paymentLinkId = truncateTochkaPaymentLinkId(orderId);
     try {
       await db.transaction(async (tx) => {
         await tx.insert(lessonOrders).values({
@@ -273,7 +280,6 @@ export async function createCheckout(
 
   const orderIdFinal = pending.order.id;
   const paymentIdFinal = pending.payment.id;
-  const linkId = truncatePaymentLinkId(orderIdFinal);
   if (pending.checkoutUrl) {
     return {
       orderId: orderIdFinal,
@@ -283,6 +289,12 @@ export async function createCheckout(
       returnPath: STUDENT_CHECKOUT_RETURN_PATH,
     };
   }
+
+  // Если URL ещё нет (сбой после insert / битая ссылка) — новый paymentLinkId,
+  // иначе Точка может отклонить повтор с тем же id (maxLength 45).
+  const linkId = truncateTochkaPaymentLinkId(
+    `${paymentIdFinal}_${randomBytes(3).toString("hex")}`
+  );
 
   const provider = requirePaymentProvider();
   const purpose = `Оплата: ${tariff.name}, ${option.lessonsCount} занятий`;
