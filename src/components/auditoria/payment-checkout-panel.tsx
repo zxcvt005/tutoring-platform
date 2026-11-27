@@ -5,12 +5,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { PaymentStatusCard } from "@/components/auditoria/payment-flow-view";
+import { YandexBrowserPayNotice } from "@/components/auditoria/yandex-browser-pay-notice";
 import {
   emptyFormConsentState,
   FormConsentFields,
   validateRequiredFormConsents,
   type FormConsentState,
 } from "@/components/legal/form-consent-fields";
+import { detectYandexBrowserFromWindow } from "@/lib/browser/yandex-browser";
 import { requestOpenTeacherChat } from "@/lib/chat/student-teacher-chat";
 import { isPublicOfferPublished } from "@/lib/legal/documents";
 import {
@@ -59,8 +61,14 @@ export function PaymentCheckoutPanel() {
   >({});
   /** Свежая ссылка банка после createLessonCheckout — для ручного перехода без about:blank. */
   const [manualPayUrl, setManualPayUrl] = useState<string | null>(null);
+  /**
+   * null до клиентского определения: кнопку оплаты не показываем,
+   * пока нет надёжного сигнала Яндекс Браузера.
+   */
+  const [yandexBrowser, setYandexBrowser] = useState<boolean | null>(null);
   const inflight = useRef(false);
   const offerAvailable = isPublicOfferPublished();
+  const paymentAllowed = yandexBrowser === true;
 
   const studentId = data.currentStudentId;
   const student = data.students.find((item) => item.id === studentId) ?? null;
@@ -132,6 +140,10 @@ export function PaymentCheckoutPanel() {
       options.find((o) => o.id === optionId) ?? options[0] ?? null,
     [options, optionId]
   );
+
+  useEffect(() => {
+    setYandexBrowser(detectYandexBrowserFromWindow());
+  }, []);
 
   useEffect(() => {
     if (!ready || !studentId || hydrated) return;
@@ -290,6 +302,10 @@ export function PaymentCheckoutPanel() {
 
   async function goToSchoolPayment() {
     if (inflight.current) return;
+    if (!paymentAllowed) {
+      toast.message("Оплата доступна только в Яндекс Браузере");
+      return;
+    }
     const tId = selectedTariff?.id ?? tariffId;
     const oId = selectedOption?.id ?? optionId;
     if (!tId || !oId) {
@@ -466,66 +482,82 @@ export function PaymentCheckoutPanel() {
                   </div>
                 </div>
 
-                <FormConsentFields
-                  idPrefix="checkout"
-                  value={consents}
-                  onChange={(next) => {
-                    setConsents(next);
-                    setConsentErrors({});
-                  }}
-                  showMarketing
-                  showPublicOffer={offerAvailable}
-                  publicOfferAvailable={offerAvailable}
-                  errors={consentErrors}
-                />
-                <button
-                  type="button"
-                  disabled={!canPay || busy}
-                  onClick={() => void goToSchoolPayment()}
-                  className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-full bg-[#e7dff6]/95 px-5 text-base font-medium disabled:opacity-60"
-                >
-                  <CreditCard className="size-4 shrink-0" aria-hidden />
-                  {busy ? "Создаём заказ…" : "Перейти к оплате"}
-                </button>
-                {manualPayUrl ? (
-                  <div
-                    className="rounded-2xl border border-black/10 bg-auditoria-surface p-4"
-                    data-testid="checkout-pay-fallback"
-                  >
-                    <p className="text-sm font-medium">Ссылка на оплату готова</p>
-                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                      Если окно банка не открылось или сразу закрылось, перейдите
-                      по кнопке ниже. Страница оплаты Точки останется открытой —
-                      мы её не закрываем.
-                    </p>
-                    <a
-                      href={manualPayUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      data-testid="checkout-pay-link"
-                      className="mt-3 inline-flex h-12 w-full items-center justify-center rounded-full bg-[#e7dff6]/95 px-4 text-sm font-medium"
-                    >
-                      Открыть страницу оплаты
-                    </a>
+                {paymentAllowed ? (
+                  <>
+                    <FormConsentFields
+                      idPrefix="checkout"
+                      value={consents}
+                      onChange={(next) => {
+                        setConsents(next);
+                        setConsentErrors({});
+                      }}
+                      showMarketing
+                      showPublicOffer={offerAvailable}
+                      publicOfferAvailable={offerAvailable}
+                      errors={consentErrors}
+                    />
                     <button
                       type="button"
-                      onClick={openPayInSameTab}
-                      className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-full border border-black/10 px-4 text-sm"
+                      disabled={!canPay || busy}
+                      onClick={() => void goToSchoolPayment()}
+                      data-testid="checkout-pay-button"
+                      className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-full bg-[#e7dff6]/95 px-5 text-base font-medium disabled:opacity-60"
                     >
-                      Открыть в этой вкладке
+                      <CreditCard className="size-4 shrink-0" aria-hidden />
+                      {busy ? "Создаём заказ…" : "Перейти к оплате"}
                     </button>
-                  </div>
-                ) : null}
-                {error ? (
-                  <p className="text-sm text-destructive" role="alert">
-                    {error}
+                    {manualPayUrl ? (
+                      <div
+                        className="rounded-2xl border border-black/10 bg-auditoria-surface p-4"
+                        data-testid="checkout-pay-fallback"
+                      >
+                        <p className="text-sm font-medium">
+                          Ссылка на оплату готова
+                        </p>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                          Если окно банка не открылось или сразу закрылось,
+                          перейдите по кнопке ниже. Страница оплаты Точки
+                          останется открытой — мы её не закрываем.
+                        </p>
+                        <a
+                          href={manualPayUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          data-testid="checkout-pay-link"
+                          className="mt-3 inline-flex h-12 w-full items-center justify-center rounded-full bg-[#e7dff6]/95 px-4 text-sm font-medium"
+                        >
+                          Открыть страницу оплаты
+                        </a>
+                        <button
+                          type="button"
+                          onClick={openPayInSameTab}
+                          className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-full border border-black/10 px-4 text-sm"
+                        >
+                          Открыть в этой вкладке
+                        </button>
+                      </div>
+                    ) : null}
+                    {error ? (
+                      <p className="text-sm text-destructive" role="alert">
+                        {error}
+                      </p>
+                    ) : null}
+                    <p className="inline-flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
+                      <ShieldCheck
+                        className="mt-0.5 size-3.5 shrink-0"
+                        aria-hidden
+                      />
+                      Возврат со страницы банка не означает успешную оплату.
+                      Занятия зачислятся после подтверждения платежа.
+                    </p>
+                  </>
+                ) : yandexBrowser === false ? (
+                  <YandexBrowserPayNotice className="mt-1" />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Проверяем браузер…
                   </p>
-                ) : null}
-                <p className="inline-flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
-                  <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                  Возврат со страницы банка не означает успешную оплату. Занятия
-                  зачислятся после подтверждения платежа.
-                </p>
+                )}
               </div>
             )}
           </section>
