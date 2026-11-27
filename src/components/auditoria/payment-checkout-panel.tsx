@@ -24,6 +24,10 @@ import {
   type PaymentFlowStatus,
 } from "@/lib/payment-checkout";
 import {
+  assignBankCheckoutUrl,
+  openBankCheckoutUrl,
+} from "@/lib/payment-checkout-navigate";
+import {
   loadStudentCheckoutPrefs,
   resolveCheckoutDirectionId,
   resolveCheckoutSelection,
@@ -53,6 +57,8 @@ export function PaymentCheckoutPanel() {
   const [consentErrors, setConsentErrors] = useState<
     Partial<Record<keyof FormConsentState, string>>
   >({});
+  /** Свежая ссылка банка после createLessonCheckout — для ручного перехода без about:blank. */
+  const [manualPayUrl, setManualPayUrl] = useState<string | null>(null);
   const inflight = useRef(false);
   const offerAvailable = isPublicOfferPublished();
 
@@ -301,6 +307,7 @@ export function PaymentCheckoutPanel() {
     inflight.current = true;
     setBusy(true);
     setError(null);
+    setManualPayUrl(null);
     try {
       const res = await apiPlatform<CheckoutResponse>("createLessonCheckout", {
         tariffId: tId,
@@ -310,7 +317,7 @@ export function PaymentCheckoutPanel() {
         marketingConsent: consents.marketing,
       });
       const checkoutUrl = resolveCheckoutUrl(res.checkoutUrl);
-      if (!checkoutUrl) {
+      if (!checkoutUrl || !/^https:\/\//i.test(checkoutUrl)) {
         throw new Error("Ссылка на оплату недоступна. Попробуйте позже.");
       }
       if (res.paymentId) {
@@ -326,14 +333,34 @@ export function PaymentCheckoutPanel() {
       if (res.alreadyPending) {
         toast.message(res.message || "Заявка уже создана — открываем оплату");
       }
-      window.location.assign(checkoutUrl);
+
+      // Не открываем about:blank до ответа API и не вызываем window.close.
+      // После await popup часто блокируется — тогда остаётся явная ссылка.
+      const opened = openBankCheckoutUrl(checkoutUrl, { preferred: "new-tab" });
+      setManualPayUrl(checkoutUrl);
+      if (opened.ok && opened.method === "new-tab") {
+        toast.message("Страница оплаты открыта в новой вкладке");
+      } else if (!opened.ok && opened.reason === "popup_blocked") {
+        toast.message(
+          "Браузер заблокировал новое окно — нажмите «Открыть страницу оплаты»"
+        );
+      }
     } catch (e) {
       const message =
         e instanceof Error ? e.message : "Не удалось создать заказ";
       setError(message);
       toast.error(message);
+    } finally {
       inflight.current = false;
       setBusy(false);
+    }
+  }
+
+  function openPayInSameTab() {
+    if (!manualPayUrl) return;
+    const result = assignBankCheckoutUrl(manualPayUrl);
+    if (!result.ok) {
+      toast.error("Некорректная ссылка оплаты");
     }
   }
 
@@ -460,6 +487,35 @@ export function PaymentCheckoutPanel() {
                   <CreditCard className="size-4 shrink-0" aria-hidden />
                   {busy ? "Создаём заказ…" : "Перейти к оплате"}
                 </button>
+                {manualPayUrl ? (
+                  <div
+                    className="rounded-2xl border border-black/10 bg-auditoria-surface p-4"
+                    data-testid="checkout-pay-fallback"
+                  >
+                    <p className="text-sm font-medium">Ссылка на оплату готова</p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                      Если окно банка не открылось или сразу закрылось, перейдите
+                      по кнопке ниже. Страница оплаты Точки останется открытой —
+                      мы её не закрываем.
+                    </p>
+                    <a
+                      href={manualPayUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-testid="checkout-pay-link"
+                      className="mt-3 inline-flex h-12 w-full items-center justify-center rounded-full bg-[#e7dff6]/95 px-4 text-sm font-medium"
+                    >
+                      Открыть страницу оплаты
+                    </a>
+                    <button
+                      type="button"
+                      onClick={openPayInSameTab}
+                      className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-full border border-black/10 px-4 text-sm"
+                    >
+                      Открыть в этой вкладке
+                    </button>
+                  </div>
+                ) : null}
                 {error ? (
                   <p className="text-sm text-destructive" role="alert">
                     {error}

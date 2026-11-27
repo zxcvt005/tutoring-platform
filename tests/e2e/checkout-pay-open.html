@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>E2E checkout open payment</title>
+  </head>
+  <body>
+    <button id="pay" type="button">Перейти к оплате</button>
+    <div id="fallback" hidden>
+      <a id="pay-link" href="#" target="_blank" rel="noopener noreferrer"
+        >Открыть страницу оплаты</a
+      >
+    </div>
+    <pre id="log"></pre>
+    <script type="module">
+      const log = (obj) => {
+        const el = document.getElementById("log");
+        el.textContent = JSON.stringify(obj, null, 2);
+        window.__e2e = obj;
+      };
+
+      function resolveCheckoutUrl(checkoutUrl) {
+        const trimmed = checkoutUrl?.trim();
+        if (!trimmed) return null;
+        try {
+          const parsed = new URL(trimmed);
+          if (!/^https?:$/i.test(parsed.protocol)) return null;
+          return trimmed;
+        } catch {
+          return null;
+        }
+      }
+
+      function openBankCheckoutUrl(rawUrl, preferred = "new-tab") {
+        const url = resolveCheckoutUrl(rawUrl);
+        if (!url) {
+          return { ok: false, method: "manual", url: "", reason: "invalid_url" };
+        }
+        if (preferred === "same-tab") {
+          window.location.assign(url);
+          return { ok: true, method: "same-tab", url };
+        }
+        const win = window.open(url, "_blank", "noopener,noreferrer");
+        if (win) return { ok: true, method: "new-tab", url };
+        return { ok: false, method: "manual", url, reason: "popup_blocked" };
+      }
+
+      let inflight = false;
+      const openedArgs = [];
+      const closed = [];
+      const realOpen = window.open.bind(window);
+      window.open = (...args) => {
+        openedArgs.push(args);
+        // Simulate popup blocker for deterministic E2E in automation.
+        if (window.__forcePopupBlock) return null;
+        return realOpen(...args);
+      };
+      const realClose = Window.prototype.close;
+      Window.prototype.close = function (...args) {
+        closed.push(true);
+        return realClose.apply(this, args);
+      };
+
+      async function mockCreate() {
+        await new Promise((r) => setTimeout(r, 30));
+        return {
+          checkoutUrl: "https://merch.securepaytb.ru/order/?uuid=e2e-test",
+          paymentId: "pay_e2e",
+        };
+      }
+
+      document.getElementById("pay").addEventListener("click", async () => {
+        if (inflight) {
+          log({ error: "double_submit_blocked", openedArgs, closed });
+          return;
+        }
+        inflight = true;
+        try {
+          // Intentionally NO about:blank open before await.
+          const res = await mockCreate();
+          const opened = openBankCheckoutUrl(res.checkoutUrl, "new-tab");
+          if (opened.url) {
+            const a = document.getElementById("pay-link");
+            a.href = opened.url;
+            document.getElementById("fallback").hidden = false;
+          }
+          log({
+            openedArgs,
+            closed,
+            opened,
+            usedAboutBlank: openedArgs.some((a) => a[0] === "about:blank"),
+            fallbackVisible: !document.getElementById("fallback").hidden,
+            payHref: document.getElementById("pay-link").href,
+          });
+        } finally {
+          inflight = false;
+        }
+      });
+
+      window.__forcePopupBlock = true;
+      log({ ready: true });
+    </script>
+  </body>
+</html>

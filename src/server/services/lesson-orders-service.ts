@@ -198,15 +198,9 @@ export async function createCheckout(
     studentId,
     optionId
   );
-  if (pending?.checkoutUrl) {
-    return {
-      orderId: pending.order.id,
-      paymentId: pending.payment.id,
-      checkoutUrl: pending.checkoutUrl,
-      alreadyPending: true as const,
-      returnPath: STUDENT_CHECKOUT_RETURN_PATH,
-    };
-  }
+  // Не возвращаем старый checkoutUrl без обращения к банку:
+  // просроченная/битая ссылка даёт «мигание» страницы оплаты и возврат назад.
+  // Ниже всегда создаём свежую платёжную ссылку Точки для pending-заказа.
 
   if (!pending) {
     const orderId = newId("lord");
@@ -280,18 +274,9 @@ export async function createCheckout(
 
   const orderIdFinal = pending.order.id;
   const paymentIdFinal = pending.payment.id;
-  if (pending.checkoutUrl) {
-    return {
-      orderId: orderIdFinal,
-      paymentId: paymentIdFinal,
-      checkoutUrl: pending.checkoutUrl,
-      alreadyPending: true as const,
-      returnPath: STUDENT_CHECKOUT_RETURN_PATH,
-    };
-  }
+  const hadCheckoutUrl = Boolean(pending.checkoutUrl);
 
-  // Если URL ещё нет (сбой после insert / битая ссылка) — новый paymentLinkId,
-  // иначе Точка может отклонить повтор с тем же id (maxLength 45).
+  // Всегда новый paymentLinkId: повтор с тем же id Точка может отклонить (maxLength 45).
   const linkId = truncateTochkaPaymentLinkId(
     `${paymentIdFinal}_${randomBytes(3).toString("hex")}`
   );
@@ -323,7 +308,7 @@ export async function createCheckout(
     orderId: orderIdFinal,
     paymentId: paymentIdFinal,
     checkoutUrl: bank.paymentLink,
-    alreadyPending: false as const,
+    alreadyPending: hadCheckoutUrl,
     returnPath: STUDENT_CHECKOUT_RETURN_PATH,
   };
 }
